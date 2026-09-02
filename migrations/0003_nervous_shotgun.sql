@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `journals_org_reversal_uq` ON `journal_entries` (`organization_id`,`reversal_of_id`);

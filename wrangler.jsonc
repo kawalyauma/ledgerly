@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "your-finance-pro-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "vars": {
+    "ENVIRONMENT": "development",
+    "JWT_ISSUER": "your-finance-pro",
+    "JWT_AUDIENCE": "your-finance-pro-api"
+  },
+  "d1_databases": [
+    {
+      "binding": "FINANCE_DB",
+      "database_name": "your-finance-pro",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "REPORTS_BUCKET",
+      "bucket_name": "your-finance-pro-reports"
+    }
+  ],
+  "queues": {
+    "producers": [
+      { "binding": "REPORT_QUEUE", "queue": "finance-report-jobs" },
+      { "binding": "WEBHOOK_QUEUE", "queue": "finance-webhook-jobs" }
+    ],
+    "consumers": [
+      { "queue": "finance-report-jobs", "max_batch_size": 5, "max_batch_timeout": 10, "max_retries": 5, "dead_letter_queue": "finance-report-jobs-dlq" },
+      { "queue": "finance-webhook-jobs", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 8, "dead_letter_queue": "finance-webhook-jobs-dlq" }
+    ]
+  },
+  "triggers": { "crons": ["0 * * * *"] }
+}
