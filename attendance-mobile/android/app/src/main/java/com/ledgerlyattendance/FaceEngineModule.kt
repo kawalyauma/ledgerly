@@ -76,11 +76,19 @@ class FaceEngineModule(private val context:ReactApplicationContext):ReactContext
   private fun oriented(path:String):Bitmap{
     val p=path.removePrefix("file://");val src=BitmapFactory.decodeFile(p)?:throw IllegalArgumentException("Unable to read camera image")
     val exif=try{ExifInterface(p)}catch(_:Throwable){null}
-    val rot=when(exif?.getAttributeInt(ExifInterface.TAG_ORIENTATION,ExifInterface.ORIENTATION_NORMAL)){
-      ExifInterface.ORIENTATION_ROTATE_90->90f;ExifInterface.ORIENTATION_ROTATE_180->180f;ExifInterface.ORIENTATION_ROTATE_270->270f;else->0f
+    val orientation=exif?.getAttributeInt(ExifInterface.TAG_ORIENTATION,ExifInterface.ORIENTATION_NORMAL)?:ExifInterface.ORIENTATION_NORMAL
+    val matrix=Matrix()
+    when(orientation){
+      ExifInterface.ORIENTATION_FLIP_HORIZONTAL->matrix.setScale(-1f,1f)
+      ExifInterface.ORIENTATION_ROTATE_180->matrix.setRotate(180f)
+      ExifInterface.ORIENTATION_FLIP_VERTICAL->{matrix.setRotate(180f);matrix.postScale(-1f,1f)}
+      ExifInterface.ORIENTATION_TRANSPOSE->{matrix.setRotate(90f);matrix.postScale(-1f,1f)}
+      ExifInterface.ORIENTATION_ROTATE_90->matrix.setRotate(90f)
+      ExifInterface.ORIENTATION_TRANSVERSE->{matrix.setRotate(-90f);matrix.postScale(-1f,1f)}
+      ExifInterface.ORIENTATION_ROTATE_270->matrix.setRotate(-90f)
     }
-    if(rot==0f)return src
-    val m=Matrix().apply{postRotate(rot)};return Bitmap.createBitmap(src,0,0,src.width,src.height,m,true).also{if(it!==src)src.recycle()}
+    if(matrix.isIdentity)return src
+    return Bitmap.createBitmap(src,0,0,src.width,src.height,matrix,true).also{if(it!==src)src.recycle()}
   }
   private fun sample(path:String):FaceSample{
     val bmp=oriented(path);val faces=Tasks.await(detector.process(InputImage.fromBitmap(bmp,0)))
