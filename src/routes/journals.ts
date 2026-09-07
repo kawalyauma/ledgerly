@@ -4,8 +4,9 @@ import type { AppVariables, Env } from "../types";
 import { AppError } from "../lib/errors";
 import { pagination } from "../lib/http";
 import { requireScope } from "../lib/auth";
-import { createJournal, postJournal, reverseJournal } from "../services/ledger";
+import { createJournal, postJournal } from "../services/ledger";
 import { auditStatement } from "../services/audit";
+import { previewCrossModuleReversal, reverseCrossModuleJournal } from "../services/crossModuleReversal";
 
 const lineInput = z.object({
   accountId: z.string().min(1), description: z.string().max(500).optional(), debitMinor: z.number().int().nonnegative().optional(),
@@ -88,17 +89,17 @@ journalsRoutes.post("/:id/post", requireScope("journals:write"), async (c) => {
   return c.json({ data: { id: c.req.param("id"), status: "posted" } });
 });
 
+journalsRoutes.get("/:id/reversal-preview", requireScope("journals:read"), async (c) => {
+  const p = c.get("principal");
+  return c.json({ data: await previewCrossModuleReversal(c.env.FINANCE_DB, p.organizationId, c.req.param("id")) });
+});
+
 journalsRoutes.post("/:id/reverse", requireScope("journals:write"), async (c) => {
   const parsed = reversalInput.safeParse(await c.req.json());
   if (!parsed.success) throw new AppError(422, "VALIDATION_ERROR", "A posting date and reason are required", parsed.error.flatten());
   const p = c.get("principal"), journalId = c.req.param("id");
-  const source = await c.env.FINANCE_DB.prepare("SELECT source_type AS sourceType FROM journal_entries WHERE id=? AND organization_id=?").bind(journalId,p.organizationId).first<{sourceType:string|null}>();
-  if (!source) throw new AppError(404,"NOT_FOUND","Journal not found");
-  if (String(source.sourceType || "").startsWith("school_fee_")) {
-    throw new AppError(409,"SOURCE_MANAGED_TRANSACTION","This journal was created by School Management. Reverse it from Fees & Billing so the student fee subledger and general ledger remain synchronized.");
-  }
-  const reversal = await reverseJournal(c.env.FINANCE_DB, p.organizationId, p.userId, journalId, parsed.data.postingDate, parsed.data.reason);
-  return c.json({ data: { originalId: journalId, status: "reversed", reversal } });
+  const result = await reverseCrossModuleJournal(c.env.FINANCE_DB, p.organizationId, p.userId, journalId, parsed.data.postingDate, parsed.data.reason);
+  return c.json({ data: result });
 });
 
 journalsRoutes.delete("/:id", requireScope("journals:write"), async (c) => {
