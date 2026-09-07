@@ -1,35 +1,17 @@
 {
   "key": "attendance",
   "name": "Attendance",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Canonical student and staff attendance, devices, offline capture, biometrics, exceptions, corrections and reporting.",
   "category": "education",
   "core": false,
   "active": true,
   "manifest": {
     "standalone": true,
-    "requiresModules": [
-      "school-management"
-    ],
-    "requiresDataFrom": [
-      "school-management"
-    ],
-    "integratesWith": [
-      "academics",
-      "payroll-payments",
-      "communications",
-      "school-management"
-    ],
-    "captureMethods": [
-      "FACE",
-      "QR",
-      "NFC",
-      "MANUAL",
-      "TEACHER_REGISTER",
-      "ADMIN_OVERRIDE",
-      "IMPORT",
-      "API"
-    ],
+    "requiresModules": ["school-management"],
+    "requiresDataFrom": ["school-management"],
+    "integratesWith": ["academics", "payroll-payments", "communications", "school-management"],
+    "captureMethods": ["FACE", "QR", "NFC", "MANUAL", "TEACHER_REGISTER", "ADMIN_OVERRIDE", "IMPORT", "API"],
     "offline": true,
     "primaryKioskPlatform": "android",
     "features": [
@@ -42,6 +24,7 @@
       "biometric-profiles",
       "test-spoof-controls",
       "devices",
+      "qr-kiosk-enrollment",
       "exceptions",
       "corrections",
       "reports",
@@ -56,9 +39,6 @@
     "faceMatching": "on-device-1-n",
     "activeLiveness": "blink-or-head-turn",
     "encryptedTemplateSync": true,
-    "faceTestOverrides": [
-      "screen-image",
-      "printed-image"
-    ]
+    "faceTestOverrides": ["screen-image", "printed-image"]
   }
 }
