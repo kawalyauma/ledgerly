@@ -1,0 +1,34 @@
+{
+  "key": "school-management",
+  "name": "School Management",
+  "version": "1.9.0",
+  "description": "School administration, fees, promotion, discipline, students, staff, identity and academic setup",
+  "category": "education",
+  "core": false,
+  "active": true,
+  "manifest": {
+    "backendModules": [
+      "setup",
+      "iam",
+      "student-management",
+      "promotion-engine",
+      "discipline-behaviour",
+      "staff-teacher-management",
+      "files",
+      "fees-billing"
+    ],
+    "plannedModules": [
+      "library",
+      "boarding",
+      "transport",
+      "communications"
+    ],
+    "accountingIntegration": true,
+    "integratesWith": [
+      "academics",
+      "attendance",
+      "communications",
+      "exams"
+    ]
+  }
+}

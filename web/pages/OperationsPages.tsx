@@ -18,6 +18,7 @@ import {
   Field,
   Modal,
   Notice,
+  SearchableSelect,
   Spinner,
 } from "../components/ui";
 import { Heading } from "./OrganizationPages";
@@ -299,6 +300,7 @@ function ClaimModal({
   done: (c: Claim) => void;
 }) {
   const [accounts, setAccounts] = useState<Account[]>([]),
+    [accountsLoading, setAccountsLoading] = useState(true),
     [projects, setProjects] = useState<Project[]>([]),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
@@ -327,7 +329,8 @@ function ClaimModal({
         setAccounts(a);
         setProjects(p);
       })
-      .catch((e) => setError(e.message));
+      .catch((e) => setError(e.message))
+      .finally(() => setAccountsLoading(false));
   }, []);
   const setLine = (i: number, k: keyof ExpenseLine, v: unknown) =>
       setLines((xs) => xs.map((x, j) => (i === j ? { ...x, [k]: v } : x))),
@@ -454,20 +457,9 @@ function ClaimModal({
                 />
               </Field>
               <Field label="Expense account">
-                <select
-                  required
-                  value={l.accountId}
-                  onChange={(e) => setLine(i, "accountId", e.target.value)}
-                >
-                  <option value="">Select account…</option>
-                  {accounts
-                    .filter((a) => a.active && a.allowPosting)
-                    .map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.code} · {a.name}
-                      </option>
-                    ))}
-                </select>
+                <SearchableSelect value={l.accountId} onChange={(value) => setLine(i, "accountId", value)} loading={accountsLoading}
+                  options={accounts.filter((a) => a.active && a.allowPosting).map((a) => ({ value: a.id, label: `${a.code} · ${a.name}` }))}
+                  placeholder="Select account…" searchPlaceholder="Search account code or name…" emptyText="No posting accounts found." ariaLabel={`Expense account ${i + 1}`}/>
               </Field>
               <Field label="Amount">
                 <input

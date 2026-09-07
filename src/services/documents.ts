@@ -5,7 +5,7 @@ import { auditStatement } from "./audit";
 import { recordMovement } from "./inventory";
 
 export type DocumentType = "invoice" | "bill" | "credit_note" | "supplier_credit";
-export interface DocumentLineInput { productId?: string; accountId: string; taxAccountId?: string; description: string; quantityMicros: number; unitPriceMinor: number; taxMinor: number; projectId?: string }
+export interface DocumentLineInput { productId?: string; accountId: string; taxAccountId?: string; description: string; quantityMicros: number; unitPriceMinor: number; taxMinor: number; projectId?: string; classId?: string; departmentId?: string; locationId?: string; dimensions?: Record<string, string | number | boolean | null | undefined> }
 export interface DocumentInput { type: DocumentType; number: string; contactId: string; issueDate: string; dueDate?: string; currency: string; customFields?: Record<string, unknown>; lines: DocumentLineInput[] }
 
 function calculate(input: DocumentInput) {
@@ -44,8 +44,8 @@ export async function createDocument(db:D1Database,organizationId:string,actorId
     (id,organization_id,type,number,contact_id,issue_date,due_date,status,currency,subtotal_minor,tax_minor,total_minor,custom_fields)
     VALUES (?,?,?,?,?,?,?,'draft',?,?,?,?,?)`).bind(id,organizationId,input.type,input.number,input.contactId,input.issueDate,input.dueDate??input.issueDate,input.currency,totals.subtotalMinor,totals.taxMinor,totals.totalMinor,JSON.stringify(input.customFields??{}))];
   for(const line of totals.lines) statements.push(db.prepare(`INSERT INTO document_lines
-    (id,organization_id,document_id,product_id,account_id,tax_account_id,description,quantity_micros,unit_price_minor,subtotal_minor,tax_minor,total_minor,project_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(createId("dln"),organizationId,id,line.productId??null,line.accountId,line.taxAccountId??null,line.description,line.quantityMicros,line.unitPriceMinor,line.subtotalMinor,line.taxMinor,line.totalMinor,line.projectId??null));
+    (id,organization_id,document_id,product_id,account_id,tax_account_id,description,quantity_micros,unit_price_minor,subtotal_minor,tax_minor,total_minor,project_id,class_id,department_id,location_id,dimensions_json)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(createId("dln"),organizationId,id,line.productId??null,line.accountId,line.taxAccountId??null,line.description,line.quantityMicros,line.unitPriceMinor,line.subtotalMinor,line.taxMinor,line.totalMinor,line.projectId??null,line.classId??null,line.departmentId??null,line.locationId??null,JSON.stringify(line.dimensions??{})));
   statements.push(auditStatement(db,{organizationId,actorId,action:"document.created",entityType:"document",entityId:id,after:{type:input.type,number:input.number,totalMinor:totals.totalMinor}}));
   await db.batch(statements);
   return {id,status:"draft" as const,...totals};
@@ -61,21 +61,33 @@ export async function postDocument(db:D1Database,organizationId:string,actorId:s
   const control=await db.prepare("SELECT subtype FROM accounts WHERE id=? AND organization_id=? AND active=1 AND allow_posting=1").bind(controlAccountId,organizationId).first<{subtype:string}>();
   const receivable=doc.type==="invoice"||doc.type==="credit_note";
   if(!control||control.subtype!==(receivable?"receivable":"payable")) throw new AppError(422,"INVALID_CONTROL_ACCOUNT",`A valid accounts ${receivable?"receivable":"payable"} control account is required`);
-  const raw=await db.prepare(`SELECT account_id AS accountId,tax_account_id AS taxAccountId,description,subtotal_minor AS subtotalMinor,tax_minor AS taxMinor,project_id AS projectId
-    FROM document_lines WHERE document_id=? AND organization_id=?`).bind(id,organizationId).all<{accountId:string;taxAccountId:string|null;description:string;subtotalMinor:number;taxMinor:number;projectId:string|null}>();
+  const raw=await db.prepare(`SELECT account_id AS accountId,tax_account_id AS taxAccountId,description,subtotal_minor AS subtotalMinor,tax_minor AS taxMinor,project_id AS projectId,class_id AS classId,department_id AS departmentId,location_id AS locationId,dimensions_json AS dimensionsJson
+    FROM document_lines WHERE document_id=? AND organization_id=?`).bind(id,organizationId).all<{accountId:string;taxAccountId:string|null;description:string;subtotalMinor:number;taxMinor:number;projectId:string|null;classId:string|null;departmentId:string|null;locationId:string|null;dimensionsJson:string}>();
   const positive=doc.type==="invoice"||doc.type==="bill";
+  let customFields: Record<string, unknown> = {};
+  try { customFields = JSON.parse(doc.customFields || "{}"); } catch { customFields = {}; }
+  const typeLabel: Record<DocumentType,string> = { invoice: "Invoice", bill: "Bill", credit_note: "Credit note", supplier_credit: "Supplier credit" };
+  let narration = `${typeLabel[doc.type]} ${doc.number}`;
+  const lineSummary = raw.results.map(line => String(line.description || "").trim()).filter(Boolean).slice(0,3).join("; ");
+  if (customFields.schoolFee === true && typeof customFields.studentId === "string") {
+    const student = await db.prepare(`SELECT admission_number AS admissionNumber,student_number AS studentNumber,
+      TRIM(first_name || ' ' || COALESCE(middle_name || ' ','') || last_name) AS studentName
+      FROM school_students WHERE id=? AND organization_id=? AND deleted_at IS NULL`).bind(customFields.studentId,organizationId).first<{admissionNumber:string;studentNumber:string;studentName:string}>();
+    const learner = student ? `${student.studentName} (${student.admissionNumber || student.studentNumber})` : `student ${customFields.studentId}`;
+    narration = `School fees ${doc.type === "invoice" ? "invoice" : typeLabel[doc.type].toLowerCase()} ${doc.number} — ${learner}${lineSummary ? ` — ${lineSummary}` : ""}`;
+  } else if (lineSummary) narration += ` — ${lineSummary}`;
   const lines:JournalLineInput[]=[];
   const controlDebit=doc.type==="invoice"||doc.type==="supplier_credit";
-  lines.push({accountId:controlAccountId,contactId:doc.contactId,description:doc.number,...(controlDebit?{debitMinor:doc.totalMinor}:{creditMinor:doc.totalMinor})});
+  lines.push({accountId:controlAccountId,contactId:doc.contactId,description:narration,...(controlDebit?{debitMinor:doc.totalMinor}:{creditMinor:doc.totalMinor})});
   for(const line of raw.results){
     const debit=(doc.type==="bill"||doc.type==="credit_note");
-    lines.push({accountId:line.accountId,description:line.description,projectId:line.projectId??undefined,contactId:doc.contactId,...(debit?{debitMinor:line.subtotalMinor}:{creditMinor:line.subtotalMinor})});
+    lines.push({accountId:line.accountId,description:line.description,projectId:line.projectId??undefined,classId:line.classId??undefined,departmentId:line.departmentId??undefined,locationId:line.locationId??undefined,dimensions:line.dimensionsJson?JSON.parse(line.dimensionsJson):{},contactId:doc.contactId,...(debit?{debitMinor:line.subtotalMinor}:{creditMinor:line.subtotalMinor})});
     if(line.taxMinor>0){
       if(!line.taxAccountId) throw new AppError(422,"TAX_ACCOUNT_REQUIRED","Every taxed line requires a tax account");
-      lines.push({accountId:line.taxAccountId,description:`Tax: ${line.description}`,contactId:doc.contactId,...(debit?{debitMinor:line.taxMinor}:{creditMinor:line.taxMinor})});
+      lines.push({accountId:line.taxAccountId,description:`Tax: ${line.description}`,contactId:doc.contactId,dimensions:line.dimensionsJson?JSON.parse(line.dimensionsJson):{},...(debit?{debitMinor:line.taxMinor}:{creditMinor:line.taxMinor})});
     }
   }
-  const journal=await createJournal(db,organizationId,actorId,{transactionDate:doc.issueDate,postingDate:doc.issueDate,description:`${doc.type}: ${doc.number}`,reference:doc.number,currency:doc.currency,sourceType:doc.type,sourceId:id,lines},`document:${id}:post`);
+  const journal=await createJournal(db,organizationId,actorId,{transactionDate:doc.issueDate,postingDate:doc.issueDate,description:narration,reference:doc.number,currency:doc.currency,sourceType:doc.type,sourceId:id,lines},`document:${id}:post`);
   const state=await db.prepare("SELECT status FROM journal_entries WHERE id=? AND organization_id=?").bind(journal.id,organizationId).first<{status:string}>();
   if(state?.status==="draft") await postJournal(db,organizationId,actorId,journal.id);
   await db.batch([

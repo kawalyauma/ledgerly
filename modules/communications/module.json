@@ -1,0 +1,16 @@
+{
+  "key": "communications",
+  "name": "Messages & Notifications",
+  "version": "1.0.0",
+  "description": "Platform-wide SMS and approved-template WhatsApp campaigns for School, Exams, Finance, Attendance, Discipline, Tasks & Work and future modules.",
+  "category": "platform",
+  "core": false,
+  "active": true,
+  "manifest": {
+    "standalone": true,
+    "channels": ["sms", "whatsapp"],
+    "whatsappTemplate": {"name":"general_app_update","language":"en_US","category":"UTILITY"},
+    "sharedCore": ["organizations","users","memberships","contacts","contact_people","school_students","school_guardians","school_staff_profiles"],
+    "features": ["message-types","audience-preview","fee-reminders","published-results","student-parent-messaging","teacher-staff-messaging","attendance-notices","discipline-notices","task-work-updates","scheduled-campaigns","delivery-history","retry-failed","recipient-preferences","audit-snapshots"]
+  }
+}

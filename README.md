@@ -126,3 +126,13 @@ Before handling real financial data:
 6. Run load, penetration, tenant-isolation and disaster-recovery tests.
 
 This software provides accounting infrastructure; it is not itself tax, audit or legal advice.
+
+## Modular architecture (v0.2.0 / modular v9)
+
+Major capabilities now live under the top-level `modules/` directory. To scaffold a future module without editing the central Worker/router/sidebar files:
+
+```bash
+npm run module:new -- library "Library Management"
+```
+
+See `MODULAR_ARCHITECTURE.md` for the full module contract, database ownership rules, and deployment workflow.

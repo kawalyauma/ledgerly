@@ -1,0 +1,16 @@
+{
+  "key": "payroll-payments",
+  "name": "Payroll & Payments",
+  "version": "1.0.0",
+  "description": "Complete payroll calculation, statutory deductions, payslips, salary batches, receipts, supplier payments, allocations and reversals.",
+  "category": "finance",
+  "core": false,
+  "active": true,
+  "manifest": {
+    "standalone": true,
+    "discoversEnabledModules": true,
+    "requiredData": ["contacts", "accounts", "journals"],
+    "optionalSources": ["human-resources", "school-management", "communications"],
+    "features": ["employees", "salary-components", "statutory-rules", "payroll-inputs", "calculation", "approval", "posting", "reversal", "payslips", "delivery", "payment-batches", "receipts", "supplier-payments", "allocations", "reversals", "webhooks"]
+  }
+}

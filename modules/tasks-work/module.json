@@ -1,0 +1,41 @@
+{
+  "key": "tasks-work",
+  "name": "Tasks & Work",
+  "version": "1.1.0",
+  "description": "Projects, tasks and execution workflows blended with Ledgerly organizations, users, contacts, people and School staff.",
+  "category": "operations",
+  "core": false,
+  "active": true,
+  "manifest": {
+    "backendModules": [
+      "teams",
+      "shared-contacts",
+      "projects",
+      "tasks",
+      "subtasks",
+      "assignees",
+      "followers",
+      "checklists",
+      "comments",
+      "time-tracking",
+      "notifications",
+      "reminders",
+      "whatsapp-webhook"
+    ],
+    "communications": [
+      "resend",
+      "egosms",
+      "ulib-whatsapp-hub"
+    ],
+    "source": "kawalyauma/tasks-work-backend",
+    "sourceCommit": "19bda3eee6018bd2f5631a1353adcd71ad366da9",
+    "sharedCore": [
+      "organizations",
+      "users",
+      "memberships",
+      "contacts",
+      "contact_people",
+      "school_staff_profiles"
+    ]
+  }
+}

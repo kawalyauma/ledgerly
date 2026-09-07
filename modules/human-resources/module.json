@@ -1,0 +1,19 @@
+{
+  "key": "human-resources",
+  "name": "Human Resources",
+  "version": "1.0.0",
+  "description": "Standalone workforce, employment, departments, onboarding and leave management using people from enabled modules.",
+  "category": "people",
+  "core": false,
+  "active": true,
+  "manifest": {
+    "standalone": true,
+    "discoversEnabledModules": true,
+    "peopleSources": {
+      "contacts": ["employee"],
+      "school-management": ["staff"],
+      "tasks-work": ["organization_user"]
+    },
+    "features": ["workforce-directory", "departments", "employment-records", "onboarding", "leave-types", "leave-requests", "approvals", "audit"]
+  }
+}

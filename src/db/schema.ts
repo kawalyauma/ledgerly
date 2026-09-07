@@ -159,6 +159,7 @@ export const journalLines = sqliteTable("journal_lines", {
   departmentId: text("department_id").references(() => dimensions.id),
   locationId: text("location_id").references(() => dimensions.id),
   taxCode: text("tax_code"),
+  dimensionsJson: text("dimensions_json").notNull().default("{}"),
   ...timestamps,
 }, (t) => [
   index("journal_lines_entry_idx").on(t.organizationId, t.journalEntryId),
@@ -268,6 +269,10 @@ export const documentLines = sqliteTable("document_lines", {
   taxMinor: integer("tax_minor").notNull().default(0),
   totalMinor: integer("total_minor").notNull(),
   projectId: text("project_id").references(() => projects.id),
+  classId: text("class_id").references(() => dimensions.id),
+  departmentId: text("department_id").references(() => dimensions.id),
+  locationId: text("location_id").references(() => dimensions.id),
+  dimensionsJson: text("dimensions_json").notNull().default("{}"),
   ...timestamps,
 }, (t) => [index("document_lines_doc_idx").on(t.organizationId, t.documentId)]);
 

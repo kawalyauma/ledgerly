@@ -1,9 +1,37 @@
-import{useEffect,useState}from"react";import{useAuth}from"./auth";import{can}from"./api";import{AppShell}from"./components/AppShell";import{AuthPage}from"./pages/AuthPages";import{OrganizationPage,SystemStatus}from"./pages/OrganizationPages";import{ApiKeysPage,TeamPage}from"./pages/AdminPages";import{AccountsPage,DimensionsPage,GroupsPage,OpeningBalancesPage}from"./pages/AccountingPages";import{Button,Card}from"./components/ui";
-import{ApprovalsPage,ContactsPage,JournalsPage,PaymentsPage,ProductsPage,PurchasingPage,ReceivablesPage,SalesPage}from"./pages/FinanceOperationsPages";
-import{BudgetsPage,ClosingPage,CompliancePage,DashboardsPage,DocumentDeliveryPage,IntegrationsPage,ReportManagementPage,ReportsPage}from"./pages/PlanningReportingPages";
-import{BankingPage,InventoryPage}from"./pages/BankingInventoryPages";
-import{ExpensesPage,ProjectsPage,RecurringPage}from"./pages/OperationsPages";
-import{PayrollPage,TaxPage}from"./pages/TaxPayrollPages";
-const routes:Record<string,{scope?:string;admin?:boolean;view:()=>React.ReactNode}>={organization:{scope:"admin:read",view:OrganizationPage},team:{scope:"admin:read",admin:true,view:TeamPage},"api-keys":{scope:"admin:read",admin:true,view:ApiKeysPage},accounts:{scope:"accounts:read",view:AccountsPage},"account-groups":{scope:"accounts:read",view:GroupsPage},dimensions:{scope:"accounts:read",view:DimensionsPage},"opening-balances":{scope:"accounts:write",view:OpeningBalancesPage},journals:{scope:"journals:read",view:JournalsPage},contacts:{scope:"contacts:read",view:ContactsPage},products:{scope:"products:read",view:ProductsPage},sales:{scope:"documents:read",view:SalesPage},purchasing:{scope:"documents:read",view:PurchasingPage},approvals:{scope:"documents:read",view:ApprovalsPage},receivables:{scope:"reports:read",view:ReceivablesPage},payments:{scope:"payments:read",view:PaymentsPage},banking:{scope:"payments:read",view:BankingPage},inventory:{scope:"products:read",view:InventoryPage},expenses:{scope:"documents:read",view:ExpensesPage},projects:{scope:"documents:read",view:ProjectsPage},recurring:{scope:"documents:read",view:RecurringPage},tax:{scope:"accounts:read",view:TaxPage},payroll:{scope:"payroll:read",view:PayrollPage},budgets:{scope:"reports:read",view:BudgetsPage},closing:{scope:"periods:read",view:ClosingPage},reports:{scope:"reports:read",view:ReportsPage},"report-library":{scope:"reports:read",view:ReportManagementPage},dashboards:{scope:"reports:read",view:DashboardsPage},"document-delivery":{scope:"documents:read",view:DocumentDeliveryPage},compliance:{scope:"admin:read",view:CompliancePage},integrations:{scope:"admin:read",view:IntegrationsPage},"system-status":{view:SystemStatus}};
-export function App(){const{principal}=useAuth();const[path,setPath]=useState(location.hash.slice(1)||"accounts");useEffect(()=>{const f=()=>setPath(location.hash.slice(1)||"accounts");addEventListener("hashchange",f);return()=>removeEventListener("hashchange",f)},[]);useEffect(()=>{window.scrollTo({top:0,left:0,behavior:"instant"})},[path]);if(!principal)return <AuthPage/>;const route=routes[path]||routes.accounts!,View=route.view;const allowed=(!route.scope||can(principal,route.scope))&&(!route.admin||["owner","admin"].includes(principal.role));return <AppShell active={path} onNavigate={p=>{location.hash=p}}>{allowed?<View key={path}/>:<PermissionDenied/>}</AppShell>}
-function PermissionDenied(){return <div className="page"><Card><div className="empty"><h3>Permission denied</h3><p>Your role or assigned scopes do not allow access to this page. Ask an organization owner or administrator if you need access.</p><Button onClick={()=>location.hash="accounts"}>Return to accounts</Button></div></Card></div>}
+import { useEffect, useState } from "react";
+import { useAuth } from "./auth";
+import { can } from "./api";
+import { AppShell } from "./components/AppShell";
+import { AuthPage } from "./pages/AuthPages";
+import { Button, Card } from "./components/ui";
+import { appRoutes } from "../modules/frontend-registry";
+
+export function App() {
+  const { principal } = useAuth();
+  const [path, setPath] = useState(location.hash.slice(1));
+
+  useEffect(() => {
+    const onHashChange = () => setPath(location.hash.slice(1));
+    addEventListener("hashchange", onHashChange);
+    return () => removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  const defaultPath = can(principal, "accounts:read") ? "accounts" : can(principal, "school:read") ? "school" : "system-status";
+  const activePath = path || defaultPath;
+
+  useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: "instant" }); }, [activePath]);
+  if (!principal) return <AuthPage/>;
+
+  const route = appRoutes[activePath] || appRoutes[defaultPath] || appRoutes["system-status"];
+  if (!route) return <div className="page"><Card><div className="empty"><h3>No application route is available</h3><p>Check the module registry and rebuild the frontend.</p></div></Card></div>;
+  const View = route.view;
+  const allowed = (!route.scope || can(principal, route.scope)) && (!route.admin || ["owner", "admin"].includes(principal.role));
+
+  return <AppShell active={activePath} onNavigate={next => { location.hash = next; }}>
+    {allowed ? <View key={activePath}/> : <PermissionDenied fallback={defaultPath}/>} 
+  </AppShell>;
+}
+
+function PermissionDenied({ fallback }: { fallback: string }) {
+  return <div className="page"><Card><div className="empty"><h3>Permission denied</h3><p>Your role or assigned scopes do not allow access to this page. Ask an organization owner or administrator if you need access.</p><Button onClick={() => location.hash = fallback}>Return to your workspace</Button></div></Card></div>;
+}

@@ -1,0 +1,40 @@
+{
+  "key": "exams",
+  "name": "Examinations",
+  "version": "1.0.0",
+  "description": "Standalone examinations, marks, Uganda PLE grading, report cards, academic reports and audit workflows linked to School Management shared data.",
+  "category": "education",
+  "core": false,
+  "active": true,
+  "manifest": {
+    "standalone": true,
+    "requiresDataFrom": ["school-management"],
+    "sharedCore": [
+      "organizations",
+      "users",
+      "school_students",
+      "school_classes",
+      "school_streams",
+      "school_subjects",
+      "school_academic_years",
+      "school_terms",
+      "att_records"
+    ],
+    "features": [
+      "exam-crud",
+      "class-enrolment",
+      "subject-configuration",
+      "bulk-marks-entry",
+      "mark-audit",
+      "ple-grading",
+      "best-four-aggregate",
+      "division-ranking",
+      "comment-rules",
+      "report-cards",
+      "class-marksheets",
+      "academic-reports",
+      "publication"
+    ],
+    "reportStyle": "ported-from-attached-exams-project"
+  }
+}

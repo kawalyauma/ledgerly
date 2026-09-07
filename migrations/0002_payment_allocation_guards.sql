@@ -2,8 +2,8 @@ CREATE TRIGGER payment_allocation_validate
 BEFORE INSERT ON payment_allocations
 FOR EACH ROW
 BEGIN
-  SELECT CASE WHEN NEW.amount_minor <= 0 THEN RAISE(ABORT, 'allocation amount must be positive') END;
-  SELECT CASE WHEN NOT EXISTS (
+  SELECT (CASE WHEN NEW.amount_minor <= 0 THEN RAISE(ABORT, 'allocation amount must be positive') END);
+  SELECT (CASE WHEN NOT EXISTS (
     SELECT 1 FROM payments p JOIN documents d ON d.id = NEW.document_id
     WHERE p.id = NEW.payment_id
       AND p.organization_id = NEW.organization_id
@@ -13,15 +13,15 @@ BEGIN
       AND p.status = 'posted'
       AND d.status IN ('open', 'partially_paid')
       AND ((p.type = 'receipt' AND d.type = 'invoice') OR (p.type = 'payment' AND d.type = 'bill'))
-  ) THEN RAISE(ABORT, 'allocation document does not match payment') END;
-  SELECT CASE WHEN (
+  ) THEN RAISE(ABORT, 'allocation document does not match payment') END);
+  SELECT (CASE WHEN (
     SELECT COALESCE(SUM(pa.amount_minor), 0) + NEW.amount_minor
     FROM payment_allocations pa WHERE pa.payment_id = NEW.payment_id
   ) > (SELECT amount_minor FROM payments WHERE id = NEW.payment_id)
-  THEN RAISE(ABORT, 'allocations exceed payment amount') END;
-  SELECT CASE WHEN NEW.amount_minor > (
+  THEN RAISE(ABORT, 'allocations exceed payment amount') END);
+  SELECT (CASE WHEN NEW.amount_minor > (
     SELECT total_minor - paid_minor FROM documents WHERE id = NEW.document_id
-  ) THEN RAISE(ABORT, 'allocation exceeds document balance') END;
+  ) THEN RAISE(ABORT, 'allocation exceeds document balance') END);
 END;
 --> statement-breakpoint
 CREATE TRIGGER payment_allocation_apply

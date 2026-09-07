@@ -1,5 +1,5 @@
 import{useEffect,useMemo,useState,type FormEvent}from"react";import{Copy,Download,KeyRound,Plus,Search,UserPlus}from"lucide-react";import{ApiError,del,get,post}from"../api";import{usePermission}from"../auth";import{Badge,Button,Card,EmptyState,Field,Modal,Notice,Spinner}from"../components/ui";import{Heading,StateError}from"./OrganizationPages";
-const domains=["accounts","journals","reports","contacts","products","documents","payments","payroll","periods","admin"];
+const domains=["accounts","journals","reports","contacts","products","documents","payments","payroll","hr","periods","admin"];
 const presets:Record<string,string[]>={admin:domains.flatMap(x=>[`${x}:read`,`${x}:write`]),accountant:["accounts:read","accounts:write","journals:read","journals:write","reports:read","reports:write","contacts:read","documents:read","payments:read","payments:write","periods:read"],manager:["accounts:read","journals:read","reports:read","contacts:read","contacts:write","products:read","products:write","documents:read","documents:write","payments:read"],viewer:domains.map(x=>`${x}:read`),integration:[]};
 type Member={userId:string;email:string;displayName:string;role:string;scopes:string[];createdAt:string};
 type Key={id:string;name:string;prefix:string;scopes:string[];expiresAt?:string;lastUsedAt?:string;revokedAt?:string;createdAt:string};

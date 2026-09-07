@@ -7,6 +7,8 @@ import { pagination } from "../lib/http";
 import { allocatePostedPayment, createPayment, postPayment, reversePayment } from "../services/payments";
 import { auditStatement } from "../services/audit";
 import { publishWebhookEvent } from "../services/webhooks";
+import { requireModuleEnabled } from "../lib/modules";
+import { getEnabledModules } from "../lib/enabled-modules";
 
 const input = z.object({
   type: z.enum(["receipt", "payment"]), number: z.string().min(1).max(60), contactId: z.string(), bankAccountId: z.string(),
@@ -16,6 +18,25 @@ const input = z.object({
 const posting = z.object({ allocations: z.array(z.object({ documentId: z.string(), amountMinor: z.number().int().positive() })).max(500).default([]) });
 const reversal = z.object({ postingDate: z.iso.date(), reason: z.string().trim().min(3).max(500) });
 export const paymentsRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
+paymentsRoutes.use("*",requireModuleEnabled("payroll-payments"));
+paymentsRoutes.get("/manifest",requireScope("payments:read"),async c=>{const p=c.get("principal"),modules=await getEnabledModules(c.env.FINANCE_DB,p.organizationId);return c.json({data:{key:"payroll-payments",area:"payments",enabledModules:modules.map(m=>({key:m.key,name:m.name})),counterpartySources:modules.filter(m=>["contacts","school-management","human-resources"].includes(m.key)).map(m=>m.key)}})});
+
+paymentsRoutes.get("/counterparties",requireScope("payments:read"),async c=>{
+  const p=c.get("principal"),modules=await getEnabledModules(c.env.FINANCE_DB,p.organizationId),keys=new Set(modules.map(m=>m.key));
+  const contacts=await c.env.FINANCE_DB.prepare("SELECT id,name,code,email,type FROM contacts WHERE organization_id=? AND active=1 AND archived_at IS NULL ORDER BY name").bind(p.organizationId).all<any>();
+  const sources=new Map<string,Set<string>>();
+  const add=(id:string,source:string)=>{const set=sources.get(id)||new Set<string>();set.add(source);sources.set(id,set)};
+  for(const contact of contacts.results)add(contact.id,"contacts");
+  if(keys.has("school-management")){
+    const rows=await c.env.FINANCE_DB.prepare("SELECT contact_id AS contactId FROM school_guardians WHERE organization_id=? AND contact_id IS NOT NULL UNION SELECT contact_id FROM school_staff_profiles WHERE organization_id=? AND contact_id IS NOT NULL").bind(p.organizationId,p.organizationId).all<any>();
+    for(const row of rows.results)add(row.contactId,"school-management");
+  }
+  if(keys.has("human-resources")){
+    const rows=await c.env.FINANCE_DB.prepare("SELECT contact_id AS contactId FROM hr_employees WHERE organization_id=? AND contact_id IS NOT NULL").bind(p.organizationId).all<any>();
+    for(const row of rows.results)add(row.contactId,"human-resources");
+  }
+  return c.json({data:contacts.results.map(contact=>({...contact,sourceModules:[...(sources.get(contact.id)||new Set(["contacts"]))]}))});
+});
 
 paymentsRoutes.get("/", requireScope("payments:read"), async (c) => {
   const p = c.get("principal"); const { limit, offset } = pagination(c);

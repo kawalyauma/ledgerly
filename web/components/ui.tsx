@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Inbox, AlertTriangle, X } from "lucide-react";
 
 export function Button({ children, variant = "primary", className = "", ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger" }) {
@@ -22,6 +22,39 @@ export function Skeleton({ className = "" }: { className?: string }) { return <s
 
 export function EmptyState({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
   return <div className="empty"><span className="empty__icon"><Inbox size={22} /></span><h3>{title}</h3><p>{description}</p>{action}</div>;
+}
+
+
+export type SearchableOption = { value: string; label: string; keywords?: string; disabled?: boolean };
+
+export function SearchableSelect({ value, onChange, options, placeholder = "Select…", searchPlaceholder = "Search…", loading = false, emptyText = "No options found.", disabled = false, clearable = true, ariaLabel }: { value: string; onChange: (value: string) => void; options: SearchableOption[]; placeholder?: string; searchPlaceholder?: string; loading?: boolean; emptyText?: string; disabled?: boolean; clearable?: boolean; ariaLabel?: string }) {
+  const [open, setOpen] = useState(false), [query, setQuery] = useState("");
+  const root = useRef<HTMLDivElement>(null);
+  const selected = options.find(option => option.value === value);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter(option => `${option.label} ${option.keywords || ""}`.toLowerCase().includes(q));
+  }, [options, query]);
+  useEffect(() => {
+    const close = (event: MouseEvent) => { if (root.current && !root.current.contains(event.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, []);
+  useEffect(() => { if (!open) setQuery(""); }, [open]);
+  return <div className={`searchable-select ${disabled ? "is-disabled" : ""}`} ref={root}>
+    <button type="button" className="searchable-select__trigger" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} disabled={disabled || loading} onClick={() => setOpen(v => !v)}>
+      <span className={!selected ? "searchable-select__placeholder" : ""}>{loading ? "Loading options…" : selected?.label || placeholder}</span><span aria-hidden="true">⌄</span>
+    </button>
+    {loading && <small className="searchable-select__state">Loading data…</small>}
+    {open && !loading && <div className="searchable-select__panel">
+      <input autoFocus value={query} onChange={e => setQuery(e.target.value)} placeholder={searchPlaceholder} aria-label={searchPlaceholder}/>
+      <div className="searchable-select__options" role="listbox">
+        {!filtered.length ? <div className="searchable-select__empty">{emptyText}</div> : filtered.map(option => <button type="button" role="option" aria-selected={option.value === value} className={option.value === value ? "selected" : ""} disabled={option.disabled} key={option.value} onClick={() => { onChange(option.value); setOpen(false); }}>{option.label}</button>)}
+      </div>
+      {value && clearable && <button type="button" className="searchable-select__clear" onClick={() => { onChange(""); setOpen(false); }}>Clear selection</button>}
+    </div>}
+  </div>;
 }
 
 export function Pagination({ page, pages, onChange }: { page: number; pages: number; onChange: (page: number) => void }) {

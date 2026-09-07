@@ -1,0 +1,20 @@
+{
+  "key": "contacts",
+  "name": "Contacts",
+  "version": "1.0.0",
+  "description": "Shared people and organizations directory assembled from the capabilities enabled for each organization.",
+  "category": "platform",
+  "core": true,
+  "active": true,
+  "manifest": {
+    "standalone": true,
+    "owns": ["contacts", "contact_people", "contact_addresses"],
+    "discoversEnabledModules": true,
+    "contactSources": {
+      "ledgerly-core": ["customer", "supplier", "employee", "other"],
+      "communications": ["sms", "whatsapp"],
+      "school-management": ["student", "guardian", "staff"],
+      "tasks-work": ["organization_user"]
+    }
+  }
+}

@@ -1,6 +1,6 @@
 {
   "name": "your-finance-pro",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -15,13 +15,25 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply FINANCE_DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply FINANCE_DB --remote",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "modules:sync": "node scripts/sync-modules.mjs",
+    "module:new": "node scripts/create-module.mjs",
+    "predev": "npm run build:web && node scripts/ensure-single-origin.mjs",
+    "predev:web": "npm run modules:sync",
+    "prebuild:web": "npm run modules:sync",
+    "predeploy": "npm run build:web && node scripts/ensure-single-origin.mjs",
+    "pretypecheck": "npm run modules:sync",
+    "pretest": "npm run modules:sync",
+    "single-origin:ensure": "node scripts/ensure-single-origin.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.2",
     "drizzle-orm": "^0.44.7",
     "hono": "^4.13.5",
     "jose": "^6.1.0",
+    "jsbarcode": "^3.12.3",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.4",
     "lucide-react": "^0.542.0",
     "nanoid": "^5.1.6",
     "pdf-lib": "^1.17.1",

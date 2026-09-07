@@ -14,6 +14,7 @@ export interface JournalLineInput {
   departmentId?: string;
   locationId?: string;
   taxCode?: string;
+  dimensions?: Record<string, string | number | boolean | null | undefined>;
 }
 
 export interface CreateJournalInput {
@@ -76,11 +77,11 @@ export async function createJournal(db: D1Database, organizationId: string, acto
     const debit = line.debitMinor ?? 0;
     const credit = line.creditMinor ?? 0;
     statements.push(db.prepare(`INSERT INTO journal_lines
-      (id, organization_id, journal_entry_id, account_id, description, debit_minor, credit_minor, base_debit_minor, base_credit_minor, contact_id, project_id, class_id, department_id, location_id, tax_code)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      (id, organization_id, journal_entry_id, account_id, description, debit_minor, credit_minor, base_debit_minor, base_credit_minor, contact_id, project_id, class_id, department_id, location_id, tax_code, dimensions_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(createId("jln"), organizationId, id, line.accountId, line.description ?? null, debit, credit,
         Math.round(debit * rate / 1_000_000), Math.round(credit * rate / 1_000_000), line.contactId ?? null,
-        line.projectId ?? null, line.classId ?? null, line.departmentId ?? null, line.locationId ?? null, line.taxCode ?? null));
+        line.projectId ?? null, line.classId ?? null, line.departmentId ?? null, line.locationId ?? null, line.taxCode ?? null, JSON.stringify(line.dimensions ?? {})));
   }
   statements.push(auditStatement(db, { organizationId, actorId, action: "journal.created", entityType: "journal_entry", entityId: id, after: { entryNumber } }));
   try {
@@ -116,22 +117,27 @@ export async function reverseJournal(db: D1Database, organizationId: string, act
     .bind(id, organizationId).first<{ id: string; entryNumber: string; transactionDate: string; description: string; currency: string; exchangeRateMicros: number; status: string }>();
   if (!original) throw new AppError(404, "NOT_FOUND", "Journal not found");
   if (original.status !== "posted") throw new AppError(409, "INVALID_STATE", "Only an unreversed posted journal can be reversed");
+  const linkedDocument = await db.prepare("SELECT id,type,number,status,paid_minor AS paidMinor FROM documents WHERE organization_id=? AND journal_entry_id=? LIMIT 1")
+    .bind(organizationId, id).first<{ id: string; type: string; number: string; status: string; paidMinor: number }>();
+  if (linkedDocument && Number(linkedDocument.paidMinor || 0) > 0) throw new AppError(409, "SOURCE_TRANSACTION_HAS_SETTLEMENTS", `Journal ${original.entryNumber} belongs to ${linkedDocument.type} ${linkedDocument.number}. Reverse its payments, credits or other settlements from the source transaction before reversing this journal.`);
   await assertPostingDateOpen(db, organizationId, postingDate);
   const raw = await db.prepare(`SELECT account_id AS accountId,description,debit_minor AS debitMinor,credit_minor AS creditMinor,
-    contact_id AS contactId,project_id AS projectId,class_id AS classId,department_id AS departmentId,location_id AS locationId,tax_code AS taxCode
+    contact_id AS contactId,project_id AS projectId,class_id AS classId,department_id AS departmentId,location_id AS locationId,tax_code AS taxCode,dimensions_json AS dimensionsJson
     FROM journal_lines WHERE journal_entry_id=? AND organization_id=? ORDER BY id`).bind(id, organizationId).all<JournalLineInput>();
   const reversal = await createJournal(db, organizationId, actorId, {
     transactionDate: postingDate, postingDate, description: `Reversal of ${original.entryNumber}: ${reason}`, reference: original.entryNumber,
     currency: original.currency, exchangeRateMicros: original.exchangeRateMicros, sourceType: "reversal", sourceId: id,
-    lines: raw.results.map((line) => ({ ...line, debitMinor: line.creditMinor ?? 0, creditMinor: line.debitMinor ?? 0 })),
+    lines: raw.results.map((line: any) => ({ ...line, dimensions: line.dimensionsJson ? JSON.parse(String(line.dimensionsJson)) : {}, debitMinor: line.creditMinor ?? 0, creditMinor: line.debitMinor ?? 0 })),
   }, `journal:${id}:reversal`);
   await db.prepare("UPDATE journal_entries SET reversal_of_id=? WHERE id=? AND organization_id=? AND status='draft'").bind(id, reversal.id, organizationId).run();
   const state = await db.prepare("SELECT status FROM journal_entries WHERE id=? AND organization_id=?").bind(reversal.id, organizationId).first<{ status: string }>();
   if (state?.status === "draft") await postJournal(db, organizationId, actorId, reversal.id);
-  const result = await db.batch([
+  const reversalStatements: D1PreparedStatement[] = [
     db.prepare("UPDATE journal_entries SET status='reversed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status='posted'").bind(id, organizationId),
-    auditStatement(db, { organizationId, actorId, action: "journal.reversed", entityType: "journal_entry", entityId: id, after: { reversalId: reversal.id, reason } }),
-  ]);
+  ];
+  if (linkedDocument) reversalStatements.push(db.prepare("UPDATE documents SET status='void',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND journal_entry_id=? AND paid_minor=0").bind(linkedDocument.id, organizationId, id));
+  reversalStatements.push(auditStatement(db, { organizationId, actorId, action: "journal.reversed", entityType: "journal_entry", entityId: id, after: { reversalId: reversal.id, reason, sourceDocumentId: linkedDocument?.id ?? null } }));
+  const result = await db.batch(reversalStatements);
   if (!result[0]?.meta.changes) throw new AppError(409, "ALREADY_REVERSED", "Journal was reversed by another request");
   return { id: reversal.id, entryNumber: reversal.entryNumber };
 }

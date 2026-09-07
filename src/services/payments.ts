@@ -9,9 +9,9 @@ export interface AllocationInput { documentId:string;amountMinor:number }
 export async function createPayment(db:D1Database,organizationId:string,actorId:string,input:PaymentInput,idempotencyKey:string){
   const existing=await db.prepare("SELECT id,number,status FROM payments WHERE organization_id=? AND idempotency_key=?").bind(organizationId,idempotencyKey).first();
   if(existing)return existing;
-  const expectedContact=input.type==="receipt"?"customer":"supplier";
   const contact=await db.prepare("SELECT type FROM contacts WHERE id=? AND organization_id=? AND active=1").bind(input.contactId,organizationId).first<{type:string}>();
-  if(!contact||contact.type!==expectedContact)throw new AppError(422,"INVALID_CONTACT",`A ${expectedContact} contact is required`);
+  const allowedContacts=input.type==="receipt"?["customer"]:["supplier","employee"];
+  if(!contact||!allowedContacts.includes(contact.type))throw new AppError(422,"INVALID_CONTACT",input.type==="receipt"?"An active customer contact is required":"An active supplier or employee contact is required");
   const accounts=await db.prepare("SELECT id,subtype FROM accounts WHERE organization_id=? AND id IN (?,?) AND active=1 AND allow_posting=1").bind(organizationId,input.bankAccountId,input.controlAccountId).all<{id:string;subtype:string}>();
   if(accounts.results.length!==new Set([input.bankAccountId,input.controlAccountId]).size)throw new AppError(422,"INVALID_ACCOUNT","Payment accounts must be active posting accounts");
   if(!accounts.results.some(a=>a.id===input.bankAccountId&&a.subtype==="cash"))throw new AppError(422,"INVALID_BANK_ACCOUNT","Bank account must use the cash subtype");

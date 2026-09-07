@@ -1,0 +1,26 @@
+{
+  "key": "academics",
+  "name": "Academics",
+  "version": "1.0.0",
+  "description": "Teaching operations, timetables, schemes of work, lesson planning and delivery, teacher supervision, and academic record inspection.",
+  "category": "education",
+  "core": false,
+  "active": true,
+  "manifest": {
+    "standalone": true,
+    "requiresModules": ["school-management"],
+    "requiresDataFrom": ["school-management"],
+    "sharedCore": [
+      "school_academic_years", "school_terms", "school_departments", "school_classes", "school_streams",
+      "school_subjects", "school_staff_profiles", "school_staff_teaching_assignments", "school_files",
+      "att_sessions", "att_records", "school_students", "users"
+    ],
+    "features": [
+      "class-teacher-department-timetables", "room-allocation", "single-double-lessons", "teacher-availability",
+      "conflict-detection", "substitute-lessons", "temporary-timetable-changes", "timetable-approval-publishing",
+      "printable-timetables", "workload-analysis", "schemes-of-work", "hod-dos-approval", "scheme-version-history",
+      "lesson-plans", "lesson-plan-templates", "lesson-delivery-register", "coverage-tracking", "recovery-lessons",
+      "teacher-supervision", "observations", "followups", "book-record-inspection", "evidence-attachments"
+    ]
+  }
+}
