@@ -1,0 +1,11 @@
+import type {AttendanceEvent,Bootstrap,FaceState,FaceTemplateSync,Registration,SyncResult} from "./types";
+function endpoint(reg:Registration,path:string){return `${reg.apiUrl.replace(/\/$/,"")}/api/v1/attendance/device${path}`}
+async function request<T>(reg:Registration,path:string,init:RequestInit={}):Promise<T>{const response=await fetch(endpoint(reg,path),{...init,headers:{Accept:"application/json",Authorization:`Device ${reg.deviceId}.${reg.credential}`,...(init.body?{"Content-Type":"application/json"}:{}),...(init.headers||{})}});const payload=await response.json().catch(()=>({})) as {data?:T;error?:{message?:string}};if(!response.ok)throw new Error(payload.error?.message||`Attendance service returned ${response.status}`);return payload.data as T}
+export const deviceHealth=(reg:Registration)=>request<{serverTime:string;status:string}>(reg,"/health");
+export const fetchBootstrap=(reg:Registration)=>request<Bootstrap>(reg,"/bootstrap");
+export const syncEvents=(reg:Registration,clientBatchId:string,events:AttendanceEvent[])=>request<SyncResult>(reg,"/sync",{method:"POST",body:JSON.stringify({clientBatchId,events})});
+export const fetchFaceState=(reg:Registration)=>request<FaceState>(reg,"/face/state");
+export const fetchFaceTemplates=(reg:Registration)=>request<FaceTemplateSync>(reg,"/face/templates");
+export const claimEnrollmentJob=(reg:Registration,id:string)=>request<{id:string;status:string}>(reg,`/face/enrollment-jobs/${id}/claim`,{method:"POST",body:"{}"});
+export const completeEnrollmentJob=(reg:Registration,id:string,result:{algorithmVersion:string;embeddingBase64:string;qualityScore:number;livenessScore:number;poseCount:number})=>request<{jobId:string;profileId:string;status:string}>(reg,`/face/enrollment-jobs/${id}/complete`,{method:"POST",body:JSON.stringify(result)});
+export const failEnrollmentJob=(reg:Registration,id:string,reason:string)=>request<{id:string;status:string}>(reg,`/face/enrollment-jobs/${id}/fail`,{method:"POST",body:JSON.stringify({reason})});

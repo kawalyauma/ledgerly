@@ -1,0 +1,3 @@
+package com.ledgerlyattendance
+import android.app.admin.DeviceAdminReceiver
+class LedgerlyDeviceAdminReceiver:DeviceAdminReceiver()

@@ -5,3 +5,6 @@ coverage/
 .dev.vars
 *.log
 .DS_Store
+
+attendance-mobile/mobile.zip
+attendance-mobile/android/app/src/main/assets/facenet.tflite

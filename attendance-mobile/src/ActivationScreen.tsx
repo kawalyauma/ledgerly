@@ -1,0 +1,14 @@
+import {useState} from "react";
+import {SafeAreaView,StyleSheet,Text,TextInput,TouchableOpacity,View} from "react-native";
+import {deviceHealth} from "./api";
+import {DeviceManager} from "./native";
+import type {Registration} from "./types";
+
+const LEDGERLY_API_URL="https://your-finance-pro-api.ulib5000.workers.dev";
+
+export function ActivationScreen({onActivated}:{onActivated:(r:Registration)=>void}){
+  const[deviceId,setDeviceId]=useState(""),[credential,setCredential]=useState(""),[pin,setPin]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState("");
+  async function activate(){setBusy(true);setError("");try{const reg={apiUrl:LEDGERLY_API_URL,deviceId:deviceId.trim(),credential:credential.trim()};await deviceHealth(reg);if(!/^\d{4,10}$/.test(pin))throw new Error("Choose a 4–10 digit administrator exit PIN");await DeviceManager.saveRegistration(reg.apiUrl,reg.deviceId,reg.credential,pin);onActivated(reg)}catch(e){setError(e instanceof Error?e.message:String(e))}finally{setBusy(false)}}
+  return <SafeAreaView style={s.root}><View style={s.mark}><Text style={s.markText}>L</Text></View><Text style={s.title}>Ledgerly Attendance</Text><Text style={s.copy}>Register this Android kiosk using the one-time credential generated in the Attendance web control centre.</Text><TextInput style={s.input} autoCapitalize="none" value={deviceId} onChangeText={setDeviceId} placeholder="Device ID"/><TextInput style={s.input} autoCapitalize="none" secureTextEntry value={credential} onChangeText={setCredential} placeholder="One-time device credential"/><TextInput style={s.input} keyboardType="number-pad" secureTextEntry value={pin} onChangeText={setPin} placeholder="Administrator exit PIN"/>{error?<Text style={s.error}>{error}</Text>:null}<TouchableOpacity accessibilityRole="button" disabled={busy} style={s.button} onPress={activate}><Text style={s.buttonText}>{busy?"Registering…":"Register kiosk"}</Text></TouchableOpacity><Text style={s.note}>Connected to the Ledgerly service. No administrator login token is stored on this device.</Text></SafeAreaView>
+}
+const s=StyleSheet.create({root:{flex:1,backgroundColor:"#f4f7f5",padding:28,justifyContent:"center"},mark:{width:58,height:58,borderRadius:16,backgroundColor:"#168957",alignItems:"center",justifyContent:"center"},markText:{color:"white",fontWeight:"900",fontSize:30},title:{fontSize:29,fontWeight:"800",color:"#11261e",marginTop:18},copy:{color:"#5e6e67",fontSize:15,lineHeight:22,marginVertical:18},input:{backgroundColor:"white",borderColor:"#d8e2dd",borderWidth:1,borderRadius:11,paddingHorizontal:14,paddingVertical:13,marginBottom:10,color:"#14231d"},button:{backgroundColor:"#168957",padding:15,borderRadius:11,alignItems:"center",marginTop:4},buttonText:{color:"white",fontWeight:"800",fontSize:16},error:{color:"#b4232c",marginBottom:8},note:{textAlign:"center",color:"#718078",fontSize:12,marginTop:14}});

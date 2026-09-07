@@ -1,0 +1,64 @@
+{
+  "key": "attendance",
+  "name": "Attendance",
+  "version": "1.2.0",
+  "description": "Canonical student and staff attendance, devices, offline capture, biometrics, exceptions, corrections and reporting.",
+  "category": "education",
+  "core": false,
+  "active": true,
+  "manifest": {
+    "standalone": true,
+    "requiresModules": [
+      "school-management"
+    ],
+    "requiresDataFrom": [
+      "school-management"
+    ],
+    "integratesWith": [
+      "academics",
+      "payroll-payments",
+      "communications",
+      "school-management"
+    ],
+    "captureMethods": [
+      "FACE",
+      "QR",
+      "NFC",
+      "MANUAL",
+      "TEACHER_REGISTER",
+      "ADMIN_OVERRIDE",
+      "IMPORT",
+      "API"
+    ],
+    "offline": true,
+    "primaryKioskPlatform": "android",
+    "features": [
+      "daily-attendance",
+      "class-and-lesson-registers",
+      "staff-time",
+      "in-out-events",
+      "offline-sync",
+      "deduplication",
+      "biometric-profiles",
+      "test-spoof-controls",
+      "devices",
+      "exceptions",
+      "corrections",
+      "reports",
+      "notification-rules"
+    ],
+    "mobileClient": "react-native-android",
+    "cameraSource": "device",
+    "externalCameraSupport": false,
+    "deviceCameraOnly": true,
+    "faceEngine": "facenet-128-v1",
+    "faceDetection": "mlkit-bundled",
+    "faceMatching": "on-device-1-n",
+    "activeLiveness": "blink-or-head-turn",
+    "encryptedTemplateSync": true,
+    "faceTestOverrides": [
+      "screen-image",
+      "printed-image"
+    ]
+  }
+}

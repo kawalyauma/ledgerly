@@ -1,0 +1,23 @@
+export type PersonType="student"|"staff";
+export type CaptureMethod="FACE"|"QR"|"NFC"|"MANUAL";
+export type Direction="IN"|"OUT";
+export type Registration={apiUrl:string;deviceId:string;credential:string};
+export type RosterPerson={id:string;name:string;groupName?:string;admissionNumber?:string;studentNumber?:string;staffNumber?:string;providerProfileRef?:string;algorithmVersion?:string};
+export type Bootstrap={
+  generatedAt:string;
+  device:{id:string;deviceCode:string;name:string;locationName?:string;population:"students"|"staff"|"mixed";direction:"IN"|"OUT"|"BOTH"};
+  camera:{source:"device";preferredFacing:"front"|"back";allowFacingSwitch:boolean};
+  policies:Record<string,Record<string,unknown>>;
+  testMode:null|{allowScreenImage:boolean;allowPrintedImage:boolean;expiresAt:string};
+  roster:RosterPerson[];
+  identifiers:Array<{personType:PersonType;personId:string;method:"QR"|"NFC";identifier:string}>;
+};
+export type FaceChallenge="EYES_CLOSED"|"TURN_HEAD";
+export type BiometricSettings={algorithmVersion:string;matchThreshold:number;ambiguityMargin:number;livenessThreshold:number;qualityThreshold:number};
+export type EnrollmentJob=null|{id:string;personType:PersonType;personId:string;personName:string;groupName?:string;status:"pending"|"claimed";consentStatus:string;requestedAt:string};
+export type FaceState={settings:BiometricSettings;enrollmentJob:EnrollmentJob;templates:{count:number;version:string|null}};
+export type FaceTemplate={personType:PersonType;personId:string;algorithmVersion:string;embeddingBase64:string;qualityScore?:number;updatedAt?:string};
+export type FaceTemplateSync={version:string;count:number;replaceAll:true;templates:FaceTemplate[]};
+export type AttendanceEvent={clientEventId:string;personType:PersonType;personId:string;direction:Direction;method:CaptureMethod;verificationMode:"STANDARD"|"TEST"|"SUPERVISED";confidence?:number;matchMargin?:number;livenessScore?:number;capturedAt:string;metadata?:Record<string,unknown>};
+export type SyncItemResult={clientEventId:string;status:"accepted"|"duplicate"|"rejected";message?:string;eventId?:string};
+export type SyncResult={id:string;eventCount:number;accepted:number;duplicates:number;rejected:number;status:string;results?:SyncItemResult[]};
