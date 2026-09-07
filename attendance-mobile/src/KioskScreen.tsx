@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useMemo,useRef,useState} from "react";
 import {AppState,SafeAreaView,StyleSheet,Text,TextInput,TouchableOpacity,View} from "react-native";
-import {Camera,useCameraDevice,useCameraPermission,useCodeScanner} from "react-native-vision-camera";
+import {Camera,useCameraDevice,useCameraPermission} from "react-native-vision-camera";
 import {claimEnrollmentJob,completeEnrollmentJob,failEnrollmentJob,fetchBootstrap,fetchFaceState,fetchFaceTemplates} from "./api";
 import {DeviceManager,FaceEngine,KioskManager,LedgerlyNfc,OfflineStore,nfcEvents} from "./native";
 import {cacheBootstrap,cachedBootstrap,enqueue,eventId} from "./storage";
@@ -16,7 +16,7 @@ export function KioskScreen({registration,onReset}:{registration:Registration;on
   const[direction,setDirection]=useState<Direction>("IN"),[result,setResult]=useState<Result|null>(null),[error,setError]=useState(""),[query,setQuery]=useState("");
   const[logoTaps,setLogoTaps]=useState(0),[exitOpen,setExitOpen]=useState(false),[exitPin,setExitPin]=useState("");
   const[faceBusy,setFaceBusy]=useState(false),[facePrompt,setFacePrompt]=useState(""),[cameraFacing,setCameraFacing]=useState<"front"|"back">("front");
-  const busy=useRef(false),camera=useRef<Camera>(null),lastCode=useRef({value:"",at:0});
+  const busy=useRef(false),camera=useRef<any>(null),lastCode=useRef({value:"",at:0});
   const device=useCameraDevice(cameraFacing),permission=useCameraPermission();
 
   const syncNow=useCallback(async()=>{try{const r=await flush(registration);setPendingCount(r.remaining);setFailedCount(r.failed);setOnline(true)}catch{setOnline(false);setPendingCount(await OfflineStore.count());setFailedCount(await OfflineStore.failedCount())}},[registration]);
@@ -29,7 +29,7 @@ export function KioskScreen({registration,onReset}:{registration:Registration;on
 
   useEffect(()=>{void permission.requestPermission();void refresh();void KioskManager.enter().catch(()=>{});void LedgerlyNfc.enable().catch(()=>{});const timer=setInterval(()=>{void syncNow();void syncFace()},20000);const state=AppState.addEventListener("change",x=>{if(x==="active"){void syncNow();void syncFace()}});return()=>{state.remove();clearInterval(timer);void LedgerlyNfc.disable()}},[permission,refresh,syncNow,syncFace]);
   useEffect(()=>{const listener=nfcEvents.addListener("LedgerlyNfcTag",(value:string)=>void identifyCode(value,"NFC"));return()=>listener.remove()},[identifyCode]);
-  const scanner=useCodeScanner({codeTypes:["qr","code-128","code-39","ean-13","ean-8"],onCodeScanned:codes=>{const value=codes[0]?.value;if(value)void identifyCode(value,"QR")}});
+  const scanner:any={codeTypes:["qr","code-128","code-39","ean-13","ean-8"],onCodeScanned:(codes:any[])=>{const value=codes[0]?.value;if(value)void identifyCode(value,"QR")}};
   const testMode=!!(bootstrap?.testMode&&new Date(bootstrap.testMode.expiresAt)>new Date());
 
   async function captureSequence(test=false):Promise<{photos:string[];challenge:FaceChallenge}>{

@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from "react";
 import {SafeAreaView,StyleSheet,Text,TouchableOpacity,View} from "react-native";
-import {Camera,useCameraDevice,useCameraPermission,useCodeScanner} from "react-native-vision-camera";
+import {Camera,useCameraDevice,useCameraPermission} from "react-native-vision-camera";
 import {deviceHealth,enrollDevice} from "./api";
 import {DeviceManager} from "./native";
 import type {Registration} from "./types";
@@ -35,7 +35,7 @@ export function ActivationScreen({onActivated}:{onActivated:(r:Registration)=>vo
     }finally{setBusy(false)}
   }
 
-  const scanner=useCodeScanner({codeTypes:["qr"],onCodeScanned:codes=>{const value=codes[0]?.value;if(value)void activate(value)}});
+  const scanner:any={codeTypes:["qr"],onCodeScanned:(codes:any[])=>{const value=codes[0]?.value;if(value)void activate(value)}};
   return <SafeAreaView style={s.root}>
     <View style={s.header}><View style={s.mark}><Text style={s.markText}>L</Text></View><View><Text style={s.title}>Register this kiosk</Text><Text style={s.copy}>Scan the one-time QR code created in Ledgerly web.</Text></View></View>
     <View style={s.cameraBox}>{device&&permission.hasPermission?<Camera style={StyleSheet.absoluteFill} device={device} isActive={!busy} codeScanner={scanner}/>:<View style={s.permission}><Text style={s.permissionTitle}>Camera permission required</Text><Text style={s.permissionText}>Ledgerly needs the rear camera to scan the kiosk registration QR code.</Text><TouchableOpacity style={s.permissionButton} onPress={()=>void permission.requestPermission()}><Text style={s.permissionButtonText}>Allow camera</Text></TouchableOpacity></View>}<View pointerEvents="none" style={s.overlay}><View style={s.scanFrame}/><Text style={s.hint}>{busy?"Registering…":"Place the QR code inside the frame"}</Text></View></View>
