@@ -3,6 +3,7 @@ import type { FrontendModuleDefinition } from "../../frontend-types";
 import { AttendanceHome } from "./AttendanceHome";
 import { DevicesPage } from "./DevicesPage";
 import "./attendance.css";
+import "./professional.css";
 
 const moduleDefinition:FrontendModuleDefinition={
   key:"attendance",name:"Attendance",version:"1.3.0",order:26,

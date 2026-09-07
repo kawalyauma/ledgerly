@@ -2,6 +2,7 @@ import { BookOpenCheck } from "lucide-react";
 import type { FrontendModuleDefinition } from "../../frontend-types";
 import { AcademicsWorkspace } from "./AcademicsWorkspace";
 import "./academics.css";
+import "./professional.css";
 
 const moduleDefinition: FrontendModuleDefinition = {
   key: "academics",
