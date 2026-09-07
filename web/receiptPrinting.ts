@@ -1,4 +1,5 @@
 import { ApiError, authStore, post } from "./api";
+import { reservePrintWindow } from "./printing";
 
 type PrintRequest={id:string;receiptId:string;purpose:"print"|"download";copyNo:number;copyLabel:string;snapshotHash:string;pdfPath:string};
 
@@ -9,14 +10,23 @@ async function fetchReceiptPdf(path:string){
 }
 
 export async function openReceiptPdf(receiptId:string,receiptNumber:string,purpose:"print"|"download"="print"){
-  const popup=purpose==="print"?window.open("","_blank","noopener,noreferrer"):null;
-  if(popup){popup.document.write("<p style='font-family:Arial,sans-serif;padding:24px'>Preparing archived receipt PDF…</p>");}
+  // Reserve a real tab during the click. Using noopener in window.open features can
+  // return null in some browsers; setting opener to null after opening is safer.
+  const popup=purpose==="print"?reservePrintWindow("Preparing archived receipt PDF…"):null;
   try{
     const request=await post<PrintRequest>(`/school/fees/receipts/${receiptId}/prints`,{purpose}),blob=await fetchReceiptPdf(request.pdfPath),url=URL.createObjectURL(blob);
     if(purpose==="download"){
       const a=document.createElement("a");a.href=url;a.download=`${receiptNumber||"receipt"}.pdf`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);
-    }else if(popup){popup.location.href=url;setTimeout(()=>URL.revokeObjectURL(url),120_000);}
-    else{const a=document.createElement("a");a.href=url;a.target="_blank";a.rel="noopener noreferrer";document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),120_000);}
+    }else if(popup){
+      popup.location.replace(url);
+      setTimeout(()=>URL.revokeObjectURL(url),120_000);
+    }else{
+      // Fallback for environments that block tabs. A temporary visible link works
+      // on touch browsers and still allows the user to open/print the PDF.
+      const a=document.createElement("a");a.href=url;a.target="_blank";a.rel="noopener noreferrer";a.textContent="Open receipt PDF";
+      a.style.position="fixed";a.style.right="16px";a.style.bottom="16px";a.style.zIndex="99999";a.style.padding="12px 16px";a.style.background="#17201d";a.style.color="#fff";a.style.borderRadius="8px";
+      document.body.appendChild(a);a.click();setTimeout(()=>{a.remove();URL.revokeObjectURL(url)},120_000);
+    }
     return request;
   }catch(error){popup?.close();throw error;}
 }

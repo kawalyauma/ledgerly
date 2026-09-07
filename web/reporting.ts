@@ -1,4 +1,5 @@
 import { get } from "./api";
+import { printHtmlDocument, reservePrintWindow } from "./printing";
 
 type ReportOrganization = {
   name?: string;
@@ -64,21 +65,38 @@ export function downloadTableCsv(elementId: string, title: string) {
 export function printReportElement(elementId: string, title: string, subtitle = "") {
   const root = document.getElementById(elementId);
   if (!root) return;
-  const popup = window.open("", "_blank", "noopener,noreferrer,width=1100,height=800");
-  if (!popup) return;
-  popup.document.write("<p style='font-family:sans-serif;padding:24px'>Preparing report…</p>");
+
+  // Reserve the tab synchronously from the user's click. This avoids popup blockers
+  // on mobile browsers while branding/profile data is loaded asynchronously.
+  const reserved = reservePrintWindow("Preparing report…");
+
   void reportOrganization().then(org => {
     const branding = org.branding || {}, address = String(org.address?.formatted || "");
     const contact = [branding.phone, branding.email, branding.website].filter(Boolean).join(" · ");
     const logo = branding.logoDataUrl ? `<img src="${escapeHtml(branding.logoDataUrl)}" alt="Logo">` : "";
-    popup.document.open();
-    popup.document.write(`<!doctype html><html><head><title>${escapeHtml(title)}</title><style>
-      @page{size:auto;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;color:#17201d;margin:0;font-size:12px}.letterhead{display:flex;gap:18px;align-items:center;border-bottom:2px solid #2b5147;padding-bottom:12px;margin-bottom:18px}.letterhead img{width:76px;height:76px;object-fit:contain}.letterhead h1{font-size:20px;margin:0 0 4px}.letterhead p{margin:2px 0;color:#59635f}.report-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;margin-bottom:12px}.report-head h2{font-size:17px;margin:0}.report-head p{margin:3px 0;color:#59635f}.generated{white-space:nowrap;color:#59635f}table{width:100%;border-collapse:collapse}th,td{border:1px solid #d7ddda;padding:7px 8px;text-align:left;vertical-align:top}th{background:#f1f5f3;font-weight:700}td small{display:block;color:#68736e;margin-top:2px}.footer{border-top:1px solid #ccd5d1;margin-top:18px;padding-top:8px;color:#69736f;font-size:10px}button,.button,.badge__dot{display:none!important}.badge{border:0!important;padding:0!important;background:none!important;color:inherit!important}tr{break-inside:avoid}</style></head><body>
+    const html = `<!doctype html><html><head><title>${escapeHtml(title)}</title><style>
+      @page{size:auto;margin:14mm}
+      body{font-family:Arial,Helvetica,sans-serif;color:#17201d;margin:0;font-size:12px}
+      .letterhead{display:flex;gap:18px;align-items:center;border-bottom:2px solid #2b5147;padding-bottom:12px;margin-bottom:18px}
+      .letterhead img{width:76px;height:76px;object-fit:contain}
+      .letterhead h1{font-size:20px;margin:0 0 4px}.letterhead p{margin:2px 0;color:#59635f}
+      .report-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;margin-bottom:12px}
+      .report-head h2{font-size:17px;margin:0}.report-head p{margin:3px 0;color:#59635f}.generated{white-space:nowrap;color:#59635f}
+      table{width:100%;border-collapse:collapse}th,td{border:1px solid #d7ddda;padding:7px 8px;text-align:left;vertical-align:top}
+      th{background:#f1f5f3;font-weight:700}td small{display:block;color:#68736e;margin-top:2px}
+      .footer{border-top:1px solid #ccd5d1;margin-top:18px;padding-top:8px;color:#69736f;font-size:10px}
+      button,.button,.badge__dot{display:none!important}.badge{border:0!important;padding:0!important;background:none!important;color:inherit!important}
+      tr{break-inside:avoid}
+      @media(max-width:680px){.letterhead,.report-head{align-items:flex-start;flex-direction:column}.generated{white-space:normal}body{font-size:11px}}
+    </style></head><body>
       <header class="letterhead">${logo}<div><h1>${escapeHtml(org.legalName || org.name || "Organization")}</h1>${address ? `<p>${escapeHtml(address)}</p>` : ""}${contact ? `<p>${escapeHtml(contact)}</p>` : ""}${org.taxRegistrationNumber ? `<p>Tax ID: ${escapeHtml(org.taxRegistrationNumber)}</p>` : ""}</div></header>
       <section class="report-head"><div><h2>${escapeHtml(title)}</h2>${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ""}</div><div class="generated">Generated ${escapeHtml(new Date().toLocaleString())}</div></section>
       ${root.innerHTML}
       ${branding.footer ? `<footer class="footer">${escapeHtml(branding.footer)}</footer>` : ""}
-      <script>window.onload=()=>{window.print();window.onafterprint=()=>window.close();}<\/script></body></html>`);
-    popup.document.close();
+    </body></html>`;
+    printHtmlDocument(html, { title, reservedWindow: reserved });
+  }).catch(error => {
+    try { reserved?.close(); } catch {}
+    console.error("Unable to prepare report for printing", error);
   });
 }
