@@ -10,7 +10,8 @@ async function decode<T>(response:Response):Promise<T>{
   return payload.data as T;
 }
 export async function ledgerlyRequest<T>(session:MobileSession,path:string,init:RequestInit={},onSession?:SessionUpdater,retry=true):Promise<T>{
-  const headers={Accept:"application/json",...(init.body?{"Content-Type":"application/json"}:{}),...(init.headers||{}),Authorization:`Bearer ${session.accessToken}`};
+  const isForm=typeof FormData!=="undefined"&&init.body instanceof FormData;
+  const headers={Accept:"application/json",...(!isForm&&init.body?{"Content-Type":"application/json"}:{}),...(init.headers||{}),Authorization:`Bearer ${session.accessToken}`};
   let response:Response;
   try{response=await fetch(`${apiBase(session.apiUrl)}/api/v1${path}`,{...init,headers})}
   catch{throw new MobileApiError(0,"NETWORK_ERROR","Unable to reach Ledgerly. Check your network and retry.")}
