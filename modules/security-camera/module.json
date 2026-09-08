@@ -1,7 +1,7 @@
 {
   "key": "security-camera",
   "name": "Security Cameras",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "Local-first Ledgerly CCTV with QR-paired Android cameras, on-premise recording and remote live viewing on demand.",
   "category": "operations",
   "core": false,
@@ -11,16 +11,21 @@
     "sharedCore": ["organizations", "users", "permissions", "mobile-sync"],
     "features": [
       "qr-camera-pairing",
+      "one-time-nvr-pairing",
+      "direct-lan-mp4-segment-ingest",
+      "persistent-phone-segment-queue",
       "local-nvr-recording",
-      "camera-heartbeats",
+      "camera-and-nvr-heartbeats",
       "device-health",
+      "camera-server-assignment",
+      "recording-policy-control",
+      "recording-metadata-sync",
       "recording-index",
       "protected-clips",
       "storage-retention",
-      "remote-live-view",
-      "webrtc-signaling",
-      "offline-camera-buffer",
-      "outbound-only-nvr-connectivity"
+      "remote-live-session-requests",
+      "webrtc-signaling-control-plane",
+      "outbound-only-nvr-cloud-connectivity"
     ]
   }
 }

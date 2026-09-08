@@ -1,70 +1,82 @@
 # Ledgerly Camera Server
 
-Local-first NVR appliance for Ledgerly Security Cameras. Camera video is recorded on the local computer; Ledgerly cloud services coordinate identity, configuration and remote viewing requests without becoming the primary recording store.
+Local-first NVR appliance for Ledgerly Security Cameras. Android camera phones record short MP4 segments and send them directly over the LAN to this computer. Video bytes stay on the local disk; Ledgerly cloud stores identity, configuration, health, recording metadata and live-session control state.
 
 ## Requirements
 
 - Node.js 20+
-- FFmpeg available as `ffmpeg` (or set `FFMPEG_BIN`)
-- A local disk with enough free space for the chosen retention window
+- FFmpeg (kept for RTSP/SRT/HTTP camera compatibility)
+- A local disk for recordings
+- The computer and camera phones on the same LAN/Wi-Fi
 
-## Start
+## Pair the NVR
+
+1. In Ledgerly open **Security → Cameras → Pair NVR**.
+2. Give the server a name/location and generate a one-time pairing token.
+3. Start the server with that token once:
 
 ```bash
 cd camera-server
-CAMERA_SERVER_KEY='replace-with-a-long-random-secret' \
+LEDGERLY_API_URL='https://your-ledgerly-host' \
+CAMERA_SERVER_PAIRING_TOKEN='LEDGERLY-CAMERA-SERVER:1:...' \
+CAMERA_LOCAL_BASE_URL='http://192.168.1.20:8789' \
 CAMERA_SERVER_HOST=0.0.0.0 \
 CAMERA_STORAGE_ROOT=/srv/ledgerly-cameras \
 npm start
 ```
 
-Optional settings:
+The resulting server credential is stored in `camera-server-state.json` with mode `0600`. On subsequent starts the pairing token is not required.
+
+## Continuous phone recording
+
+After an Android camera is assigned to this NVR, Ledgerly Mobile receives an ingest URL such as:
 
 ```text
-CAMERA_SERVER_PORT=8789
-CAMERA_SEGMENT_SECONDS=300
-CAMERA_RETENTION_DAYS=30
-CAMERA_MAX_STORAGE_PERCENT=90
-CAMERA_CLEANUP_INTERVAL_MS=3600000
-FFMPEG_BIN=ffmpeg
+http://192.168.1.20:8789/v1/ingest/cam_xxx/segments
 ```
 
-## Recording model
+The phone records approximately 20-second MP4 segments. Each segment is authenticated using the camera's existing Ledgerly device credential and sent directly to the NVR. If the NVR/Wi-Fi is temporarily unavailable, the phone keeps a persistent pending-segment queue and retries later.
 
-Each camera is recorded by FFmpeg into independent MP4 segments under:
+Files are stored under:
 
 ```text
 <storage-root>/<camera-id>/YYYY-MM-DD_HH-MM-SS.mp4
 ```
 
-Segments are indexed directly from the local filesystem, so a server restart does not lose the recording timeline. A `.protected` sidecar marks important footage that automatic retention must not delete.
+The server periodically synchronizes only segment metadata (camera, timestamps, local path, size and protection state) back to Ledgerly.
 
-## Local API
+## Cloud coordination
 
-Public read endpoints:
+The NVR performs outbound HTTPS only:
 
-- `GET /health`
-- `GET /v1/storage`
-- `GET /v1/recorders`
-- `GET /v1/cameras`
-- `GET /v1/cameras/:id/summary`
-- `GET /v1/cameras/:id/recordings?from=&to=&limit=`
-- `GET /v1/cameras/:id/recording/status`
+- pairs once using a one-time server token;
+- heartbeat every ~15 seconds;
+- downloads its assigned cameras and credential hashes;
+- uploads recording metadata in batches;
+- receives short-lived live-view signaling requests.
 
-Authenticated control endpoints require `X-Ledgerly-Server-Key`:
-
-- `POST /v1/cameras/:id/recording/start` with `{ "inputUrl": "rtsp://..." }`
-- `POST /v1/cameras/:id/recording/stop`
-- `POST /v1/cameras/:id/recordings/:segment/protect` with `{ "protected": true }`
-- `POST /v1/retention/cleanup`
-
-The recording input currently accepts RTSP/RTSPS, SRT, HTTP or HTTPS sources. Ledgerly Camera mobile transport will provide the local NVR ingest source in the next runtime slice.
+No inbound Internet port is required for cloud control. The local ingest endpoint is intended for the trusted LAN.
 
 ## Retention
 
-Cleanup runs periodically and follows two rules:
+```text
+CAMERA_RETENTION_DAYS=30
+CAMERA_MAX_STORAGE_PERCENT=90
+CAMERA_CLEANUP_INTERVAL_MS=3600000
+```
 
-1. Delete unprotected recordings older than `CAMERA_RETENTION_DAYS`.
-2. If the disk is still above `CAMERA_MAX_STORAGE_PERCENT`, remove the oldest unprotected segments until the disk falls below that threshold.
+Oldest unprotected footage is removed first. `.protected` sidecars prevent automatic deletion.
 
-Protected footage is never removed by automatic retention.
+## Local API
+
+- `GET /health`
+- `GET /v1/storage`
+- `GET /v1/assignments`
+- `GET /v1/cameras`
+- `GET /v1/cameras/:id/recordings`
+- `GET /v1/cameras/:id/summary`
+- `POST /v1/ingest/:cameraId/segments` — Android segmented MP4 ingest
+- `POST /v1/cameras/:id/recordings/:segment/protect`
+- `POST /v1/retention/cleanup`
+
+`CAMERA_SERVER_KEY` remains available for administrative local mutation endpoints.

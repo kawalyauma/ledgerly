@@ -6,6 +6,7 @@ export const OfflineStore=NativeModules.OfflineStore as {enqueue(id:string,paylo
 export const KioskManager=NativeModules.KioskManager as {status():Promise<{deviceOwner:boolean;lockTaskPermitted:boolean}>;enter():Promise<boolean>;exit():Promise<boolean>};
 export const LedgerlyNfc=NativeModules.LedgerlyNfc as {isSupported():Promise<boolean>;enable():Promise<boolean>;disable():Promise<boolean>};
 export const FilePicker=NativeModules.FilePicker as {pick():Promise<{uri:string;name:string;mimeType:string;size:number}|null>};
+export const CameraSpool=NativeModules.CameraSpool as {stash(sourcePath:string,maxFiles:number):Promise<{path:string;size:number;evicted:string[]}>;remove(filePath:string):Promise<boolean>;exists(filePath:string):Promise<boolean>;list():Promise<Array<{path:string;size:number;modifiedAt:number}>>};
 export const FaceEngine=NativeModules.FaceEngine as {
   configure(matchThreshold:number,ambiguityMargin:number,livenessThreshold:number,qualityThreshold:number):Promise<boolean>;
   healthCheck():Promise<{healthy:boolean;provider:string;livenessRequired:boolean;templateCount:number;modelError?:string|null}>;

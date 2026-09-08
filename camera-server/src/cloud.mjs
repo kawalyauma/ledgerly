@@ -1,0 +1,22 @@
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import crypto from "node:crypto";
+
+function strip(url){return String(url||"").replace(/\/$/,"")}
+async function jsonResponse(res){const body=await res.json().catch(()=>({}));if(!res.ok)throw new Error(body?.error?.message||`Ledgerly returned ${res.status}`);return body.data}
+export class CloudCoordinator{
+ constructor({apiUrl,stateFile,localBaseUrl,storage}){this.apiUrl=strip(apiUrl);this.stateFile=path.resolve(stateFile||"./camera-server-state.json");this.localBaseUrl=localBaseUrl;this.storage=storage;this.registration=null;this.config={cameras:[],liveSessions:[]};this.pending=[];this.timers=[];this.load()}
+ load(){try{this.registration=JSON.parse(fs.readFileSync(this.stateFile,"utf8"))}catch{}}
+ save(){if(this.registration)fs.writeFileSync(this.stateFile,JSON.stringify(this.registration,null,2),{mode:0o600})}
+ headers(){if(!this.registration)throw new Error("Camera server is not paired");return{Accept:"application/json","Content-Type":"application/json",Authorization:`Server ${this.registration.serverId}.${this.registration.credential}`}}
+ async pair(token){const res=await fetch(`${this.apiUrl}/api/v1/security-camera/server/pair`,{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify({token,localBaseUrl:this.localBaseUrl,hostname:os.hostname(),appVersion:"0.4.0",capabilities:["lan-mp4-ingest","recording-catalog","retention","metadata-sync","live-signaling"]})});this.registration=await jsonResponse(res);this.save();return this.registration}
+ async heartbeat(){if(!this.registration)return;const s=this.storage();await jsonResponse(await fetch(`${this.apiUrl}/api/v1/security-camera/server/heartbeat`,{method:"POST",headers:this.headers(),body:JSON.stringify({localBaseUrl:this.localBaseUrl,hostname:os.hostname(),appVersion:"0.4.0",storageTotalBytes:s.totalBytes,storageFreeBytes:s.freeBytes})}))}
+ async refreshConfig(){if(!this.registration)return this.config;this.config=await jsonResponse(await fetch(`${this.apiUrl}/api/v1/security-camera/server/config`,{headers:this.headers()}));return this.config}
+ camera(cameraId){return(this.config.cameras||[]).find(x=>x.id===cameraId)||null}
+ authorizeCamera(cameraId,credential){const camera=this.camera(cameraId);if(!camera||!camera.recordingEnabled||!credential)return false;const hash=crypto.createHash("sha256").update(credential).digest("hex");return crypto.timingSafeEqual(Buffer.from(hash),Buffer.from(String(camera.credentialHash||"").padEnd(64,"0").slice(0,64)))}
+ enqueueRecording(row){this.pending.push(row);if(this.pending.length>1000)this.pending.splice(0,this.pending.length-1000)}
+ async flushRecordings(){if(!this.registration||!this.pending.length)return;const batch=this.pending.slice(0,200);await jsonResponse(await fetch(`${this.apiUrl}/api/v1/security-camera/server/recordings/sync`,{method:"POST",headers:this.headers(),body:JSON.stringify({recordings:batch})}));this.pending.splice(0,batch.length)}
+ async start(pairingToken){if(!this.apiUrl)return;if(!this.registration&&pairingToken)await this.pair(pairingToken);if(!this.registration)return;await Promise.allSettled([this.heartbeat(),this.refreshConfig()]);this.timers.push(setInterval(()=>void this.heartbeat().catch(e=>console.error("[camera-cloud] heartbeat",e.message)),15000));this.timers.push(setInterval(()=>void this.refreshConfig().catch(e=>console.error("[camera-cloud] config",e.message)),10000));this.timers.push(setInterval(()=>void this.flushRecordings().catch(e=>console.error("[camera-cloud] recording sync",e.message)),10000));for(const t of this.timers)t.unref()}
+ stop(){for(const t of this.timers)clearInterval(t);this.timers=[]}
+}
