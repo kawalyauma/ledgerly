@@ -135,6 +135,7 @@ class FaceEngineModule(private val context:ReactApplicationContext):ReactContext
   }
   private fun cosine(a:FloatArray,b:FloatArray):Double{if(a.size!=b.size)return -1.0;var s=0.0;for(i in a.indices)s+=a[i]*b[i];return s.coerceIn(-1.0,1.0)}
   private fun liveness(samples:List<FaceSample>,challenge:String):Double{
+    if(challenge=="DISABLED")return 1.0
     if(samples.size<3)return 0.0
     val a=samples.first().face;val m=samples[1].face;val z=samples.last().face
     val openStart=min(a.leftEyeOpenProbability?:1f,a.rightEyeOpenProbability?:1f)
@@ -146,6 +147,7 @@ class FaceEngineModule(private val context:ReactApplicationContext):ReactContext
     return when(challenge){
       "EYES_CLOSED"->if(eyesClosed)1.0 else .20
       "TURN_HEAD"->if(turned)1.0 else .20
+      "DISABLED"->1.0
       else->.20
     }
   }
