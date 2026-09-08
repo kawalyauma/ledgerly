@@ -2,7 +2,7 @@ import {useEffect,useRef,useState} from "react";
 import {SafeAreaView,StyleSheet,Text,TouchableOpacity,View} from "react-native";
 import {Camera,useCameraDevice,useCameraPermission,useCodeScanner} from "react-native-vision-camera";
 import {deviceHealth,enrollDevice} from "./api";
-import {DeviceManager} from "./native";
+import {DeviceManager,KioskManager} from "./native";
 import type {Registration} from "./types";
 
 const LEDGERLY_API_URL="https://your-finance-pro-api.ulib5000.workers.dev";
@@ -18,7 +18,7 @@ function parseEnrollmentQr(value:string){
 export function ActivationScreen({onActivated}:{onActivated:(r:Registration)=>void}){
   const[busy,setBusy]=useState(false),[error,setError]=useState(""),[status,setStatus]=useState("Point the camera at the QR code shown on the web app");
   const scanLock=useRef(false),device=useCameraDevice("back"),permission=useCameraPermission();
-  useEffect(()=>{void permission.requestPermission()},[]);
+  useEffect(()=>{void permission.requestPermission();void KioskManager.enter().catch(()=>{})},[]);
 
   async function activate(raw:string){
     if(scanLock.current)return;
