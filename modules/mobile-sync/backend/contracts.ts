@@ -33,12 +33,15 @@ export type MobileSyncRecord = {
   payload?: unknown;
 };
 
-export type MobileSyncMutationContext = {
+export type MobileSyncAuthorizationContext = {
   db: D1Database;
   principal: AuthPrincipal;
   organizationId: string;
   userId: string;
   deviceId: string;
+};
+
+export type MobileSyncMutationContext = MobileSyncAuthorizationContext & {
   currentVersion: number;
   nextVersion: number;
 };
@@ -50,12 +53,7 @@ export type PreparedMobileSyncMutation = {
   result?: unknown;
 };
 
-export type MobileSyncSnapshotContext = {
-  db: D1Database;
-  principal: AuthPrincipal;
-  organizationId: string;
-  userId: string;
-  deviceId: string;
+export type MobileSyncSnapshotContext = MobileSyncAuthorizationContext & {
   watermark: number;
 };
 
@@ -69,6 +67,10 @@ export type MobileSyncCollectionDefinition = {
   conflictPolicy: MobileSyncConflictPolicy;
   pullScope?: string;
   pushScope?: string;
+  /** Optional domain authorization executed in addition to coarse JWT scope checks. */
+  authorizePull?: (context: MobileSyncAuthorizationContext) => Promise<void>;
+  /** Optional domain authorization executed in addition to coarse JWT scope checks. */
+  authorizePush?: (context: MobileSyncAuthorizationContext) => Promise<void>;
   dependsOn?: Array<{ moduleKey: string; collectionKey: string }>;
   prepareMutation?: (context: MobileSyncMutationContext, mutation: MobileSyncMutation) => Promise<PreparedMobileSyncMutation>;
   snapshot?: (context: MobileSyncSnapshotContext) => Promise<MobileSyncRecord[]>;

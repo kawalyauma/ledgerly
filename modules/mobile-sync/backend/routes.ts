@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { AppVariables, Env } from "../../../src/types";
 import { AppError } from "../../../src/lib/errors";
 import { registerDevice, listDevices, revokeDevice } from "./device-service";
+import { getMobileSyncCollection } from "./registry";
 import { acknowledgeBootstrap, acknowledgePull, acknowledgeSchemas, bootstrap, mobileSyncManifest, pull, push, recoveryState } from "./sync-service";
 
 export const mobileSyncRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -48,6 +49,16 @@ async function json<T extends z.ZodTypeAny>(c: any, schema: T): Promise<z.infer<
   return parsed.data;
 }
 
+async function authorizeCollections(c:any,deviceId:string,items:Array<{moduleKey:string;collectionKey:string}>,direction:"pull"|"push") {
+  const principal=c.get("principal"),seen=new Set<string>();
+  for(const item of items){
+    const key=`${item.moduleKey}:${item.collectionKey}`;if(seen.has(key))continue;seen.add(key);
+    const definition=getMobileSyncCollection(item.moduleKey,item.collectionKey);if(!definition)continue;
+    const authorize=direction==="pull"?definition.authorizePull:definition.authorizePush;
+    if(authorize)await authorize({db:c.env.FINANCE_DB,principal,organizationId:principal.organizationId,userId:principal.userId,deviceId});
+  }
+}
+
 mobileSyncRoutes.get("/manifest", c => c.json({ data: mobileSyncManifest() }));
 mobileSyncRoutes.post("/devices", async c => {
   const input = await json(c, registration);
@@ -64,6 +75,7 @@ mobileSyncRoutes.post("/schemas/ack", async c => {
 });
 mobileSyncRoutes.post("/bootstrap", async c => {
   const input = await json(c, bootstrapBody);
+  await authorizeCollections(c,input.deviceId,input.collections,"pull");
   return c.json({ data: await bootstrap(c.env.FINANCE_DB, c.get("principal"), input) });
 });
 mobileSyncRoutes.post("/bootstrap/ack", async c => {
@@ -72,10 +84,12 @@ mobileSyncRoutes.post("/bootstrap/ack", async c => {
 });
 mobileSyncRoutes.post("/push", async c => {
   const input = await json(c, pushBody);
+  await authorizeCollections(c,input.deviceId,input.operations,"push");
   return c.json({ data: await push(c.env.FINANCE_DB, c.get("principal"), input) });
 });
 mobileSyncRoutes.post("/pull", async c => {
   const input = await json(c, pullBody);
+  await authorizeCollections(c,input.deviceId,input.collections,"pull");
   return c.json({ data: await pull(c.env.FINANCE_DB, c.get("principal"), input) });
 });
 mobileSyncRoutes.post("/pull/ack", async c => {
