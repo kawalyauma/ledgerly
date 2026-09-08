@@ -5,12 +5,13 @@ import type {Admission,BootstrapStatus,DisciplineIncident,DisciplineSummary,FeeD
 type Client={session:MobileSession;onSession?:SessionUpdater};
 const req=<T>(c:Client,path:string,init:RequestInit={})=>ledgerlyRequest<T>(c.session,`/school${path}`,init,c.onSession);
 const json=(method:string,body?:unknown):RequestInit=>({method,body:body===undefined?undefined:JSON.stringify(body)});
-const list=<T>(c:Client,path:string,params:Record<string,any>={})=>req<T[]>(c,`${path}${query(params)}`);
+const optional=async<T>(promise:Promise<T>,fallback:T)=>{try{return await promise}catch(e:any){if(e?.status===403)return fallback;throw e}};
+const list=<T>(c:Client,path:string,params:Record<string,any>={})=>optional(req<T[]>(c,`${path}${query(params)}`),[] as T[]);
 
 export const schoolApi={
- profile:(c:Client)=>req<SchoolProfile|null>(c,"/setup/profile"),
+ profile:(c:Client)=>optional(req<SchoolProfile|null>(c,"/setup/profile"),null),
  saveProfile:async(c:Client,body:any)=>{const current=await req<SchoolProfile|null>(c,"/setup/profile");const preserved={logoUrl:current?.logoUrl??null,logoFileId:current?.logoFileId??null,postalAddress:current?.postalAddress??null,locationText:current?.locationText??null,language:current?.language||"en",dateFormat:current?.dateFormat||"DD/MM/YYYY",timeFormat:current?.timeFormat||"24h",multiCampusEnabled:Boolean(current?.multiCampusEnabled),branding:current?.branding||{},systemPreferences:current?.systemPreferences||{}};return req<SchoolProfile>(c,"/setup/profile",json("PUT",{...body,...preserved}))},
- bootstrapStatus:(c:Client)=>req<BootstrapStatus>(c,"/setup/bootstrap/status"),
+ bootstrapStatus:(c:Client)=>optional(req<BootstrapStatus>(c,"/setup/bootstrap/status"),{}),
  restoreDefaults:(c:Client)=>req<any>(c,"/setup/bootstrap/defaults",json("POST",{})),
  setupList:(c:Client,key:SetupKey,params:Record<string,any>={limit:500})=>list<any>(c,`/setup/${key}`,params),
  setupGet:(c:Client,key:SetupKey,id:string)=>req<any>(c,`/setup/${key}/${id}`),
@@ -59,7 +60,7 @@ export const schoolApi={
  payslips:(c:Client,id:string)=>list<any>(c,`/staff-management/staff/${id}/payslips`),
  paySalary:(c:Client,id:string,lineId:string,body:any)=>req<any>(c,`/staff-management/staff/${id}/payslips/${lineId}/payments`,json("POST",body)),
  reverseSalaryPayment:(c:Client,id:string,paymentRecordId:string,body:any)=>req<any>(c,`/staff-management/staff/${id}/salary-payments/${paymentRecordId}/reverse`,json("POST",body)),
- disciplineSummary:(c:Client)=>req<DisciplineSummary>(c,"/discipline/summary"),
+ disciplineSummary:(c:Client)=>optional(req<DisciplineSummary>(c,"/discipline/summary"),{}),
  offenceTypes:(c:Client)=>list<any>(c,"/discipline/offence-types"),
  createOffenceType:(c:Client,body:any)=>req<any>(c,"/discipline/offence-types",json("POST",body)),
  incidents:(c:Client,params:Record<string,any>={})=>list<DisciplineIncident>(c,"/discipline/incidents",{limit:200,...params}),
@@ -72,7 +73,7 @@ export const schoolApi={
  updatePromotionItem:(c:Client,runId:string,itemId:string,body:any)=>req<any>(c,`/promotion/runs/${runId}/items/${itemId}`,json("PUT",body)),
  applyPromotionRun:(c:Client,id:string)=>req<any>(c,`/promotion/runs/${id}/apply`,json("POST",{})),
  cancelPromotionRun:(c:Client,id:string)=>req<any>(c,`/promotion/runs/${id}/cancel`,json("POST",{})),
- feeDashboard:(c:Client,params:Record<string,any>={})=>req<FeeDashboard>(c,`/fees/reports/dashboard${query(params)}`),
+ feeDashboard:(c:Client,params:Record<string,any>={})=>optional(req<FeeDashboard>(c,`/fees/reports/dashboard${query(params)}`),{}),
  feeBalances:(c:Client,params:Record<string,any>={})=>list<any>(c,"/fees/reports/balances",{limit:200,...params}),
  studentStatement:(c:Client,id:string,params:Record<string,any>={})=>req<any>(c,`/fees/students/${id}/statement${query(params)}`),
  roles:(c:Client)=>list<SchoolRole>(c,"/iam/roles"),
@@ -86,7 +87,7 @@ export const schoolApi={
  userSessions:(c:Client,id:string)=>list<any>(c,`/iam/users/${id}/sessions`),
  revokeUserSession:(c:Client,id:string,sessionId:string)=>req<void>(c,`/iam/users/${id}/sessions/${sessionId}`,{method:"DELETE"}),
  loginHistory:(c:Client)=>list<any>(c,"/iam/login-history"),
- securityPolicy:(c:Client)=>req<any>(c,"/iam/security-policy"),
+ securityPolicy:(c:Client)=>optional(req<any>(c,"/iam/security-policy"),null),
  saveSecurityPolicy:(c:Client,body:any)=>req<any>(c,"/iam/security-policy",json("PUT",body)),
  bootstrapIam:(c:Client)=>req<any>(c,"/iam/bootstrap",json("POST",{})),
  files:(c:Client,limit=200)=>list<SchoolFile>(c,"/files/",{limit}),
