@@ -1,0 +1,31 @@
+{
+  "key": "mobile-sync",
+  "name": "Mobile Sync Core",
+  "version": "1.0.0",
+  "description": "Offline-first mobile synchronization, device grants, idempotent mutation ordering, conflict/version controls, tombstones, resumable pull cursors and recovery.",
+  "category": "platform",
+  "core": true,
+  "active": true,
+  "manifest": {
+    "standalone": true,
+    "backendOnly": true,
+    "protocolVersion": 1,
+    "offlineGrantDays": 400,
+    "features": [
+      "offline-device-grants",
+      "idempotent-batches",
+      "stable-client-uuids",
+      "record-versioning",
+      "ordered-mutations",
+      "duplicate-prevention",
+      "tombstones",
+      "dependency-aware-sync",
+      "partial-sync-recovery",
+      "retry-handling",
+      "per-collection-pull-cursors",
+      "schema-version-acknowledgements",
+      "audit-events",
+      "interrupted-sync-recovery"
+    ]
+  }
+}

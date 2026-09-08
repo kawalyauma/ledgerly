@@ -6,9 +6,10 @@ import { moduleDefinition as module3 } from "./communications/backend/module";
 import { moduleDefinition as module4 } from "./contacts/backend/module";
 import { moduleDefinition as module5 } from "./exams/backend/module";
 import { moduleDefinition as module6 } from "./human-resources/backend/module";
-import { moduleDefinition as module7 } from "./ledgerly/backend/module";
+import { moduleDefinition as module7 } from "./mobile-sync/backend/module";
 import { moduleDefinition as module8 } from "./payroll-payments/backend/module";
-import { moduleDefinition as module9 } from "./school/backend/module";
-import { moduleDefinition as module10 } from "./tasks-work/backend/module";
+import { moduleDefinition as module9 } from "./printerly/backend/module";
+import { moduleDefinition as module10 } from "./school/backend/module";
+import { moduleDefinition as module11 } from "./tasks-work/backend/module";
 
-export const backendModules = [module0, module1, module2, module3, module4, module5, module6, module7, module8, module9, module10].sort((a,b)=>(a.order ?? 100)-(b.order ?? 100)||a.name.localeCompare(b.name));
+export const backendModules = [module0, module1, module2, module3, module4, module5, module6, module7, module8, module9, module10, module11].sort((a,b)=>(a.order ?? 100)-(b.order ?? 100)||a.name.localeCompare(b.name));
