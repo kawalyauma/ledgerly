@@ -14,7 +14,7 @@ export function SchoolWorkspaceScreen({session,onSession,onBack}:{session:Mobile
  const[tab,setTab]=useState<Tab>("overview"),common={session,onSession};
  return <SafeAreaView style={s.root}><StatusBar barStyle="light-content" backgroundColor="#071c16"/>
   <View style={s.header}><TouchableOpacity style={s.back} onPress={onBack}><Text style={s.backText}>←</Text></TouchableOpacity><View style={{flex:1}}><Text style={s.eyebrow}>LEDGERLY MOBILE · MODULE 02</Text><Text style={s.title}>School Management</Text></View><View style={s.badge}><Text style={s.badgeText}>LIVE</Text></View></View>
-  <View style={s.body}>{tab==="overview"?<OverviewTab {...common} onOpenStudents={()=>setTab("students")} onOpenOperations={()=>setTab("operations")}/>:tab==="students"?<StudentsTab {...common}/>:tab==="staff"?<StaffTab {...common}/>:tab==="operations"?<OperationsTab {...common}/>:<AdminTab {...common}/>}</View>
+  <View style={s.body}>{tab==="overview"?<OverviewTab {...common}/>:tab==="students"?<StudentsTab {...common}/>:tab==="staff"?<StaffTab {...common}/>:tab==="operations"?<OperationsTab {...common}/>:<AdminTab {...common}/>}</View>
   <View style={s.nav}>{tabs.map(x=><TouchableOpacity key={x.id} style={s.navItem} onPress={()=>setTab(x.id)}><View style={[s.navIcon,tab===x.id&&s.navIconActive]}><Text style={[s.navIconText,tab===x.id&&s.navIconTextActive]}>{x.icon}</Text></View><Text style={[s.navText,tab===x.id&&s.navTextActive]}>{x.label}</Text></TouchableOpacity>)}</View>
  </SafeAreaView>
 }
