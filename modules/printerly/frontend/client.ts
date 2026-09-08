@@ -8,6 +8,9 @@ export type PrintJobOptions={
   pageSize?:"A4"|"A5"|"Letter"|"Legal";colorMode?:"monochrome"|"color";duplex?:boolean;
   projectId?:string|null;departmentType?:"finance"|"school"|null;departmentId?:string|null;sourceModule?:string|null;sourceReference?:string|null;
 };
+export type QuotaMetric={key:"impressions"|"sheets"|"cost";limit:number;used:number;request:number;projected:number;percent:number;exceeded:boolean};
+export type QuotaStatus={id:string;name:string;mode:"soft"|"hard";scope_type:string;scope_name?:string;warning_percent:number;periodKey:string;usage:{metrics:QuotaMetric[];peakPercent:number;warning:boolean;exceeded:boolean}};
+export type QuotaCheck={periodKey:string;requested:{impressions:number;sheets:number;costMinor:number};allowed:boolean;quotas:QuotaStatus[]};
 
 type UploadedDocument={id:string;originalName:string;mimeType:string;sizeBytes:number;checksum:string};
 
@@ -28,6 +31,11 @@ export async function sendBlobToPrinterly(blob:Blob,fileName:string,options:Prin
 export async function loadQuickPrintContext(){
   const[printers,costing]=await Promise.all([get<PrinterlyPrinter[]>("/printerly/printers"),get<CostingOptions>("/printerly/costing/options")]);
   return {printers,costing};
+}
+
+export async function checkPrinterlyQuota(options:PrintJobOptions){
+  return post<QuotaCheck>("/printerly/quotas/check",{copies:options.copies||1,estimatedPages:options.estimatedPages||1,colorMode:options.colorMode||"monochrome",duplex:Boolean(options.duplex),
+    projectId:options.projectId||null,departmentType:options.departmentType||null,departmentId:options.departmentId||null});
 }
 
 export function estimateCost(profile:CostProfile,pages:number,copies:number,duplex:boolean,colorMode:"monochrome"|"color"){

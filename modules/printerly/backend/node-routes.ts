@@ -5,6 +5,7 @@ import * as S from "./service";
 import * as Cost from "./costing";
 import * as Health from "./health";
 import * as Scan from "./scannerly";
+import * as Quota from "./quota";
 
 export const printerlyNodeRoutes=new Hono<{Bindings:Env;Variables:AppVariables}>();
 const json=async(c:any)=>c.req.json<Record<string,any>>().catch(()=>({}));
@@ -29,8 +30,8 @@ printerlyNodeRoutes.get("/node/jobs/:id/document",async c=>{
 printerlyNodeRoutes.post("/node/jobs/:id/status",async c=>{
   const node=await S.authenticateNode(c.env.FINANCE_DB,bearer(c)),body=await json(c),id=c.req.param("id"),result=await S.nodeJobStatus(c.env.FINANCE_DB,node,id,body);
   let costing=null;
-  if(String(body.status)==="completed")costing=await Cost.finalizeJobCost(c.env.FINANCE_DB,node.organization_id,id,body,node.id);
-  else if(String(body.status)==="failed")await Health.raiseJobFailure(c.env,node,id,String(body.errorMessage||"Printing failed"));
+  if(String(body.status)==="completed"){costing=await Cost.finalizeJobCost(c.env.FINANCE_DB,node.organization_id,id,body,node.id);await Quota.settleJob(c.env.FINANCE_DB,node.organization_id,id)}
+  else if(String(body.status)==="failed"){await Quota.releaseJob(c.env.FINANCE_DB,node.organization_id,id);await Health.raiseJobFailure(c.env,node,id,String(body.errorMessage||"Printing failed"))}
   return c.json({data:{...result,costing}});
 });
 
