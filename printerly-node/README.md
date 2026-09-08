@@ -9,33 +9,114 @@ Printerly Node turns a low-spec Linux computer beside a USB/LAN printer into an 
 - Node.js 20+
 - `printerly-node` agent
 - systemd auto-start/restart
-- local job working directory
+- private local state under `/var/lib/printerly`
+- read-only appliance configuration under `/etc/printerly`
+
+## Install
+
+From a checked-out Ledgerly repository:
+
+```bash
+sudo ./printerly-node/install.sh
+sudo nano /etc/printerly/config.json
+```
+
+Set `ledgerlyBaseUrl` to the public Ledgerly installation, for example:
+
+```json
+{
+  "ledgerlyBaseUrl": "https://ledgerly.example.com",
+  "pollIntervalMs": 3000,
+  "heartbeatIntervalMs": 15000,
+  "cupsStatusIntervalMs": 3000,
+  "printCompletionTimeoutMs": 1800000,
+  "workDir": "/var/lib/printerly/jobs"
+}
+```
+
+The installer deliberately keeps `/etc/printerly/config.json` read-only to the service and gives the `printerly` service account write access only to `/var/lib/printerly`.
 
 ## Pairing
 
 1. In Ledgerly open **Printerly → Pair node** and generate the six-digit code.
-2. Copy `config.example.json` to `/etc/printerly/config.json` and enter Ledgerly's public base URL and the pairing code.
-3. Start the service. The code is exchanged once for a long machine token and is not reused.
-4. The node discovers CUPS printers with `lpstat` and reports them to Ledgerly.
-
-## Install outline
+2. On the appliance run:
 
 ```bash
-sudo apt update
-sudo apt install -y cups nodejs
-sudo useradd --system --home /var/lib/printerly --shell /usr/sbin/nologin printerly || true
-sudo usermod -a -G lp printerly
-sudo mkdir -p /opt/printerly /etc/printerly /var/lib/printerly/jobs
-sudo cp -r printerly-node/src /opt/printerly/
-sudo cp printerly-node/config.example.json /etc/printerly/config.json
-sudo cp printerly-node/systemd/printerly-node.service /etc/systemd/system/
-sudo chown -R printerly:lp /etc/printerly /var/lib/printerly
-sudo systemctl daemon-reload
+sudo printerly-pair 684921
 sudo systemctl enable --now printerly-node
 ```
 
-The agent polls the secure cloud queue, downloads the assigned document, submits it through `lp`, reports lifecycle states, removes its temporary file, and then waits for the next job.
+3. Verify:
 
-## Idempotency
+```bash
+sudo systemctl status printerly-node
+journalctl -u printerly-node -f
+lpstat -p
+```
 
-A job is atomically claimed in D1 using a unique claim token before download. Node status updates must include that token. Reconnects cannot simply re-run a completed job; the cloud queue only offers jobs still in `queued` state.
+The pairing code is exchanged once for a long random machine token. The token is stored in `/var/lib/printerly/state.json` with owner-only permissions; the six-digit code is never stored in the long-lived appliance configuration.
+
+## Secure document flow
+
+Users upload printable documents to Ledgerly. The backend stores them in the existing private `WORK_FILES_BUCKET`; the browser never gives the Node a public document URL.
+
+A Node can download a document only when all of these match:
+
+- authenticated machine token
+- organization
+- node ID
+- print job ID
+- current job claim token
+
+The Node verifies the document SHA-256 before handing it to CUPS.
+
+## Print lifecycle
+
+```text
+queued / held
+    ↓
+claimed
+    ↓
+downloading
+    ↓
+spooling
+    ↓
+printing
+    ↓
+completed / failed
+```
+
+`lp` returning successfully means CUPS accepted a job; it does **not** mean the printer finished. Printerly therefore records the CUPS request ID and polls CUPS until completion before reporting the Ledgerly job as completed.
+
+## Duplicate protection
+
+Printerly favors **never printing twice automatically** over blindly retrying an uncertain job.
+
+- Cloud jobs are atomically claimed with a random claim token.
+- Only `claimed` and `downloading` jobs can be recovered automatically after an expired lease.
+- Once spooling may have started, the job is never returned to the cloud queue automatically.
+- The appliance persists its active job before submitting to CUPS.
+- If the computer restarts after CUPS may have received the job but before Printerly recorded the CUPS request ID, the cloud job is marked failed with an explicit manual-verification message rather than being printed again.
+- If the CUPS request ID was persisted, Printerly resumes watching that exact CUPS job after restart.
+
+This is intentional for high-volume jobs such as examinations, report cards, receipts and payroll where an automatic duplicate can waste hundreds of sheets.
+
+## Supported upload formats
+
+The first hardened node accepts PDF, PNG, JPEG and plain text. PDF is recommended because it gives the most predictable page layout across printer models. Convert Word/Excel documents to PDF before submitting them.
+
+## Useful operations
+
+```bash
+# Restart the appliance agent
+sudo systemctl restart printerly-node
+
+# Watch logs
+journalctl -u printerly-node -f
+
+# See configured printers
+lpstat -p
+
+# See CUPS jobs
+lpstat -o
+```

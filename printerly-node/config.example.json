@@ -1,7 +1,8 @@
 {
   "ledgerlyBaseUrl": "https://your-ledgerly.example.com",
-  "pairingCode": "000000",
   "pollIntervalMs": 3000,
   "heartbeatIntervalMs": 15000,
+  "cupsStatusIntervalMs": 3000,
+  "printCompletionTimeoutMs": 1800000,
   "workDir": "/var/lib/printerly/jobs"
 }

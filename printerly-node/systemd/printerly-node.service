@@ -6,16 +6,19 @@ Wants=network-online.target cups.service
 [Service]
 Type=simple
 User=printerly
-Group=lp
-Environment=PRINTERLY_HOME=/etc/printerly
+Group=printerly
+SupplementaryGroups=lp
 Environment=PRINTERLY_CONFIG=/etc/printerly/config.json
+Environment=PRINTERLY_STATE_DIR=/var/lib/printerly
 ExecStart=/usr/bin/node /opt/printerly/src/agent.mjs
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/etc/printerly /var/lib/printerly
+ProtectHome=true
+ReadOnlyPaths=/etc/printerly
+ReadWritePaths=/var/lib/printerly
 
 [Install]
 WantedBy=multi-user.target
