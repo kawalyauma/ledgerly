@@ -1,0 +1,9 @@
+export type HrDashboard={employees:number;activeEmployees:number;departments:number;pendingLeave:number;pendingOnboarding:number};
+export type HrManifest={key:string;name:string;version:string;enabledModules:Array<{key:string;name:string}>;features:string[]};
+export type HrPerson={sourceModule:string;sourceType:string;sourceId:string;userId?:string|null;contactId?:string|null;schoolStaffId?:string|null;code?:string|null;name:string;email?:string|null;phone?:string|null;hrEmployeeId?:string|null};
+export type HrDepartment={id:string;code:string;name:string;managerEmployeeId?:string|null;active:boolean};
+export type HrEmployee={id:string;userId?:string|null;contactId?:string|null;schoolStaffId?:string|null;departmentId?:string|null;employeeNumber:string;jobTitle?:string|null;employmentType:string;employmentStatus:string;hireDate:string;terminationDate?:string|null;managerEmployeeId?:string|null;workEmail?:string|null;workPhone?:string|null;name?:string|null;email?:string|null;phone?:string|null;departmentName?:string|null;managerNumber?:string|null;metadata?:Record<string,unknown>;createdAt?:string;updatedAt?:string};
+export type HrLeaveType={id:string;code:string;name:string;paid:boolean;annualDays:number;active:boolean};
+export type HrLeaveRequest={id:string;employeeId:string;employeeNumber?:string;employeeName?:string;leaveType?:string;startsOn:string;endsOn:string;days:number;reason?:string|null;status:string;reviewNotes?:string|null;createdAt?:string};
+export type HrOnboardingTask={id:string;employeeId:string;employeeNumber?:string;title:string;dueDate?:string|null;status:string;assignedUserId?:string|null;completedAt?:string|null;createdAt?:string;updatedAt?:string};
+export type HrAuditEntry={id:string;action:string;entityType:string;entityId:string;actorName?:string|null;after?:Record<string,unknown>|null;createdAt:string};
