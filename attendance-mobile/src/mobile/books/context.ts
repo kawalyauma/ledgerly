@@ -1,0 +1,10 @@
+import type {BookReference,BookType,StockRow} from "./types";
+export const localDate=()=>{const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`};
+export const opts=(items:any[]=[])=>items.map(x=>({label:String(x.name||x.code||x.id),value:String(x.id),detail:x.code||undefined}));
+export const termsFor=(r:BookReference|null,yearId:string)=>(r?.terms||[]).filter(x=>!yearId||x.academicYearId===yearId||x.academic_year_id===yearId);
+export const classesFor=(r:BookReference|null,yearId:string)=>(r?.classes||[]).filter(x=>!yearId||x.academicYearId===yearId||x.academic_year_id===yearId);
+export const streamsFor=(r:BookReference|null,classId:string)=>(r?.streams||[]).filter(x=>!classId||x.classId===classId||x.class_id===classId);
+export const defaultPeriod=(r:BookReference|null)=>({yearId:r?.current?.year?.id||r?.years?.[0]?.id||"",termId:r?.current?.term?.id||""});
+export const typeLabel=(t:BookType)=>t==="a4"?"A4 books":"Small books";
+export const stockFor=(rows:StockRow[],type:BookType)=>rows.find(x=>x.bookType===type)||{bookType:type,stockIn:0,issued:0,available:0};
+export const err=(e:any)=>e?.message||"Request failed. Check your network and permissions.";

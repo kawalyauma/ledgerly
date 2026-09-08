@@ -1,0 +1,14 @@
+export type BookType="small"|"a4";
+export type BookReference={bookTypes:BookType[];years:any[];terms:any[];classes:any[];streams:any[];current:{year?:{id:string;name:string}|null;term?:{id:string;name:string;academicYearId:string}|null}};
+export type BookStudent={id:string;admissionNumber?:string;studentNumber?:string;name:string;academicYearId?:string|null;classId?:string|null;streamId?:string|null;className?:string|null;streamName?:string|null};
+export type StockRow={bookType:BookType;stockIn:number;issued:number;available:number};
+export type StockMovement={id:string;bookType:BookType;movementType:"receipt"|"adjustment";quantityDelta:number;movementOn:string;referenceText?:string|null;notes?:string|null;recordedBy?:string;recordedByName?:string;reversedAt?:string|null;reversalReason?:string|null;createdAt?:string};
+export type Distribution={id:string;studentId:string;academicYearId?:string|null;termId?:string|null;classId?:string|null;streamId?:string|null;batchId?:string|null;bookType:BookType;quantity:number;distributedOn:string;source:"individual"|"bulk";notes?:string|null;distributedBy?:string;distributedByName?:string;reversedAt?:string|null;reversalReason?:string|null;createdAt?:string;studentName:string;admissionNumber?:string|null;studentNumber?:string|null;className?:string|null;streamName?:string|null;academicYearName?:string|null;termName?:string|null};
+export type DistributionBatch={id:string;bookType:BookType;quantityPerLearner:number;learnerCount:number;totalQuantity:number;distributedOn:string;notes?:string|null;reversedAt?:string|null;className?:string|null;streamName?:string|null;termName?:string|null;academicYearName?:string|null};
+export type Paged<T>={rows:T[];total:number;limit:number;offset:number};
+export type BooksOverview={stock:StockRow[];totalIssued:number;transactions:number;learnersServed:number;currentTermIssued:number;currentTermLearners:number;current:{year?:any;term?:any};recent:Distribution[]};
+export type LearnerReport={student:{id:string;admissionNumber?:string;studentNumber?:string;name:string;currentClassName?:string|null;currentStreamName?:string|null};totals:{small:number;a4:number;total:number};transactions:Distribution[]};
+export type ClassReportRow={studentId:string;admissionNumber?:string;studentNumber?:string;studentName:string;className:string;streamName?:string|null;small:number;a4:number;total:number;lastIssuedOn?:string|null};
+export type ClassReport={rows:ClassReportRow[];totals:{learners:number;learnersServed:number;small:number;a4:number;total:number}};
+export type UnissuedReport={rows:ClassReportRow[];total:number;classLearners:number;served:number};
+export type PeriodReport={byType:Array<{bookType:BookType;quantity:number;transactions:number;learners:number}>;byClass:Array<{classId:string;className?:string;streamId?:string;streamName?:string;quantity:number;learners:number}>;byDay:Array<{date:string;quantity:number;transactions:number;learners:number}>};

@@ -23,6 +23,21 @@ export async function ledgerlyRequest<T>(session:MobileSession,path:string,init:
   }
   return decode<T>(response);
 }
+export async function ledgerlyTextRequest(session:MobileSession,path:string,init:RequestInit={},onSession?:SessionUpdater,retry=true):Promise<string>{
+  const headers={Accept:"text/plain,text/csv,*/*",...(init.headers||{}),Authorization:`Bearer ${session.accessToken}`};
+  let response:Response;
+  try{response=await fetch(`${apiBase(session.apiUrl)}/api/v1${path}`,{...init,headers})}
+  catch{throw new MobileApiError(0,"NETWORK_ERROR","Unable to reach Ledgerly. Check your network and retry.")}
+  if(response.status===401&&retry){
+    const renewed=await refreshMobile(session);
+    await saveMobileSession(renewed);
+    await onSession?.(renewed);
+    return ledgerlyTextRequest(renewed,path,init,onSession,false);
+  }
+  const text=await response.text();
+  if(!response.ok){let payload:ErrorPayload={};try{payload=JSON.parse(text)}catch{}throw new MobileApiError(response.status,payload.error?.code||"REQUEST_FAILED",payload.error?.message||`Request failed (${response.status})`,payload.error?.details)}
+  return text;
+}
 export function query(params:Record<string,string|number|boolean|undefined|null>){
   const entries=Object.entries(params).filter(([,v])=>v!==undefined&&v!==null&&String(v)!=="");
   return entries.length?`?${entries.map(([k,v])=>`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&")}`:"";
