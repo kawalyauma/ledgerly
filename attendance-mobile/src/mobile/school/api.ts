@@ -9,7 +9,7 @@ const list=<T>(c:Client,path:string,params:Record<string,any>={})=>req<T[]>(c,`$
 
 export const schoolApi={
  profile:(c:Client)=>req<SchoolProfile|null>(c,"/setup/profile"),
- saveProfile:(c:Client,body:any)=>req<SchoolProfile>(c,"/setup/profile",json("PUT",body)),
+ saveProfile:async(c:Client,body:any)=>{const current=await req<SchoolProfile|null>(c,"/setup/profile");const preserved={logoUrl:current?.logoUrl??null,logoFileId:current?.logoFileId??null,postalAddress:current?.postalAddress??null,locationText:current?.locationText??null,language:current?.language||"en",dateFormat:current?.dateFormat||"DD/MM/YYYY",timeFormat:current?.timeFormat||"24h",multiCampusEnabled:Boolean(current?.multiCampusEnabled),branding:current?.branding||{},systemPreferences:current?.systemPreferences||{}};return req<SchoolProfile>(c,"/setup/profile",json("PUT",{...body,...preserved}))},
  bootstrapStatus:(c:Client)=>req<BootstrapStatus>(c,"/setup/bootstrap/status"),
  restoreDefaults:(c:Client)=>req<any>(c,"/setup/bootstrap/defaults",json("POST",{})),
  setupList:(c:Client,key:SetupKey,params:Record<string,any>={limit:500})=>list<any>(c,`/setup/${key}`,params),
