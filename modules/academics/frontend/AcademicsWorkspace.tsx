@@ -61,6 +61,7 @@ type Setup = {
   teachers: R[];
   rooms: R[];
   periods: R[];
+  teacherAllocations: R[];
 };
 const DAYS = [
   "Monday",
@@ -210,7 +211,7 @@ function PeriodClassFields({
                 setYearId(e.target.value);
                 setClassId("");
               }}
-          required={classRequired}
+              required
             >
               <option value="">Select…</option>
               {setup.years.map((x) => (
@@ -232,7 +233,7 @@ function PeriodClassFields({
               name="class"
               value={classId}
               onChange={(e) => setClassId(e.target.value)}
-              required
+              required={classRequired}
             >
               <option value="">Select…</option>
               {classes.map((x) => (
@@ -247,6 +248,156 @@ function PeriodClassFields({
           </Field>
         </>
       )}
+    </>
+  );
+}
+function TeachingFields({
+  setup,
+  fixedYearId = "",
+  period = true,
+}: {
+  setup: Setup;
+  fixedYearId?: string;
+  period?: boolean;
+}) {
+  const [yearId, setYearId] = useState(fixedYearId || currentYear(setup)),
+    [termId, setTermId] = useState(""),
+    [classId, setClassId] = useState(""),
+    [streamId, setStreamId] = useState(""),
+    [subjectId, setSubjectId] = useState(""),
+    [teacherId, setTeacherId] = useState("");
+  useEffect(() => {
+    if (fixedYearId && fixedYearId !== yearId) {
+      setYearId(fixedYearId);
+      setClassId("");
+      setStreamId("");
+    }
+  }, [fixedYearId, yearId]);
+  useEffect(() => {
+    const a = setup.teacherAllocations.find(
+      (x) =>
+        x.classId === classId &&
+        x.subjectId === subjectId &&
+        (!x.academicYearId || x.academicYearId === yearId) &&
+        (!x.termId || x.termId === termId) &&
+        (!x.streamId || x.streamId === streamId),
+    );
+    setTeacherId(a?.teacherUserId || "");
+  }, [setup.teacherAllocations, yearId, termId, classId, streamId, subjectId]);
+  const terms = setup.terms.filter(
+      (x) => !yearId || x.academicYearId === yearId,
+    ),
+    classes = setup.classes.filter(
+      (x) => !yearId || x.academicYearId === yearId,
+    ),
+    streams = setup.streams.filter((x) => x.classId === classId);
+  return (
+    <>
+      {period && (
+        <>
+          <Field label="Academic year">
+            <select
+              name="year"
+              value={yearId}
+              required
+              onChange={(e) => {
+                setYearId(e.target.value);
+                setTermId("");
+                setClassId("");
+                setStreamId("");
+              }}
+            >
+              <option value="">Select…</option>
+              {setup.years.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Term">
+            <select
+              name="term"
+              value={termId}
+              required
+              onChange={(e) => setTermId(e.target.value)}
+            >
+              <option value="">Select…</option>
+              {terms.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </>
+      )}
+      <Field label="Class">
+        <select
+          name="class"
+          value={classId}
+          required
+          onChange={(e) => {
+            setClassId(e.target.value);
+            setStreamId("");
+          }}
+        >
+          <option value="">Select…</option>
+          {classes.map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Stream">
+        <select
+          name="stream"
+          value={streamId}
+          onChange={(e) => setStreamId(e.target.value)}
+        >
+          <option value="">All streams</option>
+          {streams.map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Subject">
+        <select
+          name="subject"
+          value={subjectId}
+          required
+          onChange={(e) => setSubjectId(e.target.value)}
+        >
+          <option value="">Select…</option>
+          {setup.subjects.map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Teacher">
+        <select
+          name="teacher"
+          value={teacherId}
+          required
+          onChange={(e) => setTeacherId(e.target.value)}
+        >
+          <option value="">
+            {classId && subjectId
+              ? "No allocation — select teacher"
+              : "Select class and subject first"}
+          </option>
+          {setup.teachers.map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.name}
+            </option>
+          ))}
+        </select>
+      </Field>
     </>
   );
 }
@@ -535,6 +686,7 @@ function useSetup() {
     teachers: [],
     rooms: [],
     periods: [],
+    teacherAllocations: [],
   });
 }
 function Timetables() {
@@ -586,6 +738,9 @@ function Timetables() {
               onClick={() => setModal("availability")}
             >
               <Users size={15} /> Availability
+            </Button>
+            <Button variant="secondary" onClick={() => setModal("allocations")}>
+              <BookOpenCheck size={15} /> Teacher allocations
             </Button>
             <Button onClick={() => setModal("timetable")}>
               <Plus size={15} /> New timetable
@@ -772,17 +927,11 @@ function Timetables() {
           }}
         >
           <div className="acad-form-grid">
-            <PeriodClassFields
+            <TeachingFields
               setup={setup.data}
               period={false}
               fixedYearId={table?.academicYearId}
             />
-            <Field label="Subject">
-              <Select name="subject" items={setup.data.subjects} required />
-            </Field>
-            <Field label="Teacher">
-              <Select name="teacher" items={setup.data.teachers} required />
-            </Field>
             <Field label="Department">
               <Select name="department" items={setup.data.departments} />
             </Field>
@@ -835,6 +984,15 @@ function Timetables() {
       )}
       {modal === "availability" && (
         <AvailabilityModal setup={setup.data} close={() => setModal(null)} />
+      )}{" "}
+      {modal === "allocations" && (
+        <TeacherAllocationsModal
+          setup={setup.data}
+          close={() => {
+            setModal(null);
+            void setup.load();
+          }}
+        />
       )}{" "}
       {modal === "change" && (
         <ChangeModal
@@ -1057,6 +1215,179 @@ function AvailabilityModal({
     </Modal>
   );
 }
+function TeacherAllocationsModal({
+  setup,
+  close,
+}: {
+  setup: Setup;
+  close: () => void;
+}) {
+  const [rows, setRows] = useState(setup.teacherAllocations),
+    [yearId, setYearId] = useState(currentYear(setup)),
+    [termId, setTermId] = useState(""),
+    [classId, setClassId] = useState(""),
+    [streamId, setStreamId] = useState(""),
+    [subjectId, setSubjectId] = useState(""),
+    [staffId, setStaffId] = useState("");
+  const terms = setup.terms.filter((x) => x.academicYearId === yearId),
+    classes = setup.classes.filter((x) => x.academicYearId === yearId),
+    streams = setup.streams.filter((x) => x.classId === classId);
+  return (
+    <Modal title="Teacher subject allocations" onClose={close}>
+      <div className="acad-modal-body">
+        <p className="acad-help">
+          Allocate each School Management teacher to a class and subject.
+          Academics will auto-fill that teacher in timetables, schemes and
+          lesson plans.
+        </p>
+        <form
+          className="acad-form-grid"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            await post(`${base}/teacher-allocations`, {
+              staffId,
+              academicYearId: yearId,
+              termId: termId || null,
+              classId,
+              streamId: streamId || null,
+              subjectId,
+            });
+            const fresh = await get<R[]>(`${base}/teacher-allocations`);
+            setRows(fresh);
+            setSubjectId("");
+          }}
+        >
+          <Field label="Academic year">
+            <select
+              value={yearId}
+              onChange={(e) => {
+                setYearId(e.target.value);
+                setTermId("");
+                setClassId("");
+              }}
+              required
+            >
+              {setup.years.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Term">
+            <select value={termId} onChange={(e) => setTermId(e.target.value)}>
+              <option value="">All terms</option>
+              {terms.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Class">
+            <select
+              value={classId}
+              onChange={(e) => {
+                setClassId(e.target.value);
+                setStreamId("");
+              }}
+              required
+            >
+              <option value="">Select…</option>
+              {classes.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Stream">
+            <select
+              value={streamId}
+              onChange={(e) => setStreamId(e.target.value)}
+            >
+              <option value="">All streams</option>
+              {streams.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Subject">
+            <select
+              value={subjectId}
+              onChange={(e) => setSubjectId(e.target.value)}
+              required
+            >
+              <option value="">Select…</option>
+              {setup.subjects.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Teacher">
+            <select
+              value={staffId}
+              onChange={(e) => setStaffId(e.target.value)}
+              required
+            >
+              <option value="">Select…</option>
+              {setup.teachers.map((x) => (
+                <option key={x.staffId} value={x.staffId}>
+                  {x.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Button type="submit">Add allocation</Button>
+        </form>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Teacher</th>
+                <th>Class</th>
+                <th>Subject</th>
+                <th>Term</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((x) => (
+                <tr key={x.id}>
+                  <td>{x.teacherName}</td>
+                  <td>
+                    {x.className}
+                    {x.streamName ? ` · ${x.streamName}` : ""}
+                  </td>
+                  <td>{x.subjectName}</td>
+                  <td>
+                    {setup.terms.find((t) => t.id === x.termId)?.name ||
+                      "All terms"}
+                  </td>
+                  <td>
+                    <button
+                      className="acad-link"
+                      onClick={async () => {
+                        await del(`${base}/teacher-allocations/${x.id}`);
+                        setRows(rows.filter((r) => r.id !== x.id));
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 function ChangeModal({
   entry,
   setup,
@@ -1236,13 +1567,7 @@ function Schemes() {
           }}
         >
           <div className="acad-form-grid">
-            <PeriodClassFields setup={setup.data} />
-            <Field label="Subject">
-              <Select name="subject" items={setup.data.subjects} required />
-            </Field>
-            <Field label="Teacher">
-              <Select name="teacher" items={setup.data.teachers} required />
-            </Field>
+            <TeachingFields setup={setup.data} />
           </div>
           <Field label="Title">
             <input
@@ -1648,13 +1973,7 @@ function LessonPlanForm({
       }}
     >
       <div className="acad-form-grid">
-        <PeriodClassFields setup={setup} />
-        <Field label="Subject">
-          <Select name="subject" items={setup.subjects} required />
-        </Field>
-        <Field label="Teacher">
-          <Select name="teacher" items={setup.teachers} required />
-        </Field>
+        <TeachingFields setup={setup} />
         <Field label="Template">
           <Select name="template" items={templates} />
         </Field>
@@ -1992,7 +2311,11 @@ function Supervision() {
             <Select name="teacher" items={setup.data.teachers} required />
           </Field>
           <div className="acad-form-grid">
-            <PeriodClassFields setup={setup.data} period={false} classRequired={false} />
+            <PeriodClassFields
+              setup={setup.data}
+              period={false}
+              classRequired={false}
+            />
             <Field label="Subject">
               <Select name="subject" items={setup.data.subjects} />
             </Field>
@@ -2192,7 +2515,11 @@ function Inspections() {
             <Field label="Teacher">
               <Select name="teacher" items={setup.data.teachers} />
             </Field>
-            <PeriodClassFields setup={setup.data} period={false} classRequired={false} />
+            <PeriodClassFields
+              setup={setup.data}
+              period={false}
+              classRequired={false}
+            />
             <Field label="Subject">
               <Select name="subject" items={setup.data.subjects} />
             </Field>

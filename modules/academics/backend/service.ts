@@ -2,93 +2,1629 @@
 import { AppError } from "../../../src/lib/errors";
 import { createId } from "../../../src/lib/ids";
 
-const rows = async (s:any) => (await s.all()).results as any[];
-const one = async (s:any) => await s.first() as any;
-const bool = (v:any)=>v===true||v===1||v==="1";
-const text = (v:any)=>v==null?null:String(v).trim()||null;
-const now=()=>new Date().toISOString();
+const rows = async (s: any) => (await s.all()).results as any[];
+const one = async (s: any) => (await s.first()) as any;
+const bool = (v: any) => v === true || v === 1 || v === "1";
+const text = (v: any) => (v == null ? null : String(v).trim() || null);
+const now = () => new Date().toISOString();
 
-async function owned(db:D1Database,table:string,id:string,org:string,label:string){
-  const allowed=new Set(["acad_rooms","acad_timetables","acad_timetable_entries","acad_schemes","acad_scheme_items","acad_lesson_plans","acad_lesson_plan_templates","acad_lesson_deliveries","acad_observations","acad_inspections"]);
-  if(!allowed.has(table))throw new Error("Unsafe table");
-  const x=await one(db.prepare(`SELECT * FROM ${table} WHERE id=? AND organization_id=?`).bind(id,org));
-  if(!x)throw new AppError(404,"NOT_FOUND",`${label} not found`);return x;
+async function owned(
+  db: D1Database,
+  table: string,
+  id: string,
+  org: string,
+  label: string,
+) {
+  const allowed = new Set([
+    "acad_rooms",
+    "acad_timetables",
+    "acad_timetable_entries",
+    "acad_schemes",
+    "acad_scheme_items",
+    "acad_lesson_plans",
+    "acad_lesson_plan_templates",
+    "acad_lesson_deliveries",
+    "acad_observations",
+    "acad_inspections",
+  ]);
+  if (!allowed.has(table)) throw new Error("Unsafe table");
+  const x = await one(
+    db
+      .prepare(`SELECT * FROM ${table} WHERE id=? AND organization_id=?`)
+      .bind(id, org),
+  );
+  if (!x) throw new AppError(404, "NOT_FOUND", `${label} not found`);
+  return x;
 }
-export async function setup(db:D1Database,org:string){
- const [years,terms,departments,classes,streams,subjects,teachers,rooms,periods]=await Promise.all([
-  rows(db.prepare("SELECT id,code,name,is_current AS isCurrent,status FROM school_academic_years WHERE organization_id=? ORDER BY starts_on DESC").bind(org)),
-  rows(db.prepare("SELECT id,academic_year_id AS academicYearId,code,name,sequence_no AS sequenceNo,is_current AS isCurrent,status FROM school_terms WHERE organization_id=? ORDER BY starts_on DESC").bind(org)),
-  rows(db.prepare("SELECT id,code,name,head_user_id AS headUserId FROM school_departments WHERE organization_id=? AND active=1 ORDER BY name").bind(org)),
-  rows(db.prepare(`SELECT c.id,c.name,c.code,c.academic_year_id AS academicYearId,c.department_id AS departmentId,l.name AS levelName,l.code AS levelCode FROM school_classes c JOIN school_class_levels l ON l.id=c.class_level_id WHERE c.organization_id=? AND c.active=1 ORDER BY l.sequence_no,c.name`).bind(org)),
-  rows(db.prepare("SELECT id,class_id AS classId,name,code FROM school_streams WHERE organization_id=? AND active=1 ORDER BY name").bind(org)),
-  rows(db.prepare("SELECT id,code,name,short_name AS shortName,department_id AS departmentId FROM school_subjects WHERE organization_id=? AND active=1 ORDER BY name").bind(org)),
-  rows(db.prepare(`SELECT sp.user_id AS id,sp.id AS staffId,sp.staff_number AS staffNumber,TRIM(sp.first_name||' '||COALESCE(sp.middle_name||' ','')||sp.last_name) AS name,sp.department_id AS departmentId FROM school_staff_profiles sp WHERE sp.organization_id=? AND sp.is_teacher=1 AND sp.employment_status='active' AND sp.deleted_at IS NULL AND sp.user_id IS NOT NULL ORDER BY sp.first_name,sp.last_name`).bind(org)),
-  rows(db.prepare("SELECT id,code,name,capacity,room_type AS roomType,location_text AS locationText,active FROM acad_rooms WHERE organization_id=? AND active=1 ORDER BY name").bind(org)),
-  rows(db.prepare("SELECT id,code,name,sequence_no AS sequenceNo,starts_at AS startsAt,ends_at AS endsAt,period_type AS periodType,teaching_period AS teachingPeriod FROM school_lesson_periods WHERE organization_id=? AND active=1 ORDER BY sequence_no").bind(org))
- ]);return{years,terms,departments,classes,streams,subjects,teachers,rooms,periods};
+export async function setup(db: D1Database, org: string) {
+  const unlinked = await rows(
+    db
+      .prepare(
+        `SELECT sp.id,sp.first_name,sp.middle_name,sp.last_name FROM school_staff_profiles sp LEFT JOIN school_staff_positions pos ON pos.id=sp.position_id WHERE sp.organization_id=? AND sp.employment_status='active' AND sp.deleted_at IS NULL AND sp.user_id IS NULL AND (sp.is_teacher=1 OR LOWER(COALESCE(pos.name,'')) LIKE '%teacher%')`,
+      )
+      .bind(org),
+  );
+  for (const sp of unlinked) {
+    const userId = createId("usr"),
+      name = [sp.first_name, sp.middle_name, sp.last_name]
+        .filter(Boolean)
+        .join(" ");
+    await db.batch([
+      db
+        .prepare("INSERT INTO users(id,email,display_name) VALUES (?,?,?)")
+        .bind(userId, `teacher-${sp.id}@ledgerly.local`, name),
+      db
+        .prepare(
+          "UPDATE school_staff_profiles SET user_id=?,is_teacher=1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND user_id IS NULL",
+        )
+        .bind(userId, sp.id, org),
+    ]);
+  }
+  const [
+    years,
+    terms,
+    departments,
+    classes,
+    streams,
+    subjects,
+    teachers,
+    rooms,
+    periods,
+    teacherAllocations,
+  ] = await Promise.all([
+    rows(
+      db
+        .prepare(
+          "SELECT id,code,name,is_current AS isCurrent,status FROM school_academic_years WHERE organization_id=? ORDER BY starts_on DESC",
+        )
+        .bind(org),
+    ),
+    rows(
+      db
+        .prepare(
+          "SELECT id,academic_year_id AS academicYearId,code,name,sequence_no AS sequenceNo,is_current AS isCurrent,status FROM school_terms WHERE organization_id=? ORDER BY starts_on DESC",
+        )
+        .bind(org),
+    ),
+    rows(
+      db
+        .prepare(
+          "SELECT id,code,name,head_user_id AS headUserId FROM school_departments WHERE organization_id=? AND active=1 ORDER BY name",
+        )
+        .bind(org),
+    ),
+    rows(
+      db
+        .prepare(
+          `SELECT c.id,c.name,c.code,c.academic_year_id AS academicYearId,c.department_id AS departmentId,l.name AS levelName,l.code AS levelCode FROM school_classes c JOIN school_class_levels l ON l.id=c.class_level_id WHERE c.organization_id=? AND c.active=1 ORDER BY l.sequence_no,c.name`,
+        )
+        .bind(org),
+    ),
+    rows(
+      db
+        .prepare(
+          "SELECT id,class_id AS classId,name,code FROM school_streams WHERE organization_id=? AND active=1 ORDER BY name",
+        )
+        .bind(org),
+    ),
+    rows(
+      db
+        .prepare(
+          "SELECT id,code,name,short_name AS shortName,department_id AS departmentId FROM school_subjects WHERE organization_id=? AND active=1 ORDER BY name",
+        )
+        .bind(org),
+    ),
+    rows(
+      db
+        .prepare(
+          `SELECT sp.user_id AS id,sp.id AS staffId,sp.staff_number AS staffNumber,TRIM(sp.first_name||' '||COALESCE(sp.middle_name||' ','')||sp.last_name) AS name,sp.department_id AS departmentId FROM school_staff_profiles sp WHERE sp.organization_id=? AND sp.is_teacher=1 AND sp.employment_status='active' AND sp.deleted_at IS NULL AND sp.user_id IS NOT NULL ORDER BY sp.first_name,sp.last_name`,
+        )
+        .bind(org),
+    ),
+    rows(
+      db
+        .prepare(
+          "SELECT id,code,name,capacity,room_type AS roomType,location_text AS locationText,active FROM acad_rooms WHERE organization_id=? AND active=1 ORDER BY name",
+        )
+        .bind(org),
+    ),
+    rows(
+      db
+        .prepare(
+          "SELECT id,code,name,sequence_no AS sequenceNo,starts_at AS startsAt,ends_at AS endsAt,period_type AS periodType,teaching_period AS teachingPeriod FROM school_lesson_periods WHERE organization_id=? AND active=1 ORDER BY sequence_no",
+        )
+        .bind(org),
+    ),
+    listTeacherAllocations(db, org),
+  ]);
+  return {
+    years,
+    terms,
+    departments,
+    classes,
+    streams,
+    subjects,
+    teachers,
+    rooms,
+    periods,
+    teacherAllocations,
+  };
 }
-export async function overview(db:D1Database,org:string){
- const q=async(sql:string)=>Number((await one(db.prepare(sql).bind(org)))?.n||0);
- const [timetables,schemes,plans,deliveries,observations,inspections]=await Promise.all([
-  q("SELECT COUNT(*) n FROM acad_timetables WHERE organization_id=? AND status IN ('draft','submitted','approved','published')"),q("SELECT COUNT(*) n FROM acad_schemes WHERE organization_id=? AND status<>'archived'"),q("SELECT COUNT(*) n FROM acad_lesson_plans WHERE organization_id=? AND status<>'delivered'"),q("SELECT COUNT(*) n FROM acad_lesson_deliveries WHERE organization_id=? AND scheduled_date=date('now')"),q("SELECT COUNT(*) n FROM acad_observations WHERE organization_id=? AND status NOT IN ('closed')"),q("SELECT COUNT(*) n FROM acad_inspections WHERE organization_id=? AND status<>'closed'")]);
- const coverage=await one(db.prepare("SELECT ROUND(AVG(coverage_percent),1) pct FROM acad_schemes WHERE organization_id=? AND status<>'archived'").bind(org));
- return{timetables,schemes,lessonPlans:plans,todaysLessons:deliveries,openObservations:observations,openInspections:inspections,averageCoverage:Number(coverage?.pct||0)};
+export const listTeacherAllocations = (db: D1Database, org: string) =>
+  rows(
+    db
+      .prepare(
+        `SELECT a.id,a.staff_id AS staffId,sp.user_id AS teacherUserId,TRIM(sp.first_name||' '||COALESCE(sp.middle_name||' ','')||sp.last_name) teacherName,a.academic_year_id AS academicYearId,a.term_id AS termId,a.class_id AS classId,c.name className,a.stream_id AS streamId,st.name streamName,a.subject_id AS subjectId,s.name subjectName,a.active FROM school_staff_teaching_assignments a JOIN school_staff_profiles sp ON sp.id=a.staff_id JOIN school_classes c ON c.id=a.class_id JOIN school_subjects s ON s.id=a.subject_id LEFT JOIN school_streams st ON st.id=a.stream_id WHERE a.organization_id=? AND a.active=1 ORDER BY teacherName,c.name,s.name`,
+      )
+      .bind(org),
+  );
+export async function createTeacherAllocation(
+  db: D1Database,
+  org: string,
+  userId: string,
+  d: any,
+) {
+  const teacher = await one(
+    db
+      .prepare(
+        "SELECT id,user_id FROM school_staff_profiles WHERE id=? AND organization_id=? AND is_teacher=1 AND employment_status='active' AND deleted_at IS NULL",
+      )
+      .bind(d.staffId, org),
+  );
+  if (!teacher?.user_id)
+    throw new AppError(
+      422,
+      "INVALID_TEACHER",
+      "Choose an active teacher from School Management",
+    );
+  const existing = await one(
+    db
+      .prepare(
+        "SELECT id FROM school_staff_teaching_assignments WHERE organization_id=? AND staff_id=? AND IFNULL(academic_year_id,'')=IFNULL(?,'') AND IFNULL(term_id,'')=IFNULL(?,'') AND class_id=? AND IFNULL(stream_id,'')=IFNULL(?,'') AND subject_id=?",
+      )
+      .bind(
+        org,
+        d.staffId,
+        text(d.academicYearId),
+        text(d.termId),
+        d.classId,
+        text(d.streamId),
+        d.subjectId,
+      ),
+  );
+  if (existing) {
+    await db
+      .prepare(
+        "UPDATE school_staff_teaching_assignments SET active=1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+      )
+      .bind(existing.id, org)
+      .run();
+    return { id: existing.id };
+  }
+  const id = createId("tas");
+  await db
+    .prepare(
+      "INSERT INTO school_staff_teaching_assignments(id,organization_id,staff_id,academic_year_id,term_id,class_id,stream_id,subject_id,assignment_role,active,created_by) VALUES(?,?,?,?,?,?,?,?, 'teacher',1,?)",
+    )
+    .bind(
+      id,
+      org,
+      d.staffId,
+      text(d.academicYearId),
+      text(d.termId),
+      d.classId,
+      text(d.streamId),
+      d.subjectId,
+      userId,
+    )
+    .run();
+  return { id };
+}
+export const deleteTeacherAllocation = (
+  db: D1Database,
+  org: string,
+  id: string,
+) =>
+  db
+    .prepare(
+      "UPDATE school_staff_teaching_assignments SET active=0,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+    )
+    .bind(id, org)
+    .run();
+export async function overview(db: D1Database, org: string) {
+  const q = async (sql: string) =>
+    Number((await one(db.prepare(sql).bind(org)))?.n || 0);
+  const [timetables, schemes, plans, deliveries, observations, inspections] =
+    await Promise.all([
+      q(
+        "SELECT COUNT(*) n FROM acad_timetables WHERE organization_id=? AND status IN ('draft','submitted','approved','published')",
+      ),
+      q(
+        "SELECT COUNT(*) n FROM acad_schemes WHERE organization_id=? AND status<>'archived'",
+      ),
+      q(
+        "SELECT COUNT(*) n FROM acad_lesson_plans WHERE organization_id=? AND status<>'delivered'",
+      ),
+      q(
+        "SELECT COUNT(*) n FROM acad_lesson_deliveries WHERE organization_id=? AND scheduled_date=date('now')",
+      ),
+      q(
+        "SELECT COUNT(*) n FROM acad_observations WHERE organization_id=? AND status NOT IN ('closed')",
+      ),
+      q(
+        "SELECT COUNT(*) n FROM acad_inspections WHERE organization_id=? AND status<>'closed'",
+      ),
+    ]);
+  const coverage = await one(
+    db
+      .prepare(
+        "SELECT ROUND(AVG(coverage_percent),1) pct FROM acad_schemes WHERE organization_id=? AND status<>'archived'",
+      )
+      .bind(org),
+  );
+  return {
+    timetables,
+    schemes,
+    lessonPlans: plans,
+    todaysLessons: deliveries,
+    openObservations: observations,
+    openInspections: inspections,
+    averageCoverage: Number(coverage?.pct || 0),
+  };
 }
 
-export const listRooms=(db:D1Database,org:string)=>rows(db.prepare("SELECT id,code,name,capacity,room_type AS roomType,location_text AS locationText,active,notes FROM acad_rooms WHERE organization_id=? ORDER BY active DESC,name").bind(org));
-export async function createRoom(db:D1Database,org:string,userId:string,d:any){const id=createId("arm");await db.prepare("INSERT INTO acad_rooms(id,organization_id,campus_id,code,name,capacity,room_type,location_text,notes,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(id,org,text(d.campusId),String(d.code).trim(),String(d.name).trim(),d.capacity==null?null:Number(d.capacity),text(d.roomType)||"classroom",text(d.locationText),text(d.notes),userId).run();return owned(db,"acad_rooms",id,org,"Room")}
-export async function updateRoom(db:D1Database,org:string,id:string,d:any){await owned(db,"acad_rooms",id,org,"Room");await db.prepare("UPDATE acad_rooms SET code=COALESCE(?,code),name=COALESCE(?,name),capacity=COALESCE(?,capacity),room_type=COALESCE(?,room_type),location_text=?,notes=?,active=COALESCE(?,active),updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(text(d.code),text(d.name),d.capacity==null?null:Number(d.capacity),text(d.roomType),text(d.locationText),text(d.notes),d.active==null?null:(bool(d.active)?1:0),id,org).run();return owned(db,"acad_rooms",id,org,"Room")}
-
-export const listAvailability=(db:D1Database,org:string,teacher?:string)=>rows(db.prepare(`SELECT a.id,a.teacher_user_id AS teacherUserId,TRIM(sp.first_name||' '||sp.last_name) teacherName,a.academic_year_id AS academicYearId,a.term_id AS termId,a.weekday,a.starts_at AS startsAt,a.ends_at AS endsAt,a.availability,a.reason FROM acad_teacher_availability a LEFT JOIN school_staff_profiles sp ON sp.organization_id=a.organization_id AND sp.user_id=a.teacher_user_id WHERE a.organization_id=? ${teacher?"AND a.teacher_user_id=?":""} ORDER BY a.weekday,a.starts_at`).bind(...(teacher?[org,teacher]:[org])));
-export async function createAvailability(db:D1Database,org:string,userId:string,d:any){const id=createId("ava");await db.prepare("INSERT INTO acad_teacher_availability(id,organization_id,teacher_user_id,academic_year_id,term_id,weekday,starts_at,ends_at,availability,reason,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)").bind(id,org,d.teacherUserId,text(d.academicYearId),text(d.termId),Number(d.weekday),d.startsAt,d.endsAt,d.availability||"available",text(d.reason),userId).run();return{id}}
-export const deleteAvailability=(db:D1Database,org:string,id:string)=>db.prepare("DELETE FROM acad_teacher_availability WHERE id=? AND organization_id=?").bind(id,org).run();
-
-export async function listTimetables(db:D1Database,org:string){return rows(db.prepare(`SELECT t.id,t.name,t.status,t.academic_year_id AS academicYearId,t.term_id AS termId,ay.name academicYearName,tr.name termName,t.submitted_at AS submittedAt,t.approved_at AS approvedAt,t.published_at AS publishedAt,(SELECT COUNT(*) FROM acad_timetable_entries e WHERE e.timetable_id=t.id AND e.active=1) entryCount FROM acad_timetables t JOIN school_academic_years ay ON ay.id=t.academic_year_id JOIN school_terms tr ON tr.id=t.term_id WHERE t.organization_id=? ORDER BY t.created_at DESC`).bind(org))}
-export async function createTimetable(db:D1Database,org:string,userId:string,d:any){const id=createId("att");await db.prepare("INSERT INTO acad_timetables(id,organization_id,academic_year_id,term_id,campus_id,name,notes,created_by) VALUES (?,?,?,?,?,?,?,?)").bind(id,org,d.academicYearId,d.termId,text(d.campusId),String(d.name).trim(),text(d.notes),userId).run();return owned(db,"acad_timetables",id,org,"Timetable")}
-export async function timetableEntries(db:D1Database,org:string,timetableId:string){await owned(db,"acad_timetables",timetableId,org,"Timetable");return rows(db.prepare(`SELECT e.id,e.timetable_id AS timetableId,e.class_id AS classId,c.name className,e.stream_id AS streamId,st.name streamName,e.subject_id AS subjectId,s.name subjectName,s.code subjectCode,e.teacher_user_id AS teacherUserId,TRIM(sp.first_name||' '||sp.last_name) teacherName,e.department_id AS departmentId,d.name departmentName,e.room_id AS roomId,r.name roomName,e.weekday,e.starts_at AS startsAt,e.ends_at AS endsAt,e.lesson_type AS lessonType,e.lesson_count AS lessonCount,e.notes FROM acad_timetable_entries e JOIN school_classes c ON c.id=e.class_id JOIN school_subjects s ON s.id=e.subject_id LEFT JOIN school_streams st ON st.id=e.stream_id LEFT JOIN school_staff_profiles sp ON sp.organization_id=e.organization_id AND sp.user_id=e.teacher_user_id LEFT JOIN school_departments d ON d.id=e.department_id LEFT JOIN acad_rooms r ON r.id=e.room_id WHERE e.organization_id=? AND e.timetable_id=? AND e.active=1 ORDER BY e.weekday,e.starts_at,c.name`).bind(org,timetableId))}
-export async function detectConflicts(db:D1Database,org:string,timetableId:string,d:any,excludeId?:string){
- const params:any[]=[org,timetableId,Number(d.weekday),d.endsAt,d.startsAt];let ex="";if(excludeId){ex=" AND e.id<>?";params.push(excludeId)}
- const existing=await rows(db.prepare(`SELECT e.id,e.class_id AS classId,e.stream_id AS streamId,e.teacher_user_id AS teacherUserId,e.room_id AS roomId,e.starts_at AS startsAt,e.ends_at AS endsAt,c.name className,s.name subjectName,TRIM(sp.first_name||' '||sp.last_name) teacherName,r.name roomName FROM acad_timetable_entries e JOIN school_classes c ON c.id=e.class_id JOIN school_subjects s ON s.id=e.subject_id LEFT JOIN school_staff_profiles sp ON sp.organization_id=e.organization_id AND sp.user_id=e.teacher_user_id LEFT JOIN acad_rooms r ON r.id=e.room_id WHERE e.organization_id=? AND e.timetable_id=? AND e.weekday=? AND e.active=1 AND e.starts_at<? AND e.ends_at>?${ex}`).bind(...params));
- const conflicts:any[]=[];for(const e of existing){if(e.teacherUserId===d.teacherUserId)conflicts.push({type:"teacher",message:`${e.teacherName||"Teacher"} is already teaching ${e.subjectName} (${e.startsAt}–${e.endsAt}).`,entryId:e.id});if(e.classId===d.classId&&(!e.streamId||!d.streamId||String(e.streamId)===String(d.streamId)))conflicts.push({type:"class",message:`${e.className} already has ${e.subjectName} at this time.`,entryId:e.id});if(d.roomId&&e.roomId===d.roomId)conflicts.push({type:"room",message:`${e.roomName||"Room"} is already allocated at this time.`,entryId:e.id})}
- const blocked=await rows(db.prepare(`SELECT id,starts_at AS startsAt,ends_at AS endsAt,reason FROM acad_teacher_availability WHERE organization_id=? AND teacher_user_id=? AND weekday=? AND availability='unavailable' AND starts_at<? AND ends_at>? AND (term_id IS NULL OR term_id=(SELECT term_id FROM acad_timetables WHERE id=?))`).bind(org,d.teacherUserId,Number(d.weekday),d.endsAt,d.startsAt,timetableId));
- for(const b of blocked)conflicts.push({type:"availability",message:`Teacher is marked unavailable ${b.startsAt}–${b.endsAt}${b.reason?`: ${b.reason}`:""}.`,availabilityId:b.id});return conflicts;
+export const listRooms = (db: D1Database, org: string) =>
+  rows(
+    db
+      .prepare(
+        "SELECT id,code,name,capacity,room_type AS roomType,location_text AS locationText,active,notes FROM acad_rooms WHERE organization_id=? ORDER BY active DESC,name",
+      )
+      .bind(org),
+  );
+export async function createRoom(
+  db: D1Database,
+  org: string,
+  userId: string,
+  d: any,
+) {
+  const id = createId("arm");
+  await db
+    .prepare(
+      "INSERT INTO acad_rooms(id,organization_id,campus_id,code,name,capacity,room_type,location_text,notes,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
+    )
+    .bind(
+      id,
+      org,
+      text(d.campusId),
+      String(d.code).trim(),
+      String(d.name).trim(),
+      d.capacity == null ? null : Number(d.capacity),
+      text(d.roomType) || "classroom",
+      text(d.locationText),
+      text(d.notes),
+      userId,
+    )
+    .run();
+  return owned(db, "acad_rooms", id, org, "Room");
 }
-export async function createTimetableEntry(db:D1Database,org:string,userId:string,timetableId:string,d:any){const t=await owned(db,"acad_timetables",timetableId,org,"Timetable");if(t.status==="published"||t.status==="archived")throw new AppError(409,"TIMETABLE_LOCKED","Published or archived timetables cannot be edited; create a temporary change instead.");const conflicts=await detectConflicts(db,org,timetableId,d);if(conflicts.length&&!bool(d.force))throw new AppError(409,"TIMETABLE_CONFLICT","This lesson conflicts with the current timetable.",{conflicts});const id=createId("ate"),subject=await one(db.prepare("SELECT department_id AS departmentId FROM school_subjects WHERE id=? AND organization_id=?").bind(d.subjectId,org));await db.prepare("INSERT INTO acad_timetable_entries(id,organization_id,timetable_id,class_id,stream_id,subject_id,teacher_user_id,department_id,room_id,weekday,starts_at,ends_at,lesson_type,lesson_count,notes,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,org,timetableId,d.classId,text(d.streamId),d.subjectId,d.teacherUserId,text(d.departmentId)||subject?.departmentId||null,text(d.roomId),Number(d.weekday),d.startsAt,d.endsAt,d.lessonType||"single",d.lessonType==="double"?2:1,text(d.notes),userId).run();return{entry:await one(db.prepare("SELECT * FROM acad_timetable_entries WHERE id=?").bind(id)),conflicts}}
-export async function deleteTimetableEntry(db:D1Database,org:string,id:string){const e=await owned(db,"acad_timetable_entries",id,org,"Timetable entry");const t=await owned(db,"acad_timetables",e.timetable_id,org,"Timetable");if(t.status==="published")throw new AppError(409,"TIMETABLE_PUBLISHED","Use a temporary timetable change for a published timetable.");await db.prepare("UPDATE acad_timetable_entries SET active=0,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(id,org).run();return{deleted:true}}
-export async function timetableWorkflow(db:D1Database,org:string,id:string,userId:string,action:string){const t=await owned(db,"acad_timetables",id,org,"Timetable");const map:any={submit:{from:["draft"],to:"submitted",sql:"submitted_by=?,submitted_at=CURRENT_TIMESTAMP"},approve:{from:["submitted"],to:"approved",sql:"approved_by=?,approved_at=CURRENT_TIMESTAMP"},publish:{from:["approved"],to:"published",sql:"published_by=?,published_at=CURRENT_TIMESTAMP"},archive:{from:["published","approved"],to:"archived",sql:"updated_at=CURRENT_TIMESTAMP"}};const x=map[action];if(!x)throw new AppError(422,"INVALID_ACTION","Invalid timetable workflow action");if(!x.from.includes(t.status))throw new AppError(409,"INVALID_STATUS",`Cannot ${action} a timetable in ${t.status} status.`);if(action==="publish"){const c=await one(db.prepare("SELECT COUNT(*) n FROM acad_timetable_entries WHERE organization_id=? AND timetable_id=? AND active=1").bind(org,id));if(!Number(c?.n))throw new AppError(409,"EMPTY_TIMETABLE","Add timetable lessons before publishing.")}
- const vals=action==="archive"?[x.to,id,org]:[x.to,userId,id,org];await db.prepare(`UPDATE acad_timetables SET status=?,${x.sql},updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).bind(...vals).run();return owned(db,"acad_timetables",id,org,"Timetable")}
-export async function createTemporaryChange(db:D1Database,org:string,userId:string,entryId:string,d:any){await owned(db,"acad_timetable_entries",entryId,org,"Timetable entry");const id=createId("atc");await db.prepare("INSERT INTO acad_timetable_changes(id,organization_id,timetable_entry_id,change_date,changed_teacher_user_id,changed_room_id,changed_starts_at,changed_ends_at,reason,status,created_by,approved_by) VALUES (?,?,?,?,?,?,?,?,?,'approved',?,?)").bind(id,org,entryId,d.changeDate,text(d.changedTeacherUserId),text(d.changedRoomId),text(d.changedStartsAt),text(d.changedEndsAt),String(d.reason),userId,userId).run();return{id}}
-export async function createSubstitute(db:D1Database,org:string,userId:string,d:any){const e=await owned(db,"acad_timetable_entries",d.timetableEntryId,org,"Timetable entry");const id=createId("asu");await db.prepare("INSERT INTO acad_substitute_lessons(id,organization_id,timetable_entry_id,lesson_date,original_teacher_user_id,substitute_teacher_user_id,reason,notes,created_by) VALUES (?,?,?,?,?,?,?,?,?)").bind(id,org,e.id,d.lessonDate,e.teacher_user_id,d.substituteTeacherUserId,String(d.reason),text(d.notes),userId).run();return{id}}
-export async function timetableChanges(db:D1Database,org:string,timetableId:string){return rows(db.prepare(`SELECT ch.id,ch.change_date AS changeDate,ch.reason,ch.changed_starts_at AS changedStartsAt,ch.changed_ends_at AS changedEndsAt,e.id AS entryId,c.name className,s.name subjectName,TRIM(sp.first_name||' '||sp.last_name) changedTeacherName,r.name changedRoomName FROM acad_timetable_changes ch JOIN acad_timetable_entries e ON e.id=ch.timetable_entry_id JOIN school_classes c ON c.id=e.class_id JOIN school_subjects s ON s.id=e.subject_id LEFT JOIN school_staff_profiles sp ON sp.organization_id=ch.organization_id AND sp.user_id=ch.changed_teacher_user_id LEFT JOIN acad_rooms r ON r.id=ch.changed_room_id WHERE ch.organization_id=? AND e.timetable_id=? AND ch.status='approved' ORDER BY ch.change_date DESC`).bind(org,timetableId))}
-export async function workload(db:D1Database,org:string,timetableId:string){const xs=await rows(db.prepare(`SELECT e.teacher_user_id AS teacherUserId,TRIM(sp.first_name||' '||sp.last_name) teacherName,e.lesson_count AS lessonCount,e.starts_at AS startsAt,e.ends_at AS endsAt FROM acad_timetable_entries e LEFT JOIN school_staff_profiles sp ON sp.organization_id=e.organization_id AND sp.user_id=e.teacher_user_id WHERE e.organization_id=? AND e.timetable_id=? AND e.active=1`).bind(org,timetableId));const m=new Map<string,any>();for(const x of xs){let o=m.get(x.teacherUserId);if(!o){o={teacherUserId:x.teacherUserId,teacherName:x.teacherName||x.teacherUserId,lessons:0,periods:0,minutes:0};m.set(x.teacherUserId,o)}o.lessons++;o.periods+=Number(x.lessonCount||1);const [sh,sm]=x.startsAt.split(":").map(Number),[eh,em]=x.endsAt.split(":").map(Number);o.minutes+=Math.max(0,(eh*60+em)-(sh*60+sm))}return[...m.values()].sort((a,b)=>b.minutes-a.minutes)}
+export async function updateRoom(
+  db: D1Database,
+  org: string,
+  id: string,
+  d: any,
+) {
+  await owned(db, "acad_rooms", id, org, "Room");
+  await db
+    .prepare(
+      "UPDATE acad_rooms SET code=COALESCE(?,code),name=COALESCE(?,name),capacity=COALESCE(?,capacity),room_type=COALESCE(?,room_type),location_text=?,notes=?,active=COALESCE(?,active),updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+    )
+    .bind(
+      text(d.code),
+      text(d.name),
+      d.capacity == null ? null : Number(d.capacity),
+      text(d.roomType),
+      text(d.locationText),
+      text(d.notes),
+      d.active == null ? null : bool(d.active) ? 1 : 0,
+      id,
+      org,
+    )
+    .run();
+  return owned(db, "acad_rooms", id, org, "Room");
+}
 
-export async function listSchemes(db:D1Database,org:string){return rows(db.prepare(`SELECT s.id,s.title,s.status,s.version_no AS versionNo,s.coverage_percent AS coveragePercent,s.term_id AS termId,s.class_id AS classId,c.name className,s.subject_id AS subjectId,su.name subjectName,s.teacher_user_id AS teacherUserId,TRIM(sp.first_name||' '||sp.last_name) teacherName,t.name termName,ay.name academicYearName FROM acad_schemes s JOIN school_classes c ON c.id=s.class_id JOIN school_subjects su ON su.id=s.subject_id JOIN school_terms t ON t.id=s.term_id JOIN school_academic_years ay ON ay.id=s.academic_year_id LEFT JOIN school_staff_profiles sp ON sp.organization_id=s.organization_id AND sp.user_id=s.teacher_user_id WHERE s.organization_id=? ORDER BY s.updated_at DESC`).bind(org))}
-export async function createScheme(db:D1Database,org:string,userId:string,d:any){const id=createId("asc");await db.prepare("INSERT INTO acad_schemes(id,organization_id,academic_year_id,term_id,class_id,stream_id,subject_id,teacher_user_id,title,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(id,org,d.academicYearId,d.termId,d.classId,text(d.streamId),d.subjectId,d.teacherUserId,String(d.title),userId).run();return{id}}
-export async function schemeDetail(db:D1Database,org:string,id:string){const scheme=await owned(db,"acad_schemes",id,org,"Scheme of work"),items=await rows(db.prepare("SELECT id,sequence_no AS sequenceNo,week_no AS weekNo,lesson_no AS lessonNo,topic,subtopic,learning_objectives AS learningObjectives,competencies,teaching_methods AS teachingMethods,learning_materials AS learningMaterials,references_text AS referencesText,planned_activities AS plannedActivities,assessment_activities AS assessmentActivities,planned_date AS plannedDate,coverage_status AS coverageStatus,teacher_reflection AS teacherReflection,covered_at AS coveredAt FROM acad_scheme_items WHERE organization_id=? AND scheme_id=? ORDER BY sequence_no").bind(org,id)),versions=await rows(db.prepare("SELECT id,version_no AS versionNo,change_note AS changeNote,created_at AS createdAt FROM acad_scheme_versions WHERE organization_id=? AND scheme_id=? ORDER BY version_no DESC").bind(org,id));return{...scheme,items,versions}}
-async function snapshotScheme(db:D1Database,org:string,schemeId:string,userId:string,note?:string){const x=await schemeDetail(db,org,schemeId);const next=Number((await one(db.prepare("SELECT COALESCE(MAX(version_no),0)+1 n FROM acad_scheme_versions WHERE organization_id=? AND scheme_id=?").bind(org,schemeId)))?.n||1);await db.prepare("INSERT INTO acad_scheme_versions(id,organization_id,scheme_id,version_no,snapshot_json,change_note,created_by) VALUES (?,?,?,?,?,?,?)").bind(createId("asv"),org,schemeId,next,JSON.stringify(x),text(note),userId).run();await db.prepare("UPDATE acad_schemes SET version_no=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(next,schemeId,org).run();return next}
-export async function addSchemeItem(db:D1Database,org:string,schemeId:string,d:any){await owned(db,"acad_schemes",schemeId,org,"Scheme of work");const id=createId("asi"),seq=d.sequenceNo||Number((await one(db.prepare("SELECT COALESCE(MAX(sequence_no),0)+1 n FROM acad_scheme_items WHERE scheme_id=?").bind(schemeId)))?.n||1);await db.prepare(`INSERT INTO acad_scheme_items(id,organization_id,scheme_id,sequence_no,week_no,lesson_no,topic,subtopic,learning_objectives,competencies,teaching_methods,learning_materials,references_text,planned_activities,assessment_activities,planned_date,coverage_status,teacher_reflection) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,org,schemeId,seq,Number(d.weekNo),d.lessonNo==null?null:Number(d.lessonNo),String(d.topic),text(d.subtopic),text(d.learningObjectives),text(d.competencies),text(d.teachingMethods),text(d.learningMaterials),text(d.referencesText),text(d.plannedActivities),text(d.assessmentActivities),text(d.plannedDate),d.coverageStatus||"planned",text(d.teacherReflection)).run();await recalcCoverage(db,org,schemeId);return{id}}
-async function recalcCoverage(db:D1Database,org:string,schemeId:string){const x=await one(db.prepare("SELECT COUNT(*) total,SUM(CASE WHEN coverage_status='covered' THEN 1 ELSE 0 END) covered FROM acad_scheme_items WHERE organization_id=? AND scheme_id=?").bind(org,schemeId)),pct=Number(x?.total||0)?Math.round(Number(x.covered||0)*1000/Number(x.total))/10:0;await db.prepare("UPDATE acad_schemes SET coverage_percent=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(pct,schemeId,org).run();return pct}
-export async function updateSchemeItem(db:D1Database,org:string,id:string,d:any){const item=await owned(db,"acad_scheme_items",id,org,"Scheme item");await db.prepare(`UPDATE acad_scheme_items SET week_no=COALESCE(?,week_no),lesson_no=?,topic=COALESCE(?,topic),subtopic=?,learning_objectives=?,competencies=?,teaching_methods=?,learning_materials=?,references_text=?,planned_activities=?,assessment_activities=?,planned_date=?,coverage_status=COALESCE(?,coverage_status),teacher_reflection=?,covered_at=CASE WHEN ?='covered' THEN COALESCE(covered_at,CURRENT_TIMESTAMP) WHEN ? IS NOT NULL AND ?<>'covered' THEN NULL ELSE covered_at END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).bind(d.weekNo==null?null:Number(d.weekNo),d.lessonNo==null?null:Number(d.lessonNo),text(d.topic),text(d.subtopic),text(d.learningObjectives),text(d.competencies),text(d.teachingMethods),text(d.learningMaterials),text(d.referencesText),text(d.plannedActivities),text(d.assessmentActivities),text(d.plannedDate),text(d.coverageStatus),text(d.teacherReflection),text(d.coverageStatus),text(d.coverageStatus),text(d.coverageStatus),id,org).run();await recalcCoverage(db,org,item.scheme_id);return{id}}
-export async function schemeWorkflow(db:D1Database,org:string,id:string,userId:string,action:string,feedback?:string){const s=await owned(db,"acad_schemes",id,org,"Scheme of work"),map:any={submit_hod:{from:["draft","rejected"],to:"submitted_hod"},hod_approve:{from:["submitted_hod"],to:"hod_approved"},submit_dos:{from:["hod_approved"],to:"submitted_dos"},dos_approve:{from:["submitted_dos"],to:"approved"},reject:{from:["submitted_hod","submitted_dos"],to:"rejected"}};const x=map[action];if(!x||!x.from.includes(s.status))throw new AppError(409,"INVALID_STATUS",`Cannot ${action.replaceAll("_"," ")} from ${s.status}.`);await snapshotScheme(db,org,id,userId,`${action}${feedback?`: ${feedback}`:""}`);let extra="",vals:any[]=[x.to];if(action==="hod_approve"){extra=",hod_feedback=?,hod_reviewed_by=?,hod_reviewed_at=CURRENT_TIMESTAMP";vals.push(text(feedback),userId)}else if(action==="dos_approve"){extra=",dos_feedback=?,dos_approved_by=?,dos_approved_at=CURRENT_TIMESTAMP";vals.push(text(feedback),userId)}else if(action==="reject"){extra=s.status==="submitted_hod"?",hod_feedback=?":",dos_feedback=?";vals.push(text(feedback))}vals.push(id,org);await db.prepare(`UPDATE acad_schemes SET status=?${extra},updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).bind(...vals).run();return schemeDetail(db,org,id)}
+export const listAvailability = (
+  db: D1Database,
+  org: string,
+  teacher?: string,
+) =>
+  rows(
+    db
+      .prepare(
+        `SELECT a.id,a.teacher_user_id AS teacherUserId,TRIM(sp.first_name||' '||sp.last_name) teacherName,a.academic_year_id AS academicYearId,a.term_id AS termId,a.weekday,a.starts_at AS startsAt,a.ends_at AS endsAt,a.availability,a.reason FROM acad_teacher_availability a LEFT JOIN school_staff_profiles sp ON sp.organization_id=a.organization_id AND sp.user_id=a.teacher_user_id WHERE a.organization_id=? ${teacher ? "AND a.teacher_user_id=?" : ""} ORDER BY a.weekday,a.starts_at`,
+      )
+      .bind(...(teacher ? [org, teacher] : [org])),
+  );
+export async function createAvailability(
+  db: D1Database,
+  org: string,
+  userId: string,
+  d: any,
+) {
+  const id = createId("ava");
+  await db
+    .prepare(
+      "INSERT INTO acad_teacher_availability(id,organization_id,teacher_user_id,academic_year_id,term_id,weekday,starts_at,ends_at,availability,reason,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+    )
+    .bind(
+      id,
+      org,
+      d.teacherUserId,
+      text(d.academicYearId),
+      text(d.termId),
+      Number(d.weekday),
+      d.startsAt,
+      d.endsAt,
+      d.availability || "available",
+      text(d.reason),
+      userId,
+    )
+    .run();
+  return { id };
+}
+export const deleteAvailability = (db: D1Database, org: string, id: string) =>
+  db
+    .prepare(
+      "DELETE FROM acad_teacher_availability WHERE id=? AND organization_id=?",
+    )
+    .bind(id, org)
+    .run();
 
-export const listTemplates=(db:D1Database,org:string)=>rows(db.prepare("SELECT id,name,description,template_json AS templateJson,active FROM acad_lesson_plan_templates WHERE organization_id=? AND active=1 ORDER BY name").bind(org));
-export async function createTemplate(db:D1Database,org:string,userId:string,d:any){const id=createId("alt");await db.prepare("INSERT INTO acad_lesson_plan_templates(id,organization_id,name,description,template_json,created_by) VALUES (?,?,?,?,?,?)").bind(id,org,String(d.name),text(d.description),JSON.stringify(d.template||{}),userId).run();return{id}}
-export async function listLessonPlans(db:D1Database,org:string){return rows(db.prepare(`SELECT p.id,p.lesson_date AS lessonDate,p.topic,p.subtopic,p.status,p.class_id AS classId,c.name className,p.subject_id AS subjectId,s.name subjectName,p.teacher_user_id AS teacherUserId,TRIM(sp.first_name||' '||sp.last_name) teacherName,p.hod_feedback AS hodFeedback,p.updated_at AS updatedAt FROM acad_lesson_plans p JOIN school_classes c ON c.id=p.class_id JOIN school_subjects s ON s.id=p.subject_id LEFT JOIN school_staff_profiles sp ON sp.organization_id=p.organization_id AND sp.user_id=p.teacher_user_id WHERE p.organization_id=? ORDER BY p.lesson_date DESC,p.updated_at DESC LIMIT 500`).bind(org))}
-export async function createLessonPlan(db:D1Database,org:string,userId:string,d:any){const id=createId("alp");await db.prepare(`INSERT INTO acad_lesson_plans(id,organization_id,academic_year_id,term_id,class_id,stream_id,subject_id,teacher_user_id,timetable_entry_id,scheme_item_id,template_id,lesson_date,week_no,lesson_no,topic,subtopic,lesson_objectives,prior_knowledge,introduction_text,lesson_development,teacher_activities,learner_activities,teaching_methods,required_materials,differentiated_instruction,special_needs_accommodations,lesson_assessment,lesson_conclusion,homework,teacher_reflection,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,org,d.academicYearId,d.termId,d.classId,text(d.streamId),d.subjectId,d.teacherUserId,text(d.timetableEntryId),text(d.schemeItemId),text(d.templateId),d.lessonDate,d.weekNo==null?null:Number(d.weekNo),d.lessonNo==null?null:Number(d.lessonNo),String(d.topic),text(d.subtopic),text(d.lessonObjectives),text(d.priorKnowledge),text(d.introductionText),text(d.lessonDevelopment),text(d.teacherActivities),text(d.learnerActivities),text(d.teachingMethods),text(d.requiredMaterials),text(d.differentiatedInstruction),text(d.specialNeedsAccommodations),text(d.lessonAssessment),text(d.lessonConclusion),text(d.homework),text(d.teacherReflection),userId).run();return{id}}
-export async function lessonPlanDetail(db:D1Database,org:string,id:string){return owned(db,"acad_lesson_plans",id,org,"Lesson plan")}
-export async function updateLessonPlan(db:D1Database,org:string,id:string,d:any){const p=await owned(db,"acad_lesson_plans",id,org,"Lesson plan");if(p.status==="approved"||p.status==="delivered")throw new AppError(409,"LESSON_PLAN_LOCKED","Approved or delivered lesson plans are locked.");const fields=["topic","subtopic","lesson_objectives","prior_knowledge","introduction_text","lesson_development","teacher_activities","learner_activities","teaching_methods","required_materials","differentiated_instruction","special_needs_accommodations","lesson_assessment","lesson_conclusion","homework","teacher_reflection"];const map:any={lessonObjectives:"lesson_objectives",priorKnowledge:"prior_knowledge",introductionText:"introduction_text",lessonDevelopment:"lesson_development",teacherActivities:"teacher_activities",learnerActivities:"learner_activities",teachingMethods:"teaching_methods",requiredMaterials:"required_materials",differentiatedInstruction:"differentiated_instruction",specialNeedsAccommodations:"special_needs_accommodations",lessonAssessment:"lesson_assessment",lessonConclusion:"lesson_conclusion",teacherReflection:"teacher_reflection"};const sets:any[]=[],vals:any[]=[];for(const [k,v] of Object.entries(d)){const col=map[k]||k.replace(/[A-Z]/g,m=>`_${m.toLowerCase()}`);if(fields.includes(col)){sets.push(`${col}=?`);vals.push(text(v))}}if(sets.length)await db.prepare(`UPDATE acad_lesson_plans SET ${sets.join(",")},updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).bind(...vals,id,org).run();return owned(db,"acad_lesson_plans",id,org,"Lesson plan")}
-export async function lessonWorkflow(db:D1Database,org:string,id:string,userId:string,action:string,feedback?:string){const p=await owned(db,"acad_lesson_plans",id,org,"Lesson plan");if(action==="submit"&&p.status==="draft")await db.prepare("UPDATE acad_lesson_plans SET status='submitted',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(id,org).run();else if(action==="approve"&&p.status==="submitted")await db.prepare("UPDATE acad_lesson_plans SET status='approved',hod_feedback=?,approved_by=?,approved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(text(feedback),userId,id,org).run();else if(action==="reject"&&p.status==="submitted")await db.prepare("UPDATE acad_lesson_plans SET status='rejected',hod_feedback=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(text(feedback),id,org).run();else throw new AppError(409,"INVALID_STATUS",`Cannot ${action} this lesson plan from ${p.status}.`);return owned(db,"acad_lesson_plans",id,org,"Lesson plan")}
+export async function listTimetables(db: D1Database, org: string) {
+  return rows(
+    db
+      .prepare(
+        `SELECT t.id,t.name,t.status,t.academic_year_id AS academicYearId,t.term_id AS termId,ay.name academicYearName,tr.name termName,t.submitted_at AS submittedAt,t.approved_at AS approvedAt,t.published_at AS publishedAt,(SELECT COUNT(*) FROM acad_timetable_entries e WHERE e.timetable_id=t.id AND e.active=1) entryCount FROM acad_timetables t JOIN school_academic_years ay ON ay.id=t.academic_year_id JOIN school_terms tr ON tr.id=t.term_id WHERE t.organization_id=? ORDER BY t.created_at DESC`,
+      )
+      .bind(org),
+  );
+}
+export async function createTimetable(
+  db: D1Database,
+  org: string,
+  userId: string,
+  d: any,
+) {
+  const id = createId("att");
+  await db
+    .prepare(
+      "INSERT INTO acad_timetables(id,organization_id,academic_year_id,term_id,campus_id,name,notes,created_by) VALUES (?,?,?,?,?,?,?,?)",
+    )
+    .bind(
+      id,
+      org,
+      d.academicYearId,
+      d.termId,
+      text(d.campusId),
+      String(d.name).trim(),
+      text(d.notes),
+      userId,
+    )
+    .run();
+  return owned(db, "acad_timetables", id, org, "Timetable");
+}
+export async function timetableEntries(
+  db: D1Database,
+  org: string,
+  timetableId: string,
+) {
+  await owned(db, "acad_timetables", timetableId, org, "Timetable");
+  return rows(
+    db
+      .prepare(
+        `SELECT e.id,e.timetable_id AS timetableId,e.class_id AS classId,c.name className,e.stream_id AS streamId,st.name streamName,e.subject_id AS subjectId,s.name subjectName,s.code subjectCode,e.teacher_user_id AS teacherUserId,TRIM(sp.first_name||' '||sp.last_name) teacherName,e.department_id AS departmentId,d.name departmentName,e.room_id AS roomId,r.name roomName,e.weekday,e.starts_at AS startsAt,e.ends_at AS endsAt,e.lesson_type AS lessonType,e.lesson_count AS lessonCount,e.notes FROM acad_timetable_entries e JOIN school_classes c ON c.id=e.class_id JOIN school_subjects s ON s.id=e.subject_id LEFT JOIN school_streams st ON st.id=e.stream_id LEFT JOIN school_staff_profiles sp ON sp.organization_id=e.organization_id AND sp.user_id=e.teacher_user_id LEFT JOIN school_departments d ON d.id=e.department_id LEFT JOIN acad_rooms r ON r.id=e.room_id WHERE e.organization_id=? AND e.timetable_id=? AND e.active=1 ORDER BY e.weekday,e.starts_at,c.name`,
+      )
+      .bind(org, timetableId),
+  );
+}
+export async function detectConflicts(
+  db: D1Database,
+  org: string,
+  timetableId: string,
+  d: any,
+  excludeId?: string,
+) {
+  const params: any[] = [
+    org,
+    timetableId,
+    Number(d.weekday),
+    d.endsAt,
+    d.startsAt,
+  ];
+  let ex = "";
+  if (excludeId) {
+    ex = " AND e.id<>?";
+    params.push(excludeId);
+  }
+  const existing = await rows(
+    db
+      .prepare(
+        `SELECT e.id,e.class_id AS classId,e.stream_id AS streamId,e.teacher_user_id AS teacherUserId,e.room_id AS roomId,e.starts_at AS startsAt,e.ends_at AS endsAt,c.name className,s.name subjectName,TRIM(sp.first_name||' '||sp.last_name) teacherName,r.name roomName FROM acad_timetable_entries e JOIN school_classes c ON c.id=e.class_id JOIN school_subjects s ON s.id=e.subject_id LEFT JOIN school_staff_profiles sp ON sp.organization_id=e.organization_id AND sp.user_id=e.teacher_user_id LEFT JOIN acad_rooms r ON r.id=e.room_id WHERE e.organization_id=? AND e.timetable_id=? AND e.weekday=? AND e.active=1 AND e.starts_at<? AND e.ends_at>?${ex}`,
+      )
+      .bind(...params),
+  );
+  const conflicts: any[] = [];
+  for (const e of existing) {
+    if (e.teacherUserId === d.teacherUserId)
+      conflicts.push({
+        type: "teacher",
+        message: `${e.teacherName || "Teacher"} is already teaching ${e.subjectName} (${e.startsAt}–${e.endsAt}).`,
+        entryId: e.id,
+      });
+    if (
+      e.classId === d.classId &&
+      (!e.streamId || !d.streamId || String(e.streamId) === String(d.streamId))
+    )
+      conflicts.push({
+        type: "class",
+        message: `${e.className} already has ${e.subjectName} at this time.`,
+        entryId: e.id,
+      });
+    if (d.roomId && e.roomId === d.roomId)
+      conflicts.push({
+        type: "room",
+        message: `${e.roomName || "Room"} is already allocated at this time.`,
+        entryId: e.id,
+      });
+  }
+  const blocked = await rows(
+    db
+      .prepare(
+        `SELECT id,starts_at AS startsAt,ends_at AS endsAt,reason FROM acad_teacher_availability WHERE organization_id=? AND teacher_user_id=? AND weekday=? AND availability='unavailable' AND starts_at<? AND ends_at>? AND (term_id IS NULL OR term_id=(SELECT term_id FROM acad_timetables WHERE id=?))`,
+      )
+      .bind(
+        org,
+        d.teacherUserId,
+        Number(d.weekday),
+        d.endsAt,
+        d.startsAt,
+        timetableId,
+      ),
+  );
+  for (const b of blocked)
+    conflicts.push({
+      type: "availability",
+      message: `Teacher is marked unavailable ${b.startsAt}–${b.endsAt}${b.reason ? `: ${b.reason}` : ""}.`,
+      availabilityId: b.id,
+    });
+  return conflicts;
+}
+export async function createTimetableEntry(
+  db: D1Database,
+  org: string,
+  userId: string,
+  timetableId: string,
+  d: any,
+) {
+  const t = await owned(db, "acad_timetables", timetableId, org, "Timetable");
+  if (t.status === "published" || t.status === "archived")
+    throw new AppError(
+      409,
+      "TIMETABLE_LOCKED",
+      "Published or archived timetables cannot be edited; create a temporary change instead.",
+    );
+  const conflicts = await detectConflicts(db, org, timetableId, d);
+  if (conflicts.length && !bool(d.force))
+    throw new AppError(
+      409,
+      "TIMETABLE_CONFLICT",
+      "This lesson conflicts with the current timetable.",
+      { conflicts },
+    );
+  const id = createId("ate"),
+    subject = await one(
+      db
+        .prepare(
+          "SELECT department_id AS departmentId FROM school_subjects WHERE id=? AND organization_id=?",
+        )
+        .bind(d.subjectId, org),
+    );
+  await db
+    .prepare(
+      "INSERT INTO acad_timetable_entries(id,organization_id,timetable_id,class_id,stream_id,subject_id,teacher_user_id,department_id,room_id,weekday,starts_at,ends_at,lesson_type,lesson_count,notes,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    )
+    .bind(
+      id,
+      org,
+      timetableId,
+      d.classId,
+      text(d.streamId),
+      d.subjectId,
+      d.teacherUserId,
+      text(d.departmentId) || subject?.departmentId || null,
+      text(d.roomId),
+      Number(d.weekday),
+      d.startsAt,
+      d.endsAt,
+      d.lessonType || "single",
+      d.lessonType === "double" ? 2 : 1,
+      text(d.notes),
+      userId,
+    )
+    .run();
+  return {
+    entry: await one(
+      db.prepare("SELECT * FROM acad_timetable_entries WHERE id=?").bind(id),
+    ),
+    conflicts,
+  };
+}
+export async function deleteTimetableEntry(
+  db: D1Database,
+  org: string,
+  id: string,
+) {
+  const e = await owned(
+    db,
+    "acad_timetable_entries",
+    id,
+    org,
+    "Timetable entry",
+  );
+  const t = await owned(
+    db,
+    "acad_timetables",
+    e.timetable_id,
+    org,
+    "Timetable",
+  );
+  if (t.status === "published")
+    throw new AppError(
+      409,
+      "TIMETABLE_PUBLISHED",
+      "Use a temporary timetable change for a published timetable.",
+    );
+  await db
+    .prepare(
+      "UPDATE acad_timetable_entries SET active=0,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+    )
+    .bind(id, org)
+    .run();
+  return { deleted: true };
+}
+export async function timetableWorkflow(
+  db: D1Database,
+  org: string,
+  id: string,
+  userId: string,
+  action: string,
+) {
+  const t = await owned(db, "acad_timetables", id, org, "Timetable");
+  const map: any = {
+    submit: {
+      from: ["draft"],
+      to: "submitted",
+      sql: "submitted_by=?,submitted_at=CURRENT_TIMESTAMP",
+    },
+    approve: {
+      from: ["submitted"],
+      to: "approved",
+      sql: "approved_by=?,approved_at=CURRENT_TIMESTAMP",
+    },
+    publish: {
+      from: ["approved"],
+      to: "published",
+      sql: "published_by=?,published_at=CURRENT_TIMESTAMP",
+    },
+    archive: {
+      from: ["published", "approved"],
+      to: "archived",
+      sql: "updated_at=CURRENT_TIMESTAMP",
+    },
+  };
+  const x = map[action];
+  if (!x)
+    throw new AppError(
+      422,
+      "INVALID_ACTION",
+      "Invalid timetable workflow action",
+    );
+  if (!x.from.includes(t.status))
+    throw new AppError(
+      409,
+      "INVALID_STATUS",
+      `Cannot ${action} a timetable in ${t.status} status.`,
+    );
+  if (action === "publish") {
+    const c = await one(
+      db
+        .prepare(
+          "SELECT COUNT(*) n FROM acad_timetable_entries WHERE organization_id=? AND timetable_id=? AND active=1",
+        )
+        .bind(org, id),
+    );
+    if (!Number(c?.n))
+      throw new AppError(
+        409,
+        "EMPTY_TIMETABLE",
+        "Add timetable lessons before publishing.",
+      );
+  }
+  const vals = action === "archive" ? [x.to, id, org] : [x.to, userId, id, org];
+  await db
+    .prepare(
+      `UPDATE acad_timetables SET status=?,${x.sql},updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`,
+    )
+    .bind(...vals)
+    .run();
+  return owned(db, "acad_timetables", id, org, "Timetable");
+}
+export async function createTemporaryChange(
+  db: D1Database,
+  org: string,
+  userId: string,
+  entryId: string,
+  d: any,
+) {
+  await owned(db, "acad_timetable_entries", entryId, org, "Timetable entry");
+  const id = createId("atc");
+  await db
+    .prepare(
+      "INSERT INTO acad_timetable_changes(id,organization_id,timetable_entry_id,change_date,changed_teacher_user_id,changed_room_id,changed_starts_at,changed_ends_at,reason,status,created_by,approved_by) VALUES (?,?,?,?,?,?,?,?,?,'approved',?,?)",
+    )
+    .bind(
+      id,
+      org,
+      entryId,
+      d.changeDate,
+      text(d.changedTeacherUserId),
+      text(d.changedRoomId),
+      text(d.changedStartsAt),
+      text(d.changedEndsAt),
+      String(d.reason),
+      userId,
+      userId,
+    )
+    .run();
+  return { id };
+}
+export async function createSubstitute(
+  db: D1Database,
+  org: string,
+  userId: string,
+  d: any,
+) {
+  const e = await owned(
+    db,
+    "acad_timetable_entries",
+    d.timetableEntryId,
+    org,
+    "Timetable entry",
+  );
+  const id = createId("asu");
+  await db
+    .prepare(
+      "INSERT INTO acad_substitute_lessons(id,organization_id,timetable_entry_id,lesson_date,original_teacher_user_id,substitute_teacher_user_id,reason,notes,created_by) VALUES (?,?,?,?,?,?,?,?,?)",
+    )
+    .bind(
+      id,
+      org,
+      e.id,
+      d.lessonDate,
+      e.teacher_user_id,
+      d.substituteTeacherUserId,
+      String(d.reason),
+      text(d.notes),
+      userId,
+    )
+    .run();
+  return { id };
+}
+export async function timetableChanges(
+  db: D1Database,
+  org: string,
+  timetableId: string,
+) {
+  return rows(
+    db
+      .prepare(
+        `SELECT ch.id,ch.change_date AS changeDate,ch.reason,ch.changed_starts_at AS changedStartsAt,ch.changed_ends_at AS changedEndsAt,e.id AS entryId,c.name className,s.name subjectName,TRIM(sp.first_name||' '||sp.last_name) changedTeacherName,r.name changedRoomName FROM acad_timetable_changes ch JOIN acad_timetable_entries e ON e.id=ch.timetable_entry_id JOIN school_classes c ON c.id=e.class_id JOIN school_subjects s ON s.id=e.subject_id LEFT JOIN school_staff_profiles sp ON sp.organization_id=ch.organization_id AND sp.user_id=ch.changed_teacher_user_id LEFT JOIN acad_rooms r ON r.id=ch.changed_room_id WHERE ch.organization_id=? AND e.timetable_id=? AND ch.status='approved' ORDER BY ch.change_date DESC`,
+      )
+      .bind(org, timetableId),
+  );
+}
+export async function workload(
+  db: D1Database,
+  org: string,
+  timetableId: string,
+) {
+  const xs = await rows(
+    db
+      .prepare(
+        `SELECT e.teacher_user_id AS teacherUserId,TRIM(sp.first_name||' '||sp.last_name) teacherName,e.lesson_count AS lessonCount,e.starts_at AS startsAt,e.ends_at AS endsAt FROM acad_timetable_entries e LEFT JOIN school_staff_profiles sp ON sp.organization_id=e.organization_id AND sp.user_id=e.teacher_user_id WHERE e.organization_id=? AND e.timetable_id=? AND e.active=1`,
+      )
+      .bind(org, timetableId),
+  );
+  const m = new Map<string, any>();
+  for (const x of xs) {
+    let o = m.get(x.teacherUserId);
+    if (!o) {
+      o = {
+        teacherUserId: x.teacherUserId,
+        teacherName: x.teacherName || x.teacherUserId,
+        lessons: 0,
+        periods: 0,
+        minutes: 0,
+      };
+      m.set(x.teacherUserId, o);
+    }
+    o.lessons++;
+    o.periods += Number(x.lessonCount || 1);
+    const [sh, sm] = x.startsAt.split(":").map(Number),
+      [eh, em] = x.endsAt.split(":").map(Number);
+    o.minutes += Math.max(0, eh * 60 + em - (sh * 60 + sm));
+  }
+  return [...m.values()].sort((a, b) => b.minutes - a.minutes);
+}
 
-export async function syncDeliveriesFromTimetable(db:D1Database,org:string,userId:string,timetableId:string,date:string){const t=await owned(db,"acad_timetables",timetableId,org,"Timetable");if(t.status!=="published")throw new AppError(409,"TIMETABLE_NOT_PUBLISHED","Publish the timetable before generating the scheduled lesson register.");const js=new Date(`${date}T00:00:00Z`).getUTCDay(),weekday=js===0?7:js;const es=await rows(db.prepare("SELECT * FROM acad_timetable_entries WHERE organization_id=? AND timetable_id=? AND weekday=? AND active=1").bind(org,timetableId,weekday));let created=0;const stmts=[];for(const e of es){const id=createId("adl");stmts.push(db.prepare(`INSERT OR IGNORE INTO acad_lesson_deliveries(id,organization_id,timetable_entry_id,academic_year_id,term_id,class_id,stream_id,subject_id,teacher_user_id,scheduled_date,scheduled_starts_at,scheduled_ends_at,created_by) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM acad_lesson_deliveries WHERE organization_id=? AND timetable_entry_id=? AND scheduled_date=?)`).bind(id,org,e.id,t.academic_year_id,t.term_id,e.class_id,e.stream_id,e.subject_id,e.teacher_user_id,date,e.starts_at,e.ends_at,userId,org,e.id,date));created++}for(let i=0;i<stmts.length;i+=50)await db.batch(stmts.slice(i,i+50));return{scheduled:es.length,attempted:created}}
-export async function listDeliveries(db:D1Database,org:string,date?:string){const params:any[]=[org];let where="";if(date){where=" AND d.scheduled_date=?";params.push(date)}return rows(db.prepare(`SELECT d.id,d.scheduled_date AS scheduledDate,d.scheduled_starts_at AS scheduledStartsAt,d.scheduled_ends_at AS scheduledEndsAt,d.actual_starts_at AS actualStartsAt,d.actual_ends_at AS actualEndsAt,d.delivery_status AS deliveryStatus,d.actual_topic AS actualTopic,d.actual_subtopic AS actualSubtopic,d.student_attendance_summary AS studentAttendanceSummary,d.lesson_notes AS lessonNotes,d.missed_reason AS missedReason,d.recovery_date AS recoveryDate,d.class_id AS classId,c.name className,d.subject_id AS subjectId,s.name subjectName,d.teacher_user_id AS teacherUserId,TRIM(sp.first_name||' '||sp.last_name) teacherName,d.lesson_plan_id AS lessonPlanId,d.timetable_entry_id AS timetableEntryId,CASE WHEN d.timetable_entry_id IS NULL THEN 0 ELSE 1 END AS timetableMatched FROM acad_lesson_deliveries d JOIN school_classes c ON c.id=d.class_id JOIN school_subjects s ON s.id=d.subject_id LEFT JOIN school_staff_profiles sp ON sp.organization_id=d.organization_id AND sp.user_id=d.teacher_user_id WHERE d.organization_id=?${where} ORDER BY d.scheduled_date DESC,d.scheduled_starts_at`).bind(...params))}
-export async function updateDelivery(db:D1Database,org:string,id:string,d:any){const x=await owned(db,"acad_lesson_deliveries",id,org,"Lesson delivery");let attendance=text(d.studentAttendanceSummary);if(d.attendanceSessionId){const a=await one(db.prepare(`SELECT COUNT(*) total,SUM(CASE WHEN status IN ('present','late') THEN 1 ELSE 0 END) present,SUM(CASE WHEN status='absent' THEN 1 ELSE 0 END) absent FROM att_records WHERE organization_id=? AND session_id=? AND person_type='student' AND official=1`).bind(org,d.attendanceSessionId));attendance=JSON.stringify({total:Number(a?.total||0),present:Number(a?.present||0),absent:Number(a?.absent||0)})}await db.prepare(`UPDATE acad_lesson_deliveries SET lesson_plan_id=COALESCE(?,lesson_plan_id),substitute_teacher_user_id=?,canonical_attendance_session_id=?,actual_starts_at=?,actual_ends_at=?,delivery_status=COALESCE(?,delivery_status),actual_topic=?,actual_subtopic=?,student_attendance_summary=?,lesson_notes=?,missed_reason=?,recovery_date=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).bind(text(d.lessonPlanId),text(d.substituteTeacherUserId),text(d.attendanceSessionId),text(d.actualStartsAt),text(d.actualEndsAt),text(d.deliveryStatus),text(d.actualTopic),text(d.actualSubtopic),attendance,text(d.lessonNotes),text(d.missedReason),text(d.recoveryDate),id,org).run();if(d.deliveryStatus==="taught"&&d.lessonPlanId){const p=await one(db.prepare("SELECT scheme_item_id AS schemeItemId FROM acad_lesson_plans WHERE id=? AND organization_id=?").bind(d.lessonPlanId,org));await db.prepare("UPDATE acad_lesson_plans SET status='delivered',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(d.lessonPlanId,org).run();if(p?.schemeItemId){const item=await one(db.prepare("SELECT scheme_id AS schemeId FROM acad_scheme_items WHERE id=? AND organization_id=?").bind(p.schemeItemId,org));await db.prepare("UPDATE acad_scheme_items SET coverage_status='covered',covered_at=CURRENT_TIMESTAMP,teacher_reflection=COALESCE(?,teacher_reflection),updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(text(d.lessonNotes),p.schemeItemId,org).run();if(item?.schemeId)await recalcCoverage(db,org,item.schemeId)}}return owned(db,"acad_lesson_deliveries",id,org,"Lesson delivery")}
-export async function attachFile(db:D1Database,org:string,userId:string,kind:"delivery"|"observation"|"inspection",entityId:string,fileId:string,caption?:string){const map:any={delivery:["acad_lesson_deliveries","acad_delivery_attachments","delivery_id","adl"],observation:["acad_observations","acad_observation_attachments","observation_id","aoa"],inspection:["acad_inspections","acad_inspection_attachments","inspection_id","aia"]};const [entityTable,table,fk,prefix]=map[kind];await owned(db,entityTable,entityId,org,kind);if(!await one(db.prepare("SELECT 1 FROM school_files WHERE id=? AND organization_id=? AND deleted_at IS NULL").bind(fileId,org)))throw new AppError(422,"INVALID_FILE","Select a file uploaded to this school.");const id=createId(prefix);await db.prepare(`INSERT OR IGNORE INTO ${table}(id,organization_id,${fk},file_id,caption,uploaded_by) VALUES (?,?,?,?,?,?)`).bind(id,org,entityId,fileId,text(caption),userId).run();return{id,fileId}}
+export async function listSchemes(db: D1Database, org: string) {
+  return rows(
+    db
+      .prepare(
+        `SELECT s.id,s.title,s.status,s.version_no AS versionNo,s.coverage_percent AS coveragePercent,s.term_id AS termId,s.class_id AS classId,c.name className,s.subject_id AS subjectId,su.name subjectName,s.teacher_user_id AS teacherUserId,TRIM(sp.first_name||' '||sp.last_name) teacherName,t.name termName,ay.name academicYearName FROM acad_schemes s JOIN school_classes c ON c.id=s.class_id JOIN school_subjects su ON su.id=s.subject_id JOIN school_terms t ON t.id=s.term_id JOIN school_academic_years ay ON ay.id=s.academic_year_id LEFT JOIN school_staff_profiles sp ON sp.organization_id=s.organization_id AND sp.user_id=s.teacher_user_id WHERE s.organization_id=? ORDER BY s.updated_at DESC`,
+      )
+      .bind(org),
+  );
+}
+export async function createScheme(
+  db: D1Database,
+  org: string,
+  userId: string,
+  d: any,
+) {
+  const id = createId("asc");
+  await db
+    .prepare(
+      "INSERT INTO acad_schemes(id,organization_id,academic_year_id,term_id,class_id,stream_id,subject_id,teacher_user_id,title,created_by) VALUES (?,?,?,?,?,?,?,?,?,?)",
+    )
+    .bind(
+      id,
+      org,
+      d.academicYearId,
+      d.termId,
+      d.classId,
+      text(d.streamId),
+      d.subjectId,
+      d.teacherUserId,
+      String(d.title),
+      userId,
+    )
+    .run();
+  return { id };
+}
+export async function schemeDetail(db: D1Database, org: string, id: string) {
+  const scheme = await owned(db, "acad_schemes", id, org, "Scheme of work"),
+    items = await rows(
+      db
+        .prepare(
+          "SELECT id,sequence_no AS sequenceNo,week_no AS weekNo,lesson_no AS lessonNo,topic,subtopic,learning_objectives AS learningObjectives,competencies,teaching_methods AS teachingMethods,learning_materials AS learningMaterials,references_text AS referencesText,planned_activities AS plannedActivities,assessment_activities AS assessmentActivities,planned_date AS plannedDate,coverage_status AS coverageStatus,teacher_reflection AS teacherReflection,covered_at AS coveredAt FROM acad_scheme_items WHERE organization_id=? AND scheme_id=? ORDER BY sequence_no",
+        )
+        .bind(org, id),
+    ),
+    versions = await rows(
+      db
+        .prepare(
+          "SELECT id,version_no AS versionNo,change_note AS changeNote,created_at AS createdAt FROM acad_scheme_versions WHERE organization_id=? AND scheme_id=? ORDER BY version_no DESC",
+        )
+        .bind(org, id),
+    );
+  return { ...scheme, items, versions };
+}
+async function snapshotScheme(
+  db: D1Database,
+  org: string,
+  schemeId: string,
+  userId: string,
+  note?: string,
+) {
+  const x = await schemeDetail(db, org, schemeId);
+  const next = Number(
+    (
+      await one(
+        db
+          .prepare(
+            "SELECT COALESCE(MAX(version_no),0)+1 n FROM acad_scheme_versions WHERE organization_id=? AND scheme_id=?",
+          )
+          .bind(org, schemeId),
+      )
+    )?.n || 1,
+  );
+  await db
+    .prepare(
+      "INSERT INTO acad_scheme_versions(id,organization_id,scheme_id,version_no,snapshot_json,change_note,created_by) VALUES (?,?,?,?,?,?,?)",
+    )
+    .bind(
+      createId("asv"),
+      org,
+      schemeId,
+      next,
+      JSON.stringify(x),
+      text(note),
+      userId,
+    )
+    .run();
+  await db
+    .prepare(
+      "UPDATE acad_schemes SET version_no=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+    )
+    .bind(next, schemeId, org)
+    .run();
+  return next;
+}
+export async function addSchemeItem(
+  db: D1Database,
+  org: string,
+  schemeId: string,
+  d: any,
+) {
+  await owned(db, "acad_schemes", schemeId, org, "Scheme of work");
+  const id = createId("asi"),
+    seq =
+      d.sequenceNo ||
+      Number(
+        (
+          await one(
+            db
+              .prepare(
+                "SELECT COALESCE(MAX(sequence_no),0)+1 n FROM acad_scheme_items WHERE scheme_id=?",
+              )
+              .bind(schemeId),
+          )
+        )?.n || 1,
+      );
+  await db
+    .prepare(
+      `INSERT INTO acad_scheme_items(id,organization_id,scheme_id,sequence_no,week_no,lesson_no,topic,subtopic,learning_objectives,competencies,teaching_methods,learning_materials,references_text,planned_activities,assessment_activities,planned_date,coverage_status,teacher_reflection) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    )
+    .bind(
+      id,
+      org,
+      schemeId,
+      seq,
+      Number(d.weekNo),
+      d.lessonNo == null ? null : Number(d.lessonNo),
+      String(d.topic),
+      text(d.subtopic),
+      text(d.learningObjectives),
+      text(d.competencies),
+      text(d.teachingMethods),
+      text(d.learningMaterials),
+      text(d.referencesText),
+      text(d.plannedActivities),
+      text(d.assessmentActivities),
+      text(d.plannedDate),
+      d.coverageStatus || "planned",
+      text(d.teacherReflection),
+    )
+    .run();
+  await recalcCoverage(db, org, schemeId);
+  return { id };
+}
+async function recalcCoverage(db: D1Database, org: string, schemeId: string) {
+  const x = await one(
+      db
+        .prepare(
+          "SELECT COUNT(*) total,SUM(CASE WHEN coverage_status='covered' THEN 1 ELSE 0 END) covered FROM acad_scheme_items WHERE organization_id=? AND scheme_id=?",
+        )
+        .bind(org, schemeId),
+    ),
+    pct = Number(x?.total || 0)
+      ? Math.round((Number(x.covered || 0) * 1000) / Number(x.total)) / 10
+      : 0;
+  await db
+    .prepare(
+      "UPDATE acad_schemes SET coverage_percent=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+    )
+    .bind(pct, schemeId, org)
+    .run();
+  return pct;
+}
+export async function updateSchemeItem(
+  db: D1Database,
+  org: string,
+  id: string,
+  d: any,
+) {
+  const item = await owned(db, "acad_scheme_items", id, org, "Scheme item");
+  await db
+    .prepare(
+      `UPDATE acad_scheme_items SET week_no=COALESCE(?,week_no),lesson_no=?,topic=COALESCE(?,topic),subtopic=?,learning_objectives=?,competencies=?,teaching_methods=?,learning_materials=?,references_text=?,planned_activities=?,assessment_activities=?,planned_date=?,coverage_status=COALESCE(?,coverage_status),teacher_reflection=?,covered_at=CASE WHEN ?='covered' THEN COALESCE(covered_at,CURRENT_TIMESTAMP) WHEN ? IS NOT NULL AND ?<>'covered' THEN NULL ELSE covered_at END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`,
+    )
+    .bind(
+      d.weekNo == null ? null : Number(d.weekNo),
+      d.lessonNo == null ? null : Number(d.lessonNo),
+      text(d.topic),
+      text(d.subtopic),
+      text(d.learningObjectives),
+      text(d.competencies),
+      text(d.teachingMethods),
+      text(d.learningMaterials),
+      text(d.referencesText),
+      text(d.plannedActivities),
+      text(d.assessmentActivities),
+      text(d.plannedDate),
+      text(d.coverageStatus),
+      text(d.teacherReflection),
+      text(d.coverageStatus),
+      text(d.coverageStatus),
+      text(d.coverageStatus),
+      id,
+      org,
+    )
+    .run();
+  await recalcCoverage(db, org, item.scheme_id);
+  return { id };
+}
+export async function schemeWorkflow(
+  db: D1Database,
+  org: string,
+  id: string,
+  userId: string,
+  action: string,
+  feedback?: string,
+) {
+  const s = await owned(db, "acad_schemes", id, org, "Scheme of work"),
+    map: any = {
+      submit_hod: { from: ["draft", "rejected"], to: "submitted_hod" },
+      hod_approve: { from: ["submitted_hod"], to: "hod_approved" },
+      submit_dos: { from: ["hod_approved"], to: "submitted_dos" },
+      dos_approve: { from: ["submitted_dos"], to: "approved" },
+      reject: { from: ["submitted_hod", "submitted_dos"], to: "rejected" },
+    };
+  const x = map[action];
+  if (!x || !x.from.includes(s.status))
+    throw new AppError(
+      409,
+      "INVALID_STATUS",
+      `Cannot ${action.replaceAll("_", " ")} from ${s.status}.`,
+    );
+  await snapshotScheme(
+    db,
+    org,
+    id,
+    userId,
+    `${action}${feedback ? `: ${feedback}` : ""}`,
+  );
+  let extra = "",
+    vals: any[] = [x.to];
+  if (action === "hod_approve") {
+    extra =
+      ",hod_feedback=?,hod_reviewed_by=?,hod_reviewed_at=CURRENT_TIMESTAMP";
+    vals.push(text(feedback), userId);
+  } else if (action === "dos_approve") {
+    extra =
+      ",dos_feedback=?,dos_approved_by=?,dos_approved_at=CURRENT_TIMESTAMP";
+    vals.push(text(feedback), userId);
+  } else if (action === "reject") {
+    extra =
+      s.status === "submitted_hod" ? ",hod_feedback=?" : ",dos_feedback=?";
+    vals.push(text(feedback));
+  }
+  vals.push(id, org);
+  await db
+    .prepare(
+      `UPDATE acad_schemes SET status=?${extra},updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`,
+    )
+    .bind(...vals)
+    .run();
+  return schemeDetail(db, org, id);
+}
 
-export async function listObservations(db:D1Database,org:string){return rows(db.prepare(`SELECT o.id,o.observation_type AS observationType,o.scheduled_for AS scheduledFor,o.observed_at AS observedAt,o.status,o.teacher_user_id AS teacherUserId,TRIM(tp.first_name||' '||tp.last_name) teacherName,o.observer_user_id AS observerUserId,COALESCE(ou.display_name,o.observer_user_id) observerName,o.class_id AS classId,c.name className,o.subject_id AS subjectId,s.name subjectName,o.strengths,o.areas_for_improvement AS areasForImprovement,o.recommendations,o.followup_date AS followupDate,o.teacher_acknowledged_at AS teacherAcknowledgedAt FROM acad_observations o LEFT JOIN school_staff_profiles tp ON tp.organization_id=o.organization_id AND tp.user_id=o.teacher_user_id LEFT JOIN users ou ON ou.id=o.observer_user_id LEFT JOIN school_classes c ON c.id=o.class_id LEFT JOIN school_subjects s ON s.id=o.subject_id WHERE o.organization_id=? ORDER BY COALESCE(o.observed_at,o.scheduled_for) DESC`).bind(org))}
-export async function createObservation(db:D1Database,org:string,userId:string,d:any){const id=createId("aob");await db.prepare(`INSERT INTO acad_observations(id,organization_id,observation_type,scheduled_for,observed_at,teacher_user_id,observer_user_id,class_id,stream_id,subject_id,lesson_plan_id,status,rubric_json,preparation_score,teaching_methods_score,classroom_management_score,learner_participation_score,materials_use_score,time_management_score,strengths,areas_for_improvement,recommendations,confidential_notes,followup_date,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,org,d.observationType||"classroom",text(d.scheduledFor),text(d.observedAt),d.teacherUserId,d.observerUserId||userId,text(d.classId),text(d.streamId),text(d.subjectId),text(d.lessonPlanId),d.status||"scheduled",JSON.stringify(d.rubric||{}),d.preparationScore??null,d.teachingMethodsScore??null,d.classroomManagementScore??null,d.learnerParticipationScore??null,d.materialsUseScore??null,d.timeManagementScore??null,text(d.strengths),text(d.areasForImprovement),text(d.recommendations),text(d.confidentialNotes),text(d.followupDate),userId).run();return{id}}
-export async function updateObservation(db:D1Database,org:string,id:string,d:any){await owned(db,"acad_observations",id,org,"Observation");await db.prepare(`UPDATE acad_observations SET observed_at=COALESCE(?,observed_at),status=COALESCE(?,status),rubric_json=COALESCE(?,rubric_json),preparation_score=COALESCE(?,preparation_score),teaching_methods_score=COALESCE(?,teaching_methods_score),classroom_management_score=COALESCE(?,classroom_management_score),learner_participation_score=COALESCE(?,learner_participation_score),materials_use_score=COALESCE(?,materials_use_score),time_management_score=COALESCE(?,time_management_score),strengths=?,areas_for_improvement=?,recommendations=?,confidential_notes=?,teacher_response=COALESCE(?,teacher_response),followup_date=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).bind(text(d.observedAt),text(d.status),d.rubric?JSON.stringify(d.rubric):null,d.preparationScore??null,d.teachingMethodsScore??null,d.classroomManagementScore??null,d.learnerParticipationScore??null,d.materialsUseScore??null,d.timeManagementScore??null,text(d.strengths),text(d.areasForImprovement),text(d.recommendations),text(d.confidentialNotes),text(d.teacherResponse),text(d.followupDate),id,org).run();return owned(db,"acad_observations",id,org,"Observation")}
-export async function acknowledgeObservation(db:D1Database,org:string,id:string,userId:string,response?:string){const x=await owned(db,"acad_observations",id,org,"Observation");if(x.teacher_user_id!==userId)throw new AppError(403,"FORBIDDEN","Only the observed teacher can acknowledge this observation.");await db.prepare("UPDATE acad_observations SET status=CASE WHEN followup_date IS NULL THEN 'acknowledged' ELSE 'followup_due' END,teacher_acknowledged_at=CURRENT_TIMESTAMP,teacher_response=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(text(response),id,org).run();return{id}}
+export const listTemplates = (db: D1Database, org: string) =>
+  rows(
+    db
+      .prepare(
+        "SELECT id,name,description,template_json AS templateJson,active FROM acad_lesson_plan_templates WHERE organization_id=? AND active=1 ORDER BY name",
+      )
+      .bind(org),
+  );
+export async function createTemplate(
+  db: D1Database,
+  org: string,
+  userId: string,
+  d: any,
+) {
+  const id = createId("alt");
+  await db
+    .prepare(
+      "INSERT INTO acad_lesson_plan_templates(id,organization_id,name,description,template_json,created_by) VALUES (?,?,?,?,?,?)",
+    )
+    .bind(
+      id,
+      org,
+      String(d.name),
+      text(d.description),
+      JSON.stringify(d.template || {}),
+      userId,
+    )
+    .run();
+  return { id };
+}
+export async function listLessonPlans(db: D1Database, org: string) {
+  return rows(
+    db
+      .prepare(
+        `SELECT p.id,p.lesson_date AS lessonDate,p.topic,p.subtopic,p.status,p.class_id AS classId,c.name className,p.subject_id AS subjectId,s.name subjectName,p.teacher_user_id AS teacherUserId,TRIM(sp.first_name||' '||sp.last_name) teacherName,p.hod_feedback AS hodFeedback,p.updated_at AS updatedAt FROM acad_lesson_plans p JOIN school_classes c ON c.id=p.class_id JOIN school_subjects s ON s.id=p.subject_id LEFT JOIN school_staff_profiles sp ON sp.organization_id=p.organization_id AND sp.user_id=p.teacher_user_id WHERE p.organization_id=? ORDER BY p.lesson_date DESC,p.updated_at DESC LIMIT 500`,
+      )
+      .bind(org),
+  );
+}
+export async function createLessonPlan(
+  db: D1Database,
+  org: string,
+  userId: string,
+  d: any,
+) {
+  const id = createId("alp");
+  await db
+    .prepare(
+      `INSERT INTO acad_lesson_plans(id,organization_id,academic_year_id,term_id,class_id,stream_id,subject_id,teacher_user_id,timetable_entry_id,scheme_item_id,template_id,lesson_date,week_no,lesson_no,topic,subtopic,lesson_objectives,prior_knowledge,introduction_text,lesson_development,teacher_activities,learner_activities,teaching_methods,required_materials,differentiated_instruction,special_needs_accommodations,lesson_assessment,lesson_conclusion,homework,teacher_reflection,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    )
+    .bind(
+      id,
+      org,
+      d.academicYearId,
+      d.termId,
+      d.classId,
+      text(d.streamId),
+      d.subjectId,
+      d.teacherUserId,
+      text(d.timetableEntryId),
+      text(d.schemeItemId),
+      text(d.templateId),
+      d.lessonDate,
+      d.weekNo == null ? null : Number(d.weekNo),
+      d.lessonNo == null ? null : Number(d.lessonNo),
+      String(d.topic),
+      text(d.subtopic),
+      text(d.lessonObjectives),
+      text(d.priorKnowledge),
+      text(d.introductionText),
+      text(d.lessonDevelopment),
+      text(d.teacherActivities),
+      text(d.learnerActivities),
+      text(d.teachingMethods),
+      text(d.requiredMaterials),
+      text(d.differentiatedInstruction),
+      text(d.specialNeedsAccommodations),
+      text(d.lessonAssessment),
+      text(d.lessonConclusion),
+      text(d.homework),
+      text(d.teacherReflection),
+      userId,
+    )
+    .run();
+  return { id };
+}
+export async function lessonPlanDetail(
+  db: D1Database,
+  org: string,
+  id: string,
+) {
+  return owned(db, "acad_lesson_plans", id, org, "Lesson plan");
+}
+export async function updateLessonPlan(
+  db: D1Database,
+  org: string,
+  id: string,
+  d: any,
+) {
+  const p = await owned(db, "acad_lesson_plans", id, org, "Lesson plan");
+  if (p.status === "approved" || p.status === "delivered")
+    throw new AppError(
+      409,
+      "LESSON_PLAN_LOCKED",
+      "Approved or delivered lesson plans are locked.",
+    );
+  const fields = [
+    "topic",
+    "subtopic",
+    "lesson_objectives",
+    "prior_knowledge",
+    "introduction_text",
+    "lesson_development",
+    "teacher_activities",
+    "learner_activities",
+    "teaching_methods",
+    "required_materials",
+    "differentiated_instruction",
+    "special_needs_accommodations",
+    "lesson_assessment",
+    "lesson_conclusion",
+    "homework",
+    "teacher_reflection",
+  ];
+  const map: any = {
+    lessonObjectives: "lesson_objectives",
+    priorKnowledge: "prior_knowledge",
+    introductionText: "introduction_text",
+    lessonDevelopment: "lesson_development",
+    teacherActivities: "teacher_activities",
+    learnerActivities: "learner_activities",
+    teachingMethods: "teaching_methods",
+    requiredMaterials: "required_materials",
+    differentiatedInstruction: "differentiated_instruction",
+    specialNeedsAccommodations: "special_needs_accommodations",
+    lessonAssessment: "lesson_assessment",
+    lessonConclusion: "lesson_conclusion",
+    teacherReflection: "teacher_reflection",
+  };
+  const sets: any[] = [],
+    vals: any[] = [];
+  for (const [k, v] of Object.entries(d)) {
+    const col = map[k] || k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
+    if (fields.includes(col)) {
+      sets.push(`${col}=?`);
+      vals.push(text(v));
+    }
+  }
+  if (sets.length)
+    await db
+      .prepare(
+        `UPDATE acad_lesson_plans SET ${sets.join(",")},updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`,
+      )
+      .bind(...vals, id, org)
+      .run();
+  return owned(db, "acad_lesson_plans", id, org, "Lesson plan");
+}
+export async function lessonWorkflow(
+  db: D1Database,
+  org: string,
+  id: string,
+  userId: string,
+  action: string,
+  feedback?: string,
+) {
+  const p = await owned(db, "acad_lesson_plans", id, org, "Lesson plan");
+  if (action === "submit" && p.status === "draft")
+    await db
+      .prepare(
+        "UPDATE acad_lesson_plans SET status='submitted',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+      )
+      .bind(id, org)
+      .run();
+  else if (action === "approve" && p.status === "submitted")
+    await db
+      .prepare(
+        "UPDATE acad_lesson_plans SET status='approved',hod_feedback=?,approved_by=?,approved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+      )
+      .bind(text(feedback), userId, id, org)
+      .run();
+  else if (action === "reject" && p.status === "submitted")
+    await db
+      .prepare(
+        "UPDATE acad_lesson_plans SET status='rejected',hod_feedback=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+      )
+      .bind(text(feedback), id, org)
+      .run();
+  else
+    throw new AppError(
+      409,
+      "INVALID_STATUS",
+      `Cannot ${action} this lesson plan from ${p.status}.`,
+    );
+  return owned(db, "acad_lesson_plans", id, org, "Lesson plan");
+}
 
-export async function listInspections(db:D1Database,org:string){return rows(db.prepare(`SELECT i.id,i.inspection_type AS inspectionType,i.inspected_on AS inspectedOn,i.status,i.teacher_user_id AS teacherUserId,TRIM(sp.first_name||' '||sp.last_name) teacherName,i.class_id AS classId,c.name className,i.subject_id AS subjectId,s.name subjectName,i.sample_size AS sampleSize,i.quantity_of_work AS quantityOfWork,i.quality_of_marking AS qualityOfMarking,i.date_of_last_marking AS dateOfLastMarking,i.findings,i.recommendations,i.teacher_response AS teacherResponse,i.followup_date AS followupDate FROM acad_inspections i LEFT JOIN school_staff_profiles sp ON sp.organization_id=i.organization_id AND sp.user_id=i.teacher_user_id LEFT JOIN school_classes c ON c.id=i.class_id LEFT JOIN school_subjects s ON s.id=i.subject_id WHERE i.organization_id=? ORDER BY i.inspected_on DESC,i.created_at DESC`).bind(org))}
-export async function createInspection(db:D1Database,org:string,userId:string,d:any){const id=createId("ain");await db.prepare(`INSERT INTO acad_inspections(id,organization_id,inspection_type,inspected_on,inspector_user_id,teacher_user_id,class_id,stream_id,subject_id,sample_size,quantity_of_work,quality_of_marking,correction_feedback_checks,date_of_last_marking,findings,recommendations,teacher_response,followup_date,status,confidential_notes,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,org,d.inspectionType,d.inspectedOn,d.inspectorUserId||userId,text(d.teacherUserId),text(d.classId),text(d.streamId),text(d.subjectId),d.sampleSize==null?null:Number(d.sampleSize),text(d.quantityOfWork),text(d.qualityOfMarking),text(d.correctionFeedbackChecks),text(d.dateOfLastMarking),String(d.findings),text(d.recommendations),text(d.teacherResponse),text(d.followupDate),d.status||"open",text(d.confidentialNotes),userId).run();if(Array.isArray(d.samples)){const st=d.samples.slice(0,100).map((x:any)=>db.prepare("INSERT INTO acad_inspection_samples(id,organization_id,inspection_id,student_id,sample_label,findings) VALUES (?,?,?,?,?,?)").bind(createId("ais"),org,id,text(x.studentId),text(x.sampleLabel),text(x.findings)));if(st.length)await db.batch(st)}return{id}}
-export async function updateInspection(db:D1Database,org:string,id:string,d:any){await owned(db,"acad_inspections",id,org,"Inspection");await db.prepare("UPDATE acad_inspections SET status=COALESCE(?,status),quantity_of_work=?,quality_of_marking=?,correction_feedback_checks=?,date_of_last_marking=?,findings=COALESCE(?,findings),recommendations=?,teacher_response=?,followup_date=?,confidential_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(text(d.status),text(d.quantityOfWork),text(d.qualityOfMarking),text(d.correctionFeedbackChecks),text(d.dateOfLastMarking),text(d.findings),text(d.recommendations),text(d.teacherResponse),text(d.followupDate),text(d.confidentialNotes),id,org).run();return owned(db,"acad_inspections",id,org,"Inspection")}
+export async function syncDeliveriesFromTimetable(
+  db: D1Database,
+  org: string,
+  userId: string,
+  timetableId: string,
+  date: string,
+) {
+  const t = await owned(db, "acad_timetables", timetableId, org, "Timetable");
+  if (t.status !== "published")
+    throw new AppError(
+      409,
+      "TIMETABLE_NOT_PUBLISHED",
+      "Publish the timetable before generating the scheduled lesson register.",
+    );
+  const js = new Date(`${date}T00:00:00Z`).getUTCDay(),
+    weekday = js === 0 ? 7 : js;
+  const es = await rows(
+    db
+      .prepare(
+        "SELECT * FROM acad_timetable_entries WHERE organization_id=? AND timetable_id=? AND weekday=? AND active=1",
+      )
+      .bind(org, timetableId, weekday),
+  );
+  let created = 0;
+  const stmts = [];
+  for (const e of es) {
+    const id = createId("adl");
+    stmts.push(
+      db
+        .prepare(
+          `INSERT OR IGNORE INTO acad_lesson_deliveries(id,organization_id,timetable_entry_id,academic_year_id,term_id,class_id,stream_id,subject_id,teacher_user_id,scheduled_date,scheduled_starts_at,scheduled_ends_at,created_by) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM acad_lesson_deliveries WHERE organization_id=? AND timetable_entry_id=? AND scheduled_date=?)`,
+        )
+        .bind(
+          id,
+          org,
+          e.id,
+          t.academic_year_id,
+          t.term_id,
+          e.class_id,
+          e.stream_id,
+          e.subject_id,
+          e.teacher_user_id,
+          date,
+          e.starts_at,
+          e.ends_at,
+          userId,
+          org,
+          e.id,
+          date,
+        ),
+    );
+    created++;
+  }
+  for (let i = 0; i < stmts.length; i += 50)
+    await db.batch(stmts.slice(i, i + 50));
+  return { scheduled: es.length, attempted: created };
+}
+export async function listDeliveries(
+  db: D1Database,
+  org: string,
+  date?: string,
+) {
+  const params: any[] = [org];
+  let where = "";
+  if (date) {
+    where = " AND d.scheduled_date=?";
+    params.push(date);
+  }
+  return rows(
+    db
+      .prepare(
+        `SELECT d.id,d.scheduled_date AS scheduledDate,d.scheduled_starts_at AS scheduledStartsAt,d.scheduled_ends_at AS scheduledEndsAt,d.actual_starts_at AS actualStartsAt,d.actual_ends_at AS actualEndsAt,d.delivery_status AS deliveryStatus,d.actual_topic AS actualTopic,d.actual_subtopic AS actualSubtopic,d.student_attendance_summary AS studentAttendanceSummary,d.lesson_notes AS lessonNotes,d.missed_reason AS missedReason,d.recovery_date AS recoveryDate,d.class_id AS classId,c.name className,d.subject_id AS subjectId,s.name subjectName,d.teacher_user_id AS teacherUserId,TRIM(sp.first_name||' '||sp.last_name) teacherName,d.lesson_plan_id AS lessonPlanId,d.timetable_entry_id AS timetableEntryId,CASE WHEN d.timetable_entry_id IS NULL THEN 0 ELSE 1 END AS timetableMatched FROM acad_lesson_deliveries d JOIN school_classes c ON c.id=d.class_id JOIN school_subjects s ON s.id=d.subject_id LEFT JOIN school_staff_profiles sp ON sp.organization_id=d.organization_id AND sp.user_id=d.teacher_user_id WHERE d.organization_id=?${where} ORDER BY d.scheduled_date DESC,d.scheduled_starts_at`,
+      )
+      .bind(...params),
+  );
+}
+export async function updateDelivery(
+  db: D1Database,
+  org: string,
+  id: string,
+  d: any,
+) {
+  const x = await owned(
+    db,
+    "acad_lesson_deliveries",
+    id,
+    org,
+    "Lesson delivery",
+  );
+  let attendance = text(d.studentAttendanceSummary);
+  if (d.attendanceSessionId) {
+    const a = await one(
+      db
+        .prepare(
+          `SELECT COUNT(*) total,SUM(CASE WHEN status IN ('present','late') THEN 1 ELSE 0 END) present,SUM(CASE WHEN status='absent' THEN 1 ELSE 0 END) absent FROM att_records WHERE organization_id=? AND session_id=? AND person_type='student' AND official=1`,
+        )
+        .bind(org, d.attendanceSessionId),
+    );
+    attendance = JSON.stringify({
+      total: Number(a?.total || 0),
+      present: Number(a?.present || 0),
+      absent: Number(a?.absent || 0),
+    });
+  }
+  await db
+    .prepare(
+      `UPDATE acad_lesson_deliveries SET lesson_plan_id=COALESCE(?,lesson_plan_id),substitute_teacher_user_id=?,canonical_attendance_session_id=?,actual_starts_at=?,actual_ends_at=?,delivery_status=COALESCE(?,delivery_status),actual_topic=?,actual_subtopic=?,student_attendance_summary=?,lesson_notes=?,missed_reason=?,recovery_date=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`,
+    )
+    .bind(
+      text(d.lessonPlanId),
+      text(d.substituteTeacherUserId),
+      text(d.attendanceSessionId),
+      text(d.actualStartsAt),
+      text(d.actualEndsAt),
+      text(d.deliveryStatus),
+      text(d.actualTopic),
+      text(d.actualSubtopic),
+      attendance,
+      text(d.lessonNotes),
+      text(d.missedReason),
+      text(d.recoveryDate),
+      id,
+      org,
+    )
+    .run();
+  if (d.deliveryStatus === "taught" && d.lessonPlanId) {
+    const p = await one(
+      db
+        .prepare(
+          "SELECT scheme_item_id AS schemeItemId FROM acad_lesson_plans WHERE id=? AND organization_id=?",
+        )
+        .bind(d.lessonPlanId, org),
+    );
+    await db
+      .prepare(
+        "UPDATE acad_lesson_plans SET status='delivered',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+      )
+      .bind(d.lessonPlanId, org)
+      .run();
+    if (p?.schemeItemId) {
+      const item = await one(
+        db
+          .prepare(
+            "SELECT scheme_id AS schemeId FROM acad_scheme_items WHERE id=? AND organization_id=?",
+          )
+          .bind(p.schemeItemId, org),
+      );
+      await db
+        .prepare(
+          "UPDATE acad_scheme_items SET coverage_status='covered',covered_at=CURRENT_TIMESTAMP,teacher_reflection=COALESCE(?,teacher_reflection),updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+        )
+        .bind(text(d.lessonNotes), p.schemeItemId, org)
+        .run();
+      if (item?.schemeId) await recalcCoverage(db, org, item.schemeId);
+    }
+  }
+  return owned(db, "acad_lesson_deliveries", id, org, "Lesson delivery");
+}
+export async function attachFile(
+  db: D1Database,
+  org: string,
+  userId: string,
+  kind: "delivery" | "observation" | "inspection",
+  entityId: string,
+  fileId: string,
+  caption?: string,
+) {
+  const map: any = {
+    delivery: [
+      "acad_lesson_deliveries",
+      "acad_delivery_attachments",
+      "delivery_id",
+      "adl",
+    ],
+    observation: [
+      "acad_observations",
+      "acad_observation_attachments",
+      "observation_id",
+      "aoa",
+    ],
+    inspection: [
+      "acad_inspections",
+      "acad_inspection_attachments",
+      "inspection_id",
+      "aia",
+    ],
+  };
+  const [entityTable, table, fk, prefix] = map[kind];
+  await owned(db, entityTable, entityId, org, kind);
+  if (
+    !(await one(
+      db
+        .prepare(
+          "SELECT 1 FROM school_files WHERE id=? AND organization_id=? AND deleted_at IS NULL",
+        )
+        .bind(fileId, org),
+    ))
+  )
+    throw new AppError(
+      422,
+      "INVALID_FILE",
+      "Select a file uploaded to this school.",
+    );
+  const id = createId(prefix);
+  await db
+    .prepare(
+      `INSERT OR IGNORE INTO ${table}(id,organization_id,${fk},file_id,caption,uploaded_by) VALUES (?,?,?,?,?,?)`,
+    )
+    .bind(id, org, entityId, fileId, text(caption), userId)
+    .run();
+  return { id, fileId };
+}
+
+export async function listObservations(db: D1Database, org: string) {
+  return rows(
+    db
+      .prepare(
+        `SELECT o.id,o.observation_type AS observationType,o.scheduled_for AS scheduledFor,o.observed_at AS observedAt,o.status,o.teacher_user_id AS teacherUserId,TRIM(tp.first_name||' '||tp.last_name) teacherName,o.observer_user_id AS observerUserId,COALESCE(ou.display_name,o.observer_user_id) observerName,o.class_id AS classId,c.name className,o.subject_id AS subjectId,s.name subjectName,o.strengths,o.areas_for_improvement AS areasForImprovement,o.recommendations,o.followup_date AS followupDate,o.teacher_acknowledged_at AS teacherAcknowledgedAt FROM acad_observations o LEFT JOIN school_staff_profiles tp ON tp.organization_id=o.organization_id AND tp.user_id=o.teacher_user_id LEFT JOIN users ou ON ou.id=o.observer_user_id LEFT JOIN school_classes c ON c.id=o.class_id LEFT JOIN school_subjects s ON s.id=o.subject_id WHERE o.organization_id=? ORDER BY COALESCE(o.observed_at,o.scheduled_for) DESC`,
+      )
+      .bind(org),
+  );
+}
+export async function createObservation(
+  db: D1Database,
+  org: string,
+  userId: string,
+  d: any,
+) {
+  const id = createId("aob");
+  await db
+    .prepare(
+      `INSERT INTO acad_observations(id,organization_id,observation_type,scheduled_for,observed_at,teacher_user_id,observer_user_id,class_id,stream_id,subject_id,lesson_plan_id,status,rubric_json,preparation_score,teaching_methods_score,classroom_management_score,learner_participation_score,materials_use_score,time_management_score,strengths,areas_for_improvement,recommendations,confidential_notes,followup_date,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    )
+    .bind(
+      id,
+      org,
+      d.observationType || "classroom",
+      text(d.scheduledFor),
+      text(d.observedAt),
+      d.teacherUserId,
+      d.observerUserId || userId,
+      text(d.classId),
+      text(d.streamId),
+      text(d.subjectId),
+      text(d.lessonPlanId),
+      d.status || "scheduled",
+      JSON.stringify(d.rubric || {}),
+      d.preparationScore ?? null,
+      d.teachingMethodsScore ?? null,
+      d.classroomManagementScore ?? null,
+      d.learnerParticipationScore ?? null,
+      d.materialsUseScore ?? null,
+      d.timeManagementScore ?? null,
+      text(d.strengths),
+      text(d.areasForImprovement),
+      text(d.recommendations),
+      text(d.confidentialNotes),
+      text(d.followupDate),
+      userId,
+    )
+    .run();
+  return { id };
+}
+export async function updateObservation(
+  db: D1Database,
+  org: string,
+  id: string,
+  d: any,
+) {
+  await owned(db, "acad_observations", id, org, "Observation");
+  await db
+    .prepare(
+      `UPDATE acad_observations SET observed_at=COALESCE(?,observed_at),status=COALESCE(?,status),rubric_json=COALESCE(?,rubric_json),preparation_score=COALESCE(?,preparation_score),teaching_methods_score=COALESCE(?,teaching_methods_score),classroom_management_score=COALESCE(?,classroom_management_score),learner_participation_score=COALESCE(?,learner_participation_score),materials_use_score=COALESCE(?,materials_use_score),time_management_score=COALESCE(?,time_management_score),strengths=?,areas_for_improvement=?,recommendations=?,confidential_notes=?,teacher_response=COALESCE(?,teacher_response),followup_date=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`,
+    )
+    .bind(
+      text(d.observedAt),
+      text(d.status),
+      d.rubric ? JSON.stringify(d.rubric) : null,
+      d.preparationScore ?? null,
+      d.teachingMethodsScore ?? null,
+      d.classroomManagementScore ?? null,
+      d.learnerParticipationScore ?? null,
+      d.materialsUseScore ?? null,
+      d.timeManagementScore ?? null,
+      text(d.strengths),
+      text(d.areasForImprovement),
+      text(d.recommendations),
+      text(d.confidentialNotes),
+      text(d.teacherResponse),
+      text(d.followupDate),
+      id,
+      org,
+    )
+    .run();
+  return owned(db, "acad_observations", id, org, "Observation");
+}
+export async function acknowledgeObservation(
+  db: D1Database,
+  org: string,
+  id: string,
+  userId: string,
+  response?: string,
+) {
+  const x = await owned(db, "acad_observations", id, org, "Observation");
+  if (x.teacher_user_id !== userId)
+    throw new AppError(
+      403,
+      "FORBIDDEN",
+      "Only the observed teacher can acknowledge this observation.",
+    );
+  await db
+    .prepare(
+      "UPDATE acad_observations SET status=CASE WHEN followup_date IS NULL THEN 'acknowledged' ELSE 'followup_due' END,teacher_acknowledged_at=CURRENT_TIMESTAMP,teacher_response=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+    )
+    .bind(text(response), id, org)
+    .run();
+  return { id };
+}
+
+export async function listInspections(db: D1Database, org: string) {
+  return rows(
+    db
+      .prepare(
+        `SELECT i.id,i.inspection_type AS inspectionType,i.inspected_on AS inspectedOn,i.status,i.teacher_user_id AS teacherUserId,TRIM(sp.first_name||' '||sp.last_name) teacherName,i.class_id AS classId,c.name className,i.subject_id AS subjectId,s.name subjectName,i.sample_size AS sampleSize,i.quantity_of_work AS quantityOfWork,i.quality_of_marking AS qualityOfMarking,i.date_of_last_marking AS dateOfLastMarking,i.findings,i.recommendations,i.teacher_response AS teacherResponse,i.followup_date AS followupDate FROM acad_inspections i LEFT JOIN school_staff_profiles sp ON sp.organization_id=i.organization_id AND sp.user_id=i.teacher_user_id LEFT JOIN school_classes c ON c.id=i.class_id LEFT JOIN school_subjects s ON s.id=i.subject_id WHERE i.organization_id=? ORDER BY i.inspected_on DESC,i.created_at DESC`,
+      )
+      .bind(org),
+  );
+}
+export async function createInspection(
+  db: D1Database,
+  org: string,
+  userId: string,
+  d: any,
+) {
+  const id = createId("ain");
+  await db
+    .prepare(
+      `INSERT INTO acad_inspections(id,organization_id,inspection_type,inspected_on,inspector_user_id,teacher_user_id,class_id,stream_id,subject_id,sample_size,quantity_of_work,quality_of_marking,correction_feedback_checks,date_of_last_marking,findings,recommendations,teacher_response,followup_date,status,confidential_notes,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    )
+    .bind(
+      id,
+      org,
+      d.inspectionType,
+      d.inspectedOn,
+      d.inspectorUserId || userId,
+      text(d.teacherUserId),
+      text(d.classId),
+      text(d.streamId),
+      text(d.subjectId),
+      d.sampleSize == null ? null : Number(d.sampleSize),
+      text(d.quantityOfWork),
+      text(d.qualityOfMarking),
+      text(d.correctionFeedbackChecks),
+      text(d.dateOfLastMarking),
+      String(d.findings),
+      text(d.recommendations),
+      text(d.teacherResponse),
+      text(d.followupDate),
+      d.status || "open",
+      text(d.confidentialNotes),
+      userId,
+    )
+    .run();
+  if (Array.isArray(d.samples)) {
+    const st = d.samples
+      .slice(0, 100)
+      .map((x: any) =>
+        db
+          .prepare(
+            "INSERT INTO acad_inspection_samples(id,organization_id,inspection_id,student_id,sample_label,findings) VALUES (?,?,?,?,?,?)",
+          )
+          .bind(
+            createId("ais"),
+            org,
+            id,
+            text(x.studentId),
+            text(x.sampleLabel),
+            text(x.findings),
+          ),
+      );
+    if (st.length) await db.batch(st);
+  }
+  return { id };
+}
+export async function updateInspection(
+  db: D1Database,
+  org: string,
+  id: string,
+  d: any,
+) {
+  await owned(db, "acad_inspections", id, org, "Inspection");
+  await db
+    .prepare(
+      "UPDATE acad_inspections SET status=COALESCE(?,status),quantity_of_work=?,quality_of_marking=?,correction_feedback_checks=?,date_of_last_marking=?,findings=COALESCE(?,findings),recommendations=?,teacher_response=?,followup_date=?,confidential_notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?",
+    )
+    .bind(
+      text(d.status),
+      text(d.quantityOfWork),
+      text(d.qualityOfMarking),
+      text(d.correctionFeedbackChecks),
+      text(d.dateOfLastMarking),
+      text(d.findings),
+      text(d.recommendations),
+      text(d.teacherResponse),
+      text(d.followupDate),
+      text(d.confidentialNotes),
+      id,
+      org,
+    )
+    .run();
+  return owned(db, "acad_inspections", id, org, "Inspection");
+}
