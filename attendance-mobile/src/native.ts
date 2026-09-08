@@ -5,6 +5,7 @@ export const DeviceManager=NativeModules.DeviceManager as {deviceFingerprint():P
 export const OfflineStore=NativeModules.OfflineStore as {enqueue(id:string,payload:string):Promise<string>;pending(limit:number):Promise<QueueRow[]>;failed(limit:number):Promise<QueueRow[]>;acknowledge(ids:string[]):Promise<number>;fail(ids:string[],message:string):Promise<number>;reject(ids:string[],message:string):Promise<number>;retryFailed():Promise<boolean>;count():Promise<number>;failedCount():Promise<number>;putSecure(key:string,value:string):Promise<boolean>;getSecure(key:string):Promise<string|null>;removeSecure(key:string):Promise<number>};
 export const KioskManager=NativeModules.KioskManager as {status():Promise<{deviceOwner:boolean;lockTaskPermitted:boolean}>;enter():Promise<boolean>;exit():Promise<boolean>};
 export const LedgerlyNfc=NativeModules.LedgerlyNfc as {isSupported():Promise<boolean>;enable():Promise<boolean>;disable():Promise<boolean>};
+export const FilePicker=NativeModules.FilePicker as {pick():Promise<{uri:string;name:string;mimeType:string;size:number}|null>};
 export const FaceEngine=NativeModules.FaceEngine as {
   configure(matchThreshold:number,ambiguityMargin:number,livenessThreshold:number,qualityThreshold:number):Promise<boolean>;
   healthCheck():Promise<{healthy:boolean;provider:string;livenessRequired:boolean;templateCount:number;modelError?:string|null}>;
