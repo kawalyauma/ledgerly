@@ -1,0 +1,19 @@
+{
+  "key": "ledgerly-core",
+  "name": "Ledgerly Finance Core",
+  "version": "1.0.0",
+  "description": "Core accounting, finance operations and authoritative offline finance projections for Ledgerly.",
+  "category": "finance",
+  "core": true,
+  "active": true,
+  "manifest": {
+    "standalone": true,
+    "requiresModules": ["contacts"],
+    "integratesWith": ["school-management","payroll-payments","human-resources"],
+    "offline": true,
+    "mobileSourceOfTruth": "server",
+    "offlineWritable": ["document-intents","journal-intents"],
+    "offlineForbidden": ["posting","reversals","period-closing","bank-reconciliation","approvals"],
+    "features": ["chart-of-accounts","journals","documents","banking","budgets","fiscal-periods","inventory","tax","reports","projects","dimensions","offline-draft-intents","year-scale-mobile-change-feed"]
+  }
+}
