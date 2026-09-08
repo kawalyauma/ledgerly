@@ -6,7 +6,7 @@ import { securityCameraServerRoutes } from "./server-routes";
 export const moduleDefinition: BackendModuleDefinition = {
   key: "security-camera",
   name: "Security Cameras",
-  version: "0.4.0",
+  version: "0.5.0",
   order: 43,
   publicRoutes: [
     { basePath: "/api/v1/security-camera", router: securityCameraDeviceRoutes },

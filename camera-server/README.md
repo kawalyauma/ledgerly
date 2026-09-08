@@ -1,82 +1,122 @@
 # Ledgerly Camera Server
 
-Local-first NVR appliance for Ledgerly Security Cameras. Android camera phones record short MP4 segments and send them directly over the LAN to this computer. Video bytes stay on the local disk; Ledgerly cloud stores identity, configuration, health, recording metadata and live-session control state.
+Local-first NVR appliance for Ledgerly Security Cameras. Android camera devices publish a single authenticated WebRTC feed to the local computer. MediaMTX records that same feed to local disk and exposes WHEP for authorized live viewers. Ledgerly cloud coordinates identity, permissions, health and archive metadata; the continuous video archive remains on the NVR.
+
+## Runtime architecture
+
+```text
+Ledgerly Camera phone
+  ├─ WHIP/WebRTC ────────────> MediaMTX on local NVR
+  │                            ├─ continuous fMP4 recording
+  │                            └─ WHEP fan-out to live viewers
+  └─ MP4 segment fallback ───> camera-server control daemon
+                               └─ durable local archive
+
+camera-server ── outbound HTTPS ──> Ledgerly control plane
+```
+
+Live viewing does not start a second capture on the phone. It reads the NVR's existing feed, so local recording continues while users watch.
 
 ## Requirements
 
 - Node.js 20+
-- FFmpeg (kept for RTSP/SRT/HTTP camera compatibility)
-- A local disk for recordings
-- The computer and camera phones on the same LAN/Wi-Fi
+- Docker/Compose for the bundled MediaMTX service, or MediaMTX 1.21+ installed separately
+- FFmpeg for legacy/external network-camera recorder inputs
+- A local disk sized for your retention policy
 
-## Pair the NVR
-
-1. In Ledgerly open **Security → Cameras → Pair NVR**.
-2. Give the server a name/location and generate a one-time pairing token.
-3. Start the server with that token once:
+## 1. Start MediaMTX
 
 ```bash
 cd camera-server
-LEDGERLY_API_URL='https://your-ledgerly-host' \
+docker compose up -d
+```
+
+The bundled configuration uses:
+
+- WHIP/WHEP HTTP signaling on port `8889`
+- WebRTC ICE UDP/TCP on port `8189`
+- HTTP authorization callback to the local camera-server daemon
+- 5-minute fMP4 recording segments under `camera-storage/<camera-id>/`
+
+Publishing requires the paired phone's device credential. Reading requires a short-lived viewer token issued by authenticated Ledgerly web. Do not replace the bundled HTTP auth configuration with anonymous MediaMTX access.
+
+## 2. Pair and start the control daemon
+
+In Ledgerly web open **Security → Cameras → Pair NVR**, create a one-time token, then run:
+
+```bash
+cd camera-server
+LEDGERLY_API_URL='https://YOUR-LEDGERLY-URL' \
 CAMERA_SERVER_PAIRING_TOKEN='LEDGERLY-CAMERA-SERVER:1:...' \
 CAMERA_LOCAL_BASE_URL='http://192.168.1.20:8789' \
-CAMERA_SERVER_HOST=0.0.0.0 \
-CAMERA_STORAGE_ROOT=/srv/ledgerly-cameras \
+CAMERA_WEBRTC_BASE_URL='http://192.168.1.20:8889' \
+CAMERA_STORAGE_ROOT='./camera-storage' \
 npm start
 ```
 
-The resulting server credential is stored in `camera-server-state.json` with mode `0600`. On subsequent starts the pairing token is not required.
+The pairing token is consumed once. The resulting long-lived NVR credential is stored in `camera-server-state.json` with restrictive file permissions.
 
-## Continuous phone recording
+## Remote live viewing
 
-After an Android camera is assigned to this NVR, Ledgerly Mobile receives an ingest URL such as:
+LAN viewing can use `CAMERA_WEBRTC_BASE_URL` directly. For viewing from outside the school, expose the NVR through an authenticated VPN or secure HTTPS tunnel and set:
 
-```text
-http://192.168.1.20:8789/v1/ingest/cam_xxx/segments
+```bash
+CAMERA_WEBRTC_PUBLIC_BASE_URL='https://camera-school.example.com'
 ```
 
-The phone records approximately 20-second MP4 segments. Each segment is authenticated using the camera's existing Ledgerly device credential and sent directly to the NVR. If the NVR/Wi-Fi is temporarily unavailable, the phone keeps a persistent pending-segment queue and retries later.
+Do not publicly expose raw RTSP or an anonymous MediaMTX endpoint. The public endpoint must forward the MediaMTX WHEP/WHIP HTTP service and provide a network path for WebRTC ICE traffic (direct UDP/TCP or TURN where required).
 
-Files are stored under:
+## Recording and outage behavior
+
+Normal path:
 
 ```text
-<storage-root>/<camera-id>/YYYY-MM-DD_HH-MM-SS.mp4
+phone -> WHIP/WebRTC -> MediaMTX -> local disk
 ```
 
-The server periodically synchronizes only segment metadata (camera, timestamps, local path, size and protection state) back to Ledgerly.
+If the WebRTC media service cannot be reached, Ledgerly Mobile falls back to short MP4 recording segments. Segments are moved into a bounded Android internal-storage spool and retried against the NVR control daemon when connectivity returns. This prevents an NVR/media restart from creating an immediate recording gap.
 
-## Cloud coordination
-
-The NVR performs outbound HTTPS only:
-
-- pairs once using a one-time server token;
-- heartbeat every ~15 seconds;
-- downloads its assigned cameras and credential hashes;
-- uploads recording metadata in batches;
-- receives short-lived live-view signaling requests.
-
-No inbound Internet port is required for cloud control. The local ingest endpoint is intended for the trusted LAN.
+The NVR scans completed MediaMTX files and synchronizes only recording metadata to Ledgerly. Video bytes remain local.
 
 ## Retention
+
+Optional settings:
 
 ```text
 CAMERA_RETENTION_DAYS=30
 CAMERA_MAX_STORAGE_PERCENT=90
 CAMERA_CLEANUP_INTERVAL_MS=3600000
+CAMERA_SEGMENT_SECONDS=300
+CAMERA_SERVER_PORT=8789
+CAMERA_SERVER_HOST=0.0.0.0
+FFMPEG_BIN=ffmpeg
 ```
 
-Oldest unprotected footage is removed first. `.protected` sidecars prevent automatic deletion.
+Cleanup removes unprotected recordings older than the retention window and then removes the oldest unprotected files if disk usage remains above the configured threshold. Protected clips are exempt.
 
-## Local API
+## Android appliance behavior
+
+A paired Security Camera device starts a sticky foreground keepalive service, holds a partial wake lock, reports battery/temperature/thermal state, reconnects the NVR stream after failure, and relaunches the dedicated camera activity after boot. Capture pauses automatically at severe thermal levels and resumes after the device cools.
+
+For permanent installations keep the phone ventilated, screen brightness low, away from direct sun, and use conservative 720p/15fps settings on older hardware.
+
+## Control API
+
+Public/local read endpoints:
 
 - `GET /health`
 - `GET /v1/storage`
 - `GET /v1/assignments`
 - `GET /v1/cameras`
-- `GET /v1/cameras/:id/recordings`
 - `GET /v1/cameras/:id/summary`
-- `POST /v1/ingest/:cameraId/segments` — Android segmented MP4 ingest
-- `POST /v1/cameras/:id/recordings/:segment/protect`
-- `POST /v1/retention/cleanup`
+- `GET /v1/cameras/:id/recordings`
 
-`CAMERA_SERVER_KEY` remains available for administrative local mutation endpoints.
+Camera ingest:
+
+- `POST /v1/ingest/:cameraId/segments` — authenticated fallback MP4 upload
+
+Local MediaMTX callback:
+
+- `POST /v1/media/auth` — loopback-only WHIP/WHEP authorization
+
+Administrative control endpoints requiring `X-Ledgerly-Server-Key` remain available for retention, clip protection and legacy FFmpeg recorder control.
