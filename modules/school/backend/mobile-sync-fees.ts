@@ -1,0 +1,25 @@
+import { z } from "zod";
+import { AppError } from "../../../src/lib/errors";
+import type { MobileSyncMutation,MobileSyncMutationContext,PreparedMobileSyncMutation } from "../../mobile-sync/backend/contracts";
+import { registerMobileSyncCollection } from "../../mobile-sync/backend/registry";
+import { requireFeesRead,requireFeesWrite } from "./mobile-sync-fees-permissions";
+import { snapshotFeeBalances,snapshotFeeCharges,snapshotFeePaymentMethods,snapshotFeePlans,snapshotFeeReceiptIntents,snapshotFeeReceipts } from "./mobile-sync-fees-snapshots";
+const intent=z.object({studentId:z.string().max(160).nullable().optional(),payerContactId:z.string().max(160).nullable().optional(),paymentMethodId:z.string().min(3).max(160),paymentDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/),currency:z.string().length(3).toUpperCase().default("UGX"),amountMinor:z.number().int().positive(),reference:z.string().max(200).nullable().optional(),notes:z.string().max(2000).nullable().optional(),supportingFileId:z.string().max(160).nullable().optional(),allocations:z.array(z.object({documentId:z.string().min(3).max(160),amountMinor:z.number().int().positive()})).max(200).default([]),autoAllocate:z.boolean().default(true),capturedAt:z.string().datetime().optional()}).strict();
+async function prepareIntent(c:MobileSyncMutationContext,m:MobileSyncMutation):Promise<PreparedMobileSyncMutation>{
+ await requireFeesWrite(c);if(m.kind==="delete")throw new AppError(409,"APPEND_ONLY_COLLECTION","Offline receipt intents cannot be deleted from mobile");
+ if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,149}$/.test(m.recordId))throw new AppError(422,"INVALID_RECEIPT_INTENT_ID","Use a stable UUID-style receipt intent ID");
+ const p=intent.safeParse(m.payload);if(!p.success)throw new AppError(422,"VALIDATION_ERROR","Invalid offline fee receipt intent",p.error.flatten());const d=p.data;
+ if(!d.studentId&&!d.payerContactId)throw new AppError(422,"PAYER_REQUIRED","Select a student or payer before capturing a receipt");
+ if(d.allocations.reduce((n,x)=>n+x.amountMinor,0)>d.amountMinor)throw new AppError(422,"INVALID_ALLOCATION","Offline allocations cannot exceed the captured amount");
+ const existing=await c.db.prepare("SELECT 1 FROM school_mobile_fee_receipt_intents WHERE id=? AND organization_id=?").bind(m.recordId,c.organizationId).first();if(existing)throw new AppError(409,"RECEIPT_INTENT_EXISTS","This receipt intent already exists");
+ const payload={id:m.recordId,...d,capturedAt:d.capturedAt??m.clientTimestamp,status:"pending",officialReceiptId:null,paymentId:null,attempts:0,lastError:null};
+ return {statements:[c.db.prepare(`INSERT INTO school_mobile_fee_receipt_intents(id,organization_id,device_id,student_id,payer_contact_id,payment_method_id,supporting_file_id,payment_date,currency,amount_minor,reference,notes,allocations_json,auto_allocate,captured_at,status,created_by)
+  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)`).bind(m.recordId,c.organizationId,c.deviceId,d.studentId??null,d.payerContactId??null,d.paymentMethodId,d.supportingFileId??null,d.paymentDate,d.currency,d.amountMinor,d.reference??null,d.notes??null,JSON.stringify(d.allocations),d.autoAllocate?1:0,d.capturedAt??m.clientTimestamp,c.userId)],serverPayload:payload,result:{intentId:m.recordId,status:"pending",requiresServerPosting:true}};
+}
+const read={pullScope:"school:read",authorizePull:requireFeesRead} as const;
+registerMobileSyncCollection({moduleKey:"school-management",collectionKey:"fee-payment-methods",schemaVersion:1,mode:"read-only",sourceOfTruth:"server",conflictPolicy:"server-wins",...read,snapshot:snapshotFeePaymentMethods});
+registerMobileSyncCollection({moduleKey:"school-management",collectionKey:"fee-charges",schemaVersion:1,mode:"read-only",sourceOfTruth:"server",conflictPolicy:"server-wins",...read,dependsOn:[{moduleKey:"school-management",collectionKey:"students"}],snapshot:snapshotFeeCharges});
+registerMobileSyncCollection({moduleKey:"school-management",collectionKey:"fee-receipts",schemaVersion:1,mode:"read-only",sourceOfTruth:"server",conflictPolicy:"server-wins",...read,snapshot:snapshotFeeReceipts});
+registerMobileSyncCollection({moduleKey:"school-management",collectionKey:"fee-balances",schemaVersion:1,mode:"read-only",sourceOfTruth:"server",conflictPolicy:"server-wins",...read,dependsOn:[{moduleKey:"school-management",collectionKey:"students"}],snapshot:snapshotFeeBalances});
+registerMobileSyncCollection({moduleKey:"school-management",collectionKey:"fee-payment-plans",schemaVersion:1,mode:"read-only",sourceOfTruth:"server",conflictPolicy:"server-wins",...read,snapshot:snapshotFeePlans});
+registerMobileSyncCollection({moduleKey:"school-management",collectionKey:"fee-receipt-intents",schemaVersion:1,mode:"append-only",sourceOfTruth:"server",conflictPolicy:"append-only",...read,pushScope:"school:write",authorizePush:requireFeesWrite,dependsOn:[{moduleKey:"school-management",collectionKey:"students"},{moduleKey:"school-management",collectionKey:"fee-payment-methods"}],prepareMutation:prepareIntent,snapshot:snapshotFeeReceiptIntents});
