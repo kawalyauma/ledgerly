@@ -1,14 +1,14 @@
 {
   "key": "printerly",
   "name": "Printerly",
-  "version": "1.2.0",
-  "description": "Secure remote printing, Scannerly, printer-health monitoring and print-cost accounting for Ledgerly using always-online local Printerly Nodes.",
+  "version": "1.3.0",
+  "description": "Secure remote printing, Scannerly, printer-health monitoring, print-cost accounting and usage reporting for Ledgerly using always-online local Printerly Nodes.",
   "category": "operations",
   "core": false,
   "active": true,
   "manifest": {
     "standalone": true,
-    "sharedCore": ["organizations", "users", "permissions", "files", "projects", "dimensions", "journals", "notifications"],
+    "sharedCore": ["organizations", "users", "permissions", "files", "projects", "dimensions", "journals", "notifications", "reports"],
     "features": [
       "remote-printing",
       "global-print-with-printerly",
@@ -22,6 +22,9 @@
       "sane-scanner-discovery",
       "student-staff-scan-routing",
       "finance-academics-exams-scan-inbox",
+      "usage-reporting",
+      "daily-requester-department-project-printer-breakdowns",
+      "csv-usage-export",
       "private-r2-print-documents",
       "printerly-node-pairing",
       "central-print-queue",
