@@ -1,3 +1,4 @@
+import "./mobile-sync-adapter";
 import type { BackendModuleDefinition } from "../../backend-types";
 import { schoolRoutes } from "./index";
 import { runScheduledFeeBilling } from "./fees/billing";
