@@ -13,18 +13,30 @@ import {AttendanceWorkspaceScreen} from "./src/mobile/attendance/AttendanceWorks
 import {SchoolWorkspaceScreen} from "./src/mobile/school/SchoolWorkspaceScreen";
 import {AcademicsWorkspaceScreen} from "./src/mobile/academics/AcademicsWorkspaceScreen";
 import {ExamsWorkspaceScreen} from "./src/mobile/exams/ExamsWorkspaceScreen";
+import {DevicePurposeScreen} from "./src/mobile/device-purpose/DevicePurposeScreen";
+import {clearDevicePurpose,readDevicePurpose,saveDevicePurpose,type DevicePurpose} from "./src/mobile/device-purpose/devicePurpose";
+import {CameraModeScreen} from "./src/mobile/camera/CameraModeScreen";
 
 type Route="home"|"attendance"|"school"|"academics"|"exams";
 export default function App(){
-  const[ready,setReady]=useState(false),[onboarded,setOnboarded]=useState(false),[session,setSession]=useState<MobileSession|null>(null),[route,setRoute]=useState<Route>("home"),[attendanceView,setAttendanceView]=useState<"landing"|"workspace"|"register"|"kiosk">("landing"),[registration,setRegistration]=useState<Registration|null|undefined>(undefined);
-  useEffect(()=>{let live=true;(async()=>{const[seen,saved,device]=await Promise.all([onboardingComplete().catch(()=>false),readMobileSession().catch(()=>null),DeviceManager.getRegistration().catch(()=>null)]);if(!live)return;setOnboarded(seen);setRegistration(device);if(saved){try{const renewed=await refreshMobile(saved);if(live){await saveMobileSession(renewed);setSession(renewed)}}catch(e:any){if(e?.status===401){await clearMobileSession()}else if(live)setSession(saved)}}setReady(true)})();return()=>{live=false}},[]);
+  const[ready,setReady]=useState(false),[onboarded,setOnboarded]=useState(false),[session,setSession]=useState<MobileSession|null>(null),[purpose,setPurpose]=useState<DevicePurpose|null>(null),[route,setRoute]=useState<Route>("home"),[attendanceView,setAttendanceView]=useState<"landing"|"workspace"|"register"|"kiosk">("landing"),[registration,setRegistration]=useState<Registration|null|undefined>(undefined);
+  useEffect(()=>{let live=true;(async()=>{const[seen,saved,device,savedPurpose]=await Promise.all([onboardingComplete().catch(()=>false),readMobileSession().catch(()=>null),DeviceManager.getRegistration().catch(()=>null),readDevicePurpose().catch(()=>null)]);if(!live)return;setOnboarded(seen);setRegistration(device);setPurpose(savedPurpose);if(saved){try{const renewed=await refreshMobile(saved);if(live){await saveMobileSession(renewed);setSession(renewed)}}catch(e:any){if(e?.status===401){await clearMobileSession()}else if(live)setSession(saved)}}setReady(true)})();return()=>{live=false}},[]);
   async function finishOnboarding(){await completeOnboarding();setOnboarded(true)}
   async function signedIn(next:MobileSession){await saveMobileSession(next);setSession(next);setRoute("home")}
   async function updateSession(next:MobileSession){await saveMobileSession(next);setSession(next)}
+  async function choosePurpose(next:DevicePurpose){await saveDevicePurpose(next);setPurpose(next);setRoute(next==="attendance-kiosk"?"attendance":"home");setAttendanceView(next==="attendance-kiosk"?(registration?"kiosk":"register"):"landing")}
+  async function changePurpose(){await clearDevicePurpose();setPurpose(null);setRoute("home");setAttendanceView("landing")}
   function requestLogout(){Alert.alert("Sign out?","You will need your Ledgerly credentials to sign in again.",[{text:"Cancel",style:"cancel"},{text:"Sign out",style:"destructive",onPress:()=>{const current=session;setSession(null);setRoute("home");void clearMobileSession();if(current)void logoutMobile(current)}}])}
   if(!ready)return <View style={s.loading}><StatusBar barStyle="light-content" backgroundColor="#071c16"/><View style={s.loaderMark}><Text style={s.loaderLetter}>L</Text></View><ActivityIndicator color="#55c894" style={{marginTop:18}}/><Text style={s.loadingText}>Preparing Ledgerly Mobile</Text></View>;
   if(!onboarded)return <OnboardingScreen onDone={()=>void finishOnboarding()}/>;
   if(!session)return <LoginScreen onLogin={signedIn}/>;
+  if(!purpose)return <DevicePurposeScreen onSelect={next=>void choosePurpose(next)}/>;
+  if(purpose==="security-camera")return <CameraModeScreen session={session} onChangePurpose={()=>void changePurpose()}/>;
+  if(purpose==="attendance-kiosk"){
+    if(registration===undefined)return <View style={s.loading}><ActivityIndicator color="#55c894"/></View>;
+    if(!registration)return <ActivationScreen onActivated={(next:Registration)=>{setRegistration(next);setAttendanceView("kiosk")}}/>;
+    return <><StatusBar hidden/><KioskScreen registration={registration} onReset={()=>{setRegistration(null);setAttendanceView("register")}}/></>;
+  }
   if(route==="school")return <SchoolWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setRoute("home")}/>;
   if(route==="academics")return <AcademicsWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setRoute("home")}/>;
   if(route==="exams")return <ExamsWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setRoute("home")}/>;
