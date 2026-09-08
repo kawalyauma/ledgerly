@@ -9,7 +9,7 @@ export class WhipPublisher{
  constructor(private streamConfig:CameraStreamConfig,private capture:CameraConfig["capture"],private onState:(state:State)=>void){}
  private auth(){const token=this.streamConfig.publishToken;if(!token)throw new Error("NVR publish token is unavailable");return{Authorization:`Bearer ${token}`}}
  async start(){if(!this.streamConfig.whipUrl||this.pc)return;this.stopped=false;this.onState({status:"connecting",stream:null});try{
-  const stream=await mediaDevices.getUserMedia({audio:false,video:{facingMode:"environment",width:{ideal:this.capture.width},height:{ideal:this.capture.height},frameRate:{ideal:this.capture.fps,max:this.capture.fps}} as any});if(this.stopped){stream.getTracks().forEach(t=>t.stop());return}
+  const stream=await mediaDevices.getUserMedia({audio:false,video:{facingMode:this.capture.preferredFacing==="front"?"user":"environment",width:{ideal:this.capture.width},height:{ideal:this.capture.height},frameRate:{ideal:this.capture.fps,max:this.capture.fps}} as any});if(this.stopped){stream.getTracks().forEach(t=>t.stop());return}
   const pc=new RTCPeerConnection({iceServers:this.streamConfig.iceServers as any});this.stream=stream;this.pc=pc;stream.getTracks().forEach(track=>pc.addTrack(track,stream));
   pc.addEventListener("connectionstatechange",()=>{if(this.stopped)return;if(pc.connectionState==="connected")this.onState({status:"online",stream});else if(["failed","disconnected","closed"].includes(pc.connectionState))this.onState({status:"failed",stream,error:`WebRTC ${pc.connectionState}`})});
   const offer=await pc.createOffer();await pc.setLocalDescription(offer);await waitForIce(pc);const sdp=pc.localDescription?.sdp;if(!sdp)throw new Error("Unable to create WHIP offer");

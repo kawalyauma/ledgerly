@@ -1,11 +1,11 @@
 {
   "name": "ledgerly-camera-server",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node src/index.mjs",
-    "check": "node --check src/index.mjs && node --check src/recorder.mjs && node --check src/catalog.mjs && node --check src/cloud.mjs && node --check src/ingest.mjs"
+    "check": "node --check src/index.mjs && node --check src/recorder.mjs && node --check src/catalog.mjs && node --check src/cloud.mjs && node --check src/ingest.mjs && node --check src/storage-pool.mjs && node --check src/media-files.mjs"
   },
   "engines": {"node": ">=20.0.0"}
 }
