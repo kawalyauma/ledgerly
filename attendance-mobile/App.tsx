@@ -18,12 +18,13 @@ import {HumanResourcesWorkspaceScreen} from "./src/mobile/human-resources/HumanR
 import {PayrollPaymentsWorkspaceScreen} from "./src/mobile/payroll-payments/PayrollPaymentsWorkspaceScreen";
 import {ContactsWorkspaceScreen} from "./src/mobile/contacts/ContactsWorkspaceScreen";
 import {CommunicationsWorkspaceScreen} from "./src/mobile/communications/CommunicationsWorkspaceScreen";
+import {TasksWorkWorkspaceScreen} from "./src/mobile/tasks-work/TasksWorkWorkspaceScreen";
 import {DevicePurposeScreen} from "./src/mobile/device-purpose/DevicePurposeScreen";
 import {clearDevicePurpose,readDevicePurpose,saveDevicePurpose,type DevicePurpose} from "./src/mobile/device-purpose/devicePurpose";
 import {CameraModeScreen} from "./src/mobile/camera/CameraModeScreen";
 import {clearCameraRegistration} from "./src/mobile/camera/api";
 
-type Route="home"|"attendance"|"school"|"academics"|"exams"|"books"|"human-resources"|"payroll-payments"|"contacts"|"communications";
+type Route="home"|"attendance"|"school"|"academics"|"exams"|"books"|"human-resources"|"payroll-payments"|"contacts"|"communications"|"tasks-work";
 export default function App(){
   const[ready,setReady]=useState(false),[onboarded,setOnboarded]=useState(false),[session,setSession]=useState<MobileSession|null>(null),[purpose,setPurpose]=useState<DevicePurpose|null>(null),[route,setRoute]=useState<Route>("home"),[attendanceView,setAttendanceView]=useState<"landing"|"workspace"|"register"|"kiosk">("landing"),[registration,setRegistration]=useState<Registration|null|undefined>(undefined);
   useEffect(()=>{let live=true;(async()=>{const[seen,saved,device,savedPurpose]=await Promise.all([onboardingComplete().catch(()=>false),readMobileSession().catch(()=>null),DeviceManager.getRegistration().catch(()=>null),readDevicePurpose().catch(()=>null)]);if(!live)return;setOnboarded(seen);setRegistration(device);setPurpose(savedPurpose);if(saved){try{const renewed=await refreshMobile(saved);if(live){await saveMobileSession(renewed);setSession(renewed)}}catch(e:any){if(e?.status===401){await clearMobileSession()}else if(live)setSession(saved)}}setReady(true)})();return()=>{live=false}},[]);
@@ -51,6 +52,7 @@ export default function App(){
   if(route==="payroll-payments")return <PayrollPaymentsWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setRoute("home")}/>;
   if(route==="contacts")return <ContactsWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setRoute("home")}/>;
   if(route==="communications")return <CommunicationsWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setRoute("home")}/>;
+  if(route==="tasks-work")return <TasksWorkWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setRoute("home")}/>;
   if(route==="attendance"){
     if(registration===undefined)return <View style={s.loading}><ActivityIndicator color="#55c894"/></View>;
     if(attendanceView==="register")return <ActivationScreen onActivated={(next:Registration)=>{setRegistration(next);setAttendanceView("landing")}}/>;
@@ -58,6 +60,6 @@ export default function App(){
     if(attendanceView==="workspace")return <AttendanceWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setAttendanceView("landing")} onOpenKiosk={()=>setAttendanceView(registration?"kiosk":"register")}/>;
     return <AttendanceModuleScreen registration={registration} onBack={()=>setRoute("home")} onWorkspace={()=>setAttendanceView("workspace")} onRegister={()=>setAttendanceView("register")} onLaunch={()=>setAttendanceView("kiosk")}/>;
   }
-  return <HomeScreen session={session} onAttendance={()=>{setAttendanceView("landing");setRoute("attendance")}} onSchool={()=>setRoute("school")} onAcademics={()=>setRoute("academics")} onExams={()=>setRoute("exams")} onBooks={()=>setRoute("books")} onHumanResources={()=>setRoute("human-resources")} onPayrollPayments={()=>setRoute("payroll-payments")} onContacts={()=>setRoute("contacts")} onCommunications={()=>setRoute("communications")} onLogout={requestLogout}/>;
+  return <HomeScreen session={session} onAttendance={()=>{setAttendanceView("landing");setRoute("attendance")}} onSchool={()=>setRoute("school")} onAcademics={()=>setRoute("academics")} onExams={()=>setRoute("exams")} onBooks={()=>setRoute("books")} onHumanResources={()=>setRoute("human-resources")} onPayrollPayments={()=>setRoute("payroll-payments")} onContacts={()=>setRoute("contacts")} onCommunications={()=>setRoute("communications")} onTasksWork={()=>setRoute("tasks-work")} onLogout={requestLogout}/>;
 }
 const s=StyleSheet.create({loading:{flex:1,backgroundColor:"#071c16",alignItems:"center",justifyContent:"center"},loaderMark:{width:58,height:58,borderRadius:18,backgroundColor:"#19955f",alignItems:"center",justifyContent:"center"},loaderLetter:{color:"white",fontSize:30,fontWeight:"900"},loadingText:{color:"#9fb9ae",fontSize:12,fontWeight:"800",marginTop:10}});

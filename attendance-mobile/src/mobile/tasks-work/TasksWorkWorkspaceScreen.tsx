@@ -1,0 +1,13 @@
+import {SafeAreaView,ScrollView,StatusBar,StyleSheet,Text,TouchableOpacity,View} from "react-native";
+import {useState} from "react";
+import type {MobileSession} from "../auth";
+import type {SessionUpdater} from "../apiClient";
+import {OverviewTab} from "./OverviewTab";
+import {TasksTab} from "./TasksTab";
+import {ProjectsTab} from "./ProjectsTab";
+import {InboxTab} from "./InboxTab";
+import {SetupTab} from "./SetupTab";
+type Tab="overview"|"tasks"|"projects"|"inbox"|"setup";
+const tabs:[Tab,string,string][]=[["overview","Overview","O"],["tasks","Tasks","T"],["projects","Projects","P"],["inbox","Inbox","I"],["setup","Setup","S"]];
+export function TasksWorkWorkspaceScreen({session,onSession,onBack}:{session:MobileSession;onSession:SessionUpdater;onBack:()=>void}){const[tab,setTab]=useState<Tab>("overview");return <SafeAreaView style={s.root}><StatusBar barStyle="light-content" backgroundColor="#1d2f49"/><View style={s.header}><TouchableOpacity onPress={onBack} style={s.back}><Text style={s.backText}>‹</Text></TouchableOpacity><View><Text style={s.eyebrow}>LEDGERLY MOBILE · MODULE 10</Text><Text style={s.title}>Tasks & Work</Text></View></View><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.tabs}>{tabs.map(([key,label,icon])=><TouchableOpacity key={key} onPress={()=>setTab(key)} style={[s.tab,tab===key&&s.tabOn]}><Text style={[s.tabIcon,tab===key&&s.tabTextOn]}>{icon}</Text><Text style={[s.tabText,tab===key&&s.tabTextOn]}>{label}</Text></TouchableOpacity>)}</ScrollView><View style={s.body}>{tab==="overview"?<OverviewTab session={session} onSession={onSession}/>:tab==="tasks"?<TasksTab session={session} onSession={onSession}/>:tab==="projects"?<ProjectsTab session={session} onSession={onSession}/>:tab==="inbox"?<InboxTab session={session} onSession={onSession}/>:<SetupTab session={session} onSession={onSession}/>}</View></SafeAreaView>}
+const s=StyleSheet.create({root:{flex:1,backgroundColor:"#f3f6f4"},header:{height:76,backgroundColor:"#1d2f49",paddingHorizontal:14,flexDirection:"row",alignItems:"center",gap:12},back:{width:40,height:40,borderRadius:13,backgroundColor:"#2b4669",alignItems:"center",justifyContent:"center"},backText:{color:"white",fontSize:28,lineHeight:30},eyebrow:{fontSize:8,fontWeight:"900",letterSpacing:1.1,color:"#8ab9ff"},title:{fontSize:22,fontWeight:"900",color:"white",marginTop:3},tabs:{padding:10,gap:8,backgroundColor:"#e7edf4"},tab:{minWidth:82,height:52,borderRadius:14,backgroundColor:"#f6f8fa",alignItems:"center",justifyContent:"center",paddingHorizontal:10},tabOn:{backgroundColor:"#2b4b74"},tabIcon:{fontSize:11,fontWeight:"900",color:"#6f8196"},tabText:{fontSize:9,fontWeight:"900",color:"#5d7188",marginTop:2},tabTextOn:{color:"white"},body:{flex:1}});
