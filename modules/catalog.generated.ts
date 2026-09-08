@@ -61,7 +61,7 @@ export const moduleCatalog = [
   {
     "key": "attendance",
     "name": "Attendance",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "description": "Canonical student and staff attendance, devices, offline capture, biometrics, exceptions, corrections and reporting.",
     "category": "education",
     "core": false,
@@ -102,6 +102,7 @@ export const moduleCatalog = [
         "biometric-profiles",
         "test-spoof-controls",
         "devices",
+        "qr-kiosk-enrollment",
         "exceptions",
         "corrections",
         "reports",
@@ -119,6 +120,50 @@ export const moduleCatalog = [
       "faceTestOverrides": [
         "screen-image",
         "printed-image"
+      ]
+    }
+  },
+  {
+    "key": "books",
+    "name": "Books",
+    "version": "1.0.0",
+    "description": "Standalone writing-book stock, learner issue tracking and reporting linked to School Management learner and academic data.",
+    "category": "education",
+    "core": false,
+    "active": true,
+    "manifest": {
+      "standalone": true,
+      "requiresModules": [
+        "school-management"
+      ],
+      "requiresDataFrom": [
+        "school-management"
+      ],
+      "sharedCore": [
+        "organizations",
+        "users",
+        "school_students",
+        "school_classes",
+        "school_streams",
+        "school_academic_years",
+        "school_terms"
+      ],
+      "bookTypes": [
+        "small",
+        "a4"
+      ],
+      "features": [
+        "stock-receipts-and-adjustments",
+        "individual-learner-issues",
+        "bulk-class-and-stream-issues",
+        "transaction-reversals",
+        "learner-book-ledger",
+        "class-and-stream-reports",
+        "term-and-year-reports",
+        "stock-balance-report",
+        "unissued-learners-report",
+        "csv-export",
+        "audit-friendly-history"
       ]
     }
   },
