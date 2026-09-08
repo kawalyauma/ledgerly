@@ -1,0 +1,51 @@
+// @ts-nocheck
+import { AppError } from "../../../src/lib/errors";
+
+const now=()=>new Date().toISOString();
+const id=(prefix:string)=>`${prefix}_${crypto.randomUUID().replaceAll("-","")}`;
+const code=()=>String(Math.floor(100000+Math.random()*900000));
+const token=()=>`${crypto.randomUUID().replaceAll("-","")}${crypto.randomUUID().replaceAll("-","")}`;
+const hash=async(value:string)=>Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(value)))).map(x=>x.toString(16).padStart(2,"0")).join("");
+
+export async function overview(db:any,organizationId:string){
+  const [nodes,printers,jobs]=await Promise.all([
+    db.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status='online' THEN 1 ELSE 0 END) online FROM prn_nodes WHERE organization_id=? AND revoked_at IS NULL").bind(organizationId).first(),
+    db.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status='ready' THEN 1 ELSE 0 END) ready FROM prn_printers WHERE organization_id=?").bind(organizationId).first(),
+    db.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status IN ('queued','held','claimed','printing') THEN 1 ELSE 0 END) active, SUM(CASE WHEN status='completed' THEN COALESCE(total_sheets,0) ELSE 0 END) sheets FROM prn_jobs WHERE organization_id=?").bind(organizationId).first()
+  ]);
+  return {nodes,printers,jobs};
+}
+export async function listNodes(db:any,organizationId:string){return (await db.prepare("SELECT id,name,location,status,last_seen_at,version,created_at FROM prn_nodes WHERE organization_id=? AND revoked_at IS NULL ORDER BY created_at DESC").bind(organizationId).all()).results||[]}
+export async function createNode(db:any,organizationId:string,userId:string,data:any){
+  const nodeId=id("prnnode"),pairingCode=code(),created=now(),expires=new Date(Date.now()+10*60*1000).toISOString();
+  await db.prepare("INSERT INTO prn_nodes(id,organization_id,name,location,status,pairing_code_hash,pairing_expires_at,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)").bind(nodeId,organizationId,String(data.name||"Printerly Node").trim(),String(data.location||"").trim(),"pairing",await hash(pairingCode),expires,userId,created,created).run();
+  return {id:nodeId,pairingCode,pairingExpiresAt:expires};
+}
+export async function revokeNode(db:any,organizationId:string,nodeId:string){const t=now();const r=await db.prepare("UPDATE prn_nodes SET status='revoked',revoked_at=?,updated_at=? WHERE id=? AND organization_id=? AND revoked_at IS NULL").bind(t,t,nodeId,organizationId).run();if(!r.meta?.changes)throw new AppError(404,"NOT_FOUND","Printerly node not found");return {id:nodeId,status:"revoked"}}
+export async function pairNode(db:any,data:any){
+  const pairingCode=String(data.pairingCode||"").trim();if(!pairingCode)throw new AppError(422,"VALIDATION_ERROR","pairingCode is required");
+  const pairingHash=await hash(pairingCode);const node=await db.prepare("SELECT * FROM prn_nodes WHERE pairing_code_hash=? AND revoked_at IS NULL").bind(pairingHash).first();
+  if(!node||!node.pairing_expires_at||node.pairing_expires_at<now())throw new AppError(401,"PAIRING_INVALID","Pairing code is invalid or expired");
+  const secret=token(),secretHash=await hash(secret),t=now();
+  await db.prepare("UPDATE prn_nodes SET token_hash=?,pairing_code_hash=NULL,pairing_expires_at=NULL,status='online',last_seen_at=?,version=?,updated_at=? WHERE id=?").bind(secretHash,t,String(data.version||"1.0.0"),t,node.id).run();
+  return {nodeId:node.id,organizationId:node.organization_id,nodeToken:secret,name:node.name};
+}
+export async function authenticateNode(db:any,bearer:string){if(!bearer)throw new AppError(401,"NODE_UNAUTHORIZED","Missing Printerly node token");const node=await db.prepare("SELECT * FROM prn_nodes WHERE token_hash=? AND revoked_at IS NULL").bind(await hash(bearer)).first();if(!node)throw new AppError(401,"NODE_UNAUTHORIZED","Invalid Printerly node token");return node}
+export async function heartbeat(db:any,node:any,data:any){const t=now();await db.prepare("UPDATE prn_nodes SET status='online',last_seen_at=?,version=?,updated_at=? WHERE id=?").bind(t,String(data.version||node.version||""),t,node.id).run();for(const p of Array.isArray(data.printers)?data.printers:[]){const printerId=String(p.id||p.name||"").trim();if(!printerId)continue;await db.prepare("INSERT INTO prn_printers(id,organization_id,node_id,name,system_name,location,status,capabilities_json,last_seen_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,system_name=excluded.system_name,location=excluded.location,status=excluded.status,capabilities_json=excluded.capabilities_json,last_seen_at=excluded.last_seen_at,updated_at=excluded.updated_at").bind(printerId,node.organization_id,node.id,String(p.name||printerId),String(p.systemName||p.name||printerId),String(p.location||node.location||""),String(p.status||"ready"),JSON.stringify(p.capabilities||{}),t,t,t).run()}return {ok:true,serverTime:t}}
+export async function listPrinters(db:any,organizationId:string){return (await db.prepare("SELECT id,node_id nodeId,name,system_name systemName,location,status,capabilities_json capabilitiesJson,last_seen_at lastSeenAt FROM prn_printers WHERE organization_id=? ORDER BY name").bind(organizationId).all()).results||[]}
+export async function listJobs(db:any,organizationId:string,limit=100){return (await db.prepare("SELECT id,job_number jobNumber,title,status,priority,copies,page_size pageSize,color_mode colorMode,duplex,secure_release secureRelease,total_sheets totalSheets,printer_id printerId,node_id nodeId,error_message errorMessage,created_at createdAt,completed_at completedAt FROM prn_jobs WHERE organization_id=? ORDER BY created_at DESC LIMIT ?").bind(organizationId,Math.min(200,Math.max(1,limit))).all()).results||[]}
+export async function createJob(db:any,organizationId:string,userId:string,data:any){
+  const documentUrl=String(data.documentUrl||"").trim();if(!documentUrl)throw new AppError(422,"VALIDATION_ERROR","documentUrl is required");
+  const jobId=id("prnjob"),created=now(),copies=Math.max(1,Math.min(1000,Number(data.copies)||1)),pages=Math.max(1,Number(data.estimatedPages)||1),secure=Boolean(data.secureRelease),status=secure?"held":"queued",number=`PRT-${created.slice(0,4)}-${jobId.slice(-8).toUpperCase()}`;
+  await db.prepare("INSERT INTO prn_jobs(id,organization_id,job_number,title,document_url,document_mime,document_sha256,printer_id,status,priority,copies,page_size,color_mode,duplex,secure_release,total_sheets,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(jobId,organizationId,number,String(data.title||"Print job").trim(),documentUrl,String(data.documentMime||"application/pdf"),String(data.documentSha256||""),data.printerId||null,status,String(data.priority||"normal"),copies,String(data.pageSize||"A4"),String(data.colorMode||"monochrome"),data.duplex?1:0,secure?1:0,copies*pages,userId,created,created).run();
+  await addEvent(db,jobId,organizationId,"created",userId,{status});return {id:jobId,jobNumber:number,status};
+}
+export async function releaseJob(db:any,organizationId:string,userId:string,jobId:string){const t=now();const r=await db.prepare("UPDATE prn_jobs SET status='queued',released_at=?,updated_at=? WHERE id=? AND organization_id=? AND status='held'").bind(t,t,jobId,organizationId).run();if(!r.meta?.changes)throw new AppError(409,"INVALID_STATE","Only held jobs can be released");await addEvent(db,jobId,organizationId,"released",userId,{});return {id:jobId,status:"queued"}}
+export async function cancelJob(db:any,organizationId:string,userId:string,jobId:string){const t=now();const r=await db.prepare("UPDATE prn_jobs SET status='cancelled',updated_at=? WHERE id=? AND organization_id=? AND status IN ('queued','held')").bind(t,jobId,organizationId).run();if(!r.meta?.changes)throw new AppError(409,"INVALID_STATE","Only queued or held jobs can be cancelled");await addEvent(db,jobId,organizationId,"cancelled",userId,{});return {id:jobId,status:"cancelled"}}
+export async function claimJob(db:any,node:any,data:any){
+  const preferred=Array.isArray(data.printerIds)?data.printerIds.map(String):[];const placeholders=preferred.map(()=>"?").join(",");const printerClause=preferred.length?` AND (printer_id IS NULL OR printer_id IN (${placeholders}))`:"";
+  const args=[node.organization_id,...preferred];const job=await db.prepare(`SELECT * FROM prn_jobs WHERE organization_id=? AND status='queued' ${printerClause} ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at LIMIT 1`).bind(...args).first();if(!job)return null;
+  const claim=id("claim"),t=now(),expires=new Date(Date.now()+2*60*1000).toISOString();const r=await db.prepare("UPDATE prn_jobs SET status='claimed',node_id=?,claim_token=?,claim_expires_at=?,updated_at=? WHERE id=? AND status='queued'").bind(node.id,claim,expires,t,job.id).run();if(!r.meta?.changes)return null;await addEvent(db,job.id,node.organization_id,"claimed",node.id,{claim});return {...job,status:"claimed",node_id:node.id,claim_token:claim,claim_expires_at:expires};
+}
+export async function nodeJobStatus(db:any,node:any,jobId:string,data:any){const allowed=["downloading","spooling","printing","completed","failed"];const status=String(data.status||"");if(!allowed.includes(status))throw new AppError(422,"VALIDATION_ERROR","Invalid node job status");const t=now(),completed=status==="completed"?t:null;const r=await db.prepare("UPDATE prn_jobs SET status=?,error_message=?,completed_at=COALESCE(?,completed_at),updated_at=? WHERE id=? AND organization_id=? AND node_id=? AND claim_token=?").bind(status,String(data.errorMessage||""),completed,t,jobId,node.organization_id,node.id,String(data.claimToken||"")).run();if(!r.meta?.changes)throw new AppError(409,"CLAIM_INVALID","Job claim is no longer valid");await addEvent(db,jobId,node.organization_id,status,node.id,data);return {id:jobId,status}}
+async function addEvent(db:any,jobId:string,organizationId:string,event:string,actorId:string,details:any){await db.prepare("INSERT INTO prn_job_events(id,organization_id,job_id,event_type,actor_id,details_json,created_at) VALUES(?,?,?,?,?,?,?)").bind(id("prnev"),organizationId,jobId,event,actorId||null,JSON.stringify(details||{}),now()).run()}

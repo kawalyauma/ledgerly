@@ -1,0 +1,27 @@
+{
+  "key": "printerly",
+  "name": "Printerly",
+  "version": "1.0.0",
+  "description": "Secure remote print management for Ledgerly with always-online Printerly Nodes connected to local USB or network printers.",
+  "category": "operations",
+  "core": false,
+  "active": true,
+  "manifest": {
+    "standalone": true,
+    "sharedCore": ["organizations", "users", "permissions", "files"],
+    "features": [
+      "remote-printing",
+      "printerly-node-pairing",
+      "central-print-queue",
+      "priority-jobs",
+      "secure-release",
+      "copies-page-size-duplex-color",
+      "node-heartbeats",
+      "printer-status",
+      "idempotent-job-claiming",
+      "job-event-audit-trail",
+      "usage-reporting",
+      "linux-cups-appliance"
+    ]
+  }
+}
