@@ -1,15 +1,19 @@
 {
   "key": "books",
   "name": "Books",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Standalone writing-book stock, learner issue tracking and reporting linked to School Management learner and academic data.",
   "category": "education",
   "core": false,
   "active": true,
   "manifest": {
     "standalone": true,
-    "requiresModules": ["school-management"],
-    "requiresDataFrom": ["school-management"],
+    "requiresModules": [
+      "school-management"
+    ],
+    "requiresDataFrom": [
+      "school-management"
+    ],
     "sharedCore": [
       "organizations",
       "users",
@@ -19,7 +23,12 @@
       "school_academic_years",
       "school_terms"
     ],
-    "bookTypes": ["small", "a4"],
+    "bookTypes": [
+      "small",
+      "a4"
+    ],
+    "offline": true,
+    "offlineModel": "immutable-operation-intents",
     "features": [
       "stock-receipts-and-adjustments",
       "individual-learner-issues",
@@ -31,7 +40,9 @@
       "stock-balance-report",
       "unissued-learners-report",
       "csv-export",
-      "audit-friendly-history"
+      "audit-friendly-history",
+      "offline-stock-operation-intents",
+      "year-scale-mobile-change-feed"
     ]
   }
 }
