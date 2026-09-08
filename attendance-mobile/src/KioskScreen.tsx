@@ -9,6 +9,7 @@ import type {AttendanceEvent,Bootstrap,CaptureMethod,Direction,EnrollmentJob,Fac
 
 type Result={person:RosterPerson;method:CaptureMethod;verificationMode?:"STANDARD"|"TEST"};
 const sleep=(ms:number)=>new Promise<void>(resolve=>setTimeout(()=>resolve(),ms));
+type Inspection=Awaited<ReturnType<typeof FaceEngine.inspect>>;
 
 export function KioskScreen({registration,onReset}:{registration:Registration;onReset:()=>void}){
   const[bootstrap,setBootstrap]=useState<Bootstrap|null>(null),[faceState,setFaceState]=useState<FaceState|null>(null);
@@ -32,22 +33,40 @@ export function KioskScreen({registration,onReset}:{registration:Registration;on
   const scanner=useCodeScanner({codeTypes:["qr","code-128","code-39","ean-13","ean-8"],onCodeScanned:codes=>{const value=codes[0]?.value;if(value)void identifyCode(value,"QR")}});
   const testMode=!!(bootstrap?.testMode&&new Date(bootstrap.testMode.expiresAt)>new Date());
 
-  async function captureSequence(test=false):Promise<{photos:string[];challenge:FaceChallenge}>{
+  async function captureSequence(test=false,enrollment=false):Promise<{photos:string[];challenge:FaceChallenge;captureMs:number}>{
     if(!camera.current)throw new Error("Device camera is unavailable");
+    const started=Date.now();
     const challenge:FaceChallenge=Math.random()<0.5?"EYES_CLOSED":"TURN_HEAD";
-    const challengePrompt=challenge==="EYES_CLOSED"?"Close both eyes and hold":"Turn your head to either side and hold";
-    const prompts=test?["Hold the test image steady"]:["Look straight at the camera",challengePrompt,"Look straight at the camera again"];
     const photos:string[]=[];
-    for(const prompt of prompts){setFacePrompt(prompt);await sleep(test?900:1150);const p=await camera.current.takePhoto({flash:"off"});photos.push(p.path);await sleep(450)}
-    setFacePrompt("");return{photos,challenge};
+    async function waitFor(prompt:string,accept:(x:Inspection)=>boolean,timeout=9000){
+      const until=Date.now()+timeout;let last="";
+      while(Date.now()<until){
+        setFacePrompt(last&&last!=="ready"?last:prompt);
+        try{const shot=await camera.current.takeSnapshot({quality:85});const check=await FaceEngine.inspect(shot.path);last=check.guidance;if(accept(check)){photos.push(shot.path);return check}}catch(e){last=e instanceof Error&&/Only one face/.test(e.message)?"Only one face allowed":"Move your face into the frame"}
+        await sleep(140);
+      }
+      throw new Error(`${last||prompt}. Face capture timed out—follow the guide and try again.`)
+    }
+    const usable=(x:Inspection)=>x.faceArea>=.08&&x.brightness>=.22&&x.sharpness>=.18;
+    await waitFor("Look straight and hold still",x=>x.ready&&x.leftEyeOpen>.45&&x.rightEyeOpen>.45);
+    if(!test){
+      if(challenge==="EYES_CLOSED")await waitFor("Blink now",x=>usable(x)&&x.leftEyeOpen>=0&&x.rightEyeOpen>=0&&x.leftEyeOpen<.38&&x.rightEyeOpen<.38);
+      else await waitFor("Turn your head left or right",x=>usable(x)&&Math.abs(x.yaw)>=14);
+      await waitFor("Look straight again",x=>x.ready&&x.leftEyeOpen>.45&&x.rightEyeOpen>.45);
+      if(enrollment){
+        const side=await waitFor("Turn slightly to either side",x=>usable(x)&&Math.abs(x.yaw)>=7&&Math.abs(x.yaw)<=22);
+        await waitFor("Turn slightly to the other side",x=>usable(x)&&Math.abs(x.yaw)>=7&&Math.abs(x.yaw)<=22&&x.yaw*side.yaw<0);
+      }
+    }
+    setFacePrompt("");return{photos,challenge,captureMs:Date.now()-started};
   }
   async function face(){
     if(faceBusy||!camera.current||!device||!permission.hasPermission)return;setFaceBusy(true);setError("");
-    try{const health=await FaceEngine.healthCheck();if(!health.healthy)throw new Error(health.modelError||"Face recognition model is not installed. Use QR, NFC or supervised lookup.");if(!health.templateCount)throw new Error("No face templates are synced to this kiosk yet.");const allowScreen=!!bootstrap?.testMode?.allowScreenImage,allowPrinted=!!bootstrap?.testMode?.allowPrintedImage;const capture=await captureSequence(testMode);const match=await FaceEngine.identify(capture.photos,testMode,allowScreen,allowPrinted,capture.challenge);const person=bootstrap?.roster.find(p=>p.id===match.personId);if(!person||((person.staffNumber?"staff":"student")!==match.personType))throw new Error("Recognized person is not available on this kiosk roster.");await record(person,"FACE",{verificationMode:testMode?"TEST":"STANDARD",confidence:match.confidence,matchMargin:match.matchMargin,livenessScore:match.livenessScore,metadata:{testAllowScreenImage:allowScreen,testAllowPrintedImage:allowPrinted,activeLiveness:!testMode,livenessChallenge:testMode?"BYPASSED":capture.challenge,secondBestConfidence:match.secondBestConfidence,matchMargin:match.matchMargin,faceModel:"facenet-128-v1"}})}catch(e){setError(e instanceof Error?e.message:String(e))}finally{setFacePrompt("");setFaceBusy(false)}
+    try{const health=await FaceEngine.healthCheck();if(!health.healthy)throw new Error(health.modelError||"Face recognition model is not installed. Use QR, NFC or supervised lookup.");if(!health.templateCount)throw new Error("No face templates are synced to this kiosk yet.");const allowScreen=!!bootstrap?.testMode?.allowScreenImage,allowPrinted=!!bootstrap?.testMode?.allowPrintedImage;const capture=await captureSequence(testMode);const match=await FaceEngine.identify(capture.photos,testMode,allowScreen,allowPrinted,capture.challenge);const person=bootstrap?.roster.find(p=>p.id===match.personId);if(!person||((person.staffNumber?"staff":"student")!==match.personType))throw new Error("Recognized person is not available on this kiosk roster.");await record(person,"FACE",{verificationMode:testMode?"TEST":"STANDARD",confidence:match.confidence,matchMargin:match.matchMargin,livenessScore:match.livenessScore,metadata:{testAllowScreenImage:allowScreen,testAllowPrintedImage:allowPrinted,activeLiveness:!testMode,livenessChallenge:testMode?"BYPASSED":capture.challenge,secondBestConfidence:match.secondBestConfidence,matchMargin:match.matchMargin,faceModel:"facenet-128-v1",performance:{captureMs:capture.captureMs,...match.timings}}})}catch(e){setError(e instanceof Error?e.message:String(e))}finally{setFacePrompt("");setFaceBusy(false)}
   }
   async function enroll(job:NonNullable<EnrollmentJob>){
     if(faceBusy||!camera.current)return;setFaceBusy(true);setError("");
-    try{const health=await FaceEngine.healthCheck();if(!health.healthy)throw new Error(health.modelError||"Face recognition model is unavailable");await claimEnrollmentJob(registration,job.id);const capture=await captureSequence(false);const result=await FaceEngine.enroll(capture.photos,capture.challenge);await completeEnrollmentJob(registration,job.id,result);setFacePrompt("Enrollment saved");await syncFace();await refresh();setTimeout(()=>setFacePrompt(""),1600)}catch(e){const msg=e instanceof Error?e.message:String(e);setError(msg);await failEnrollmentJob(registration,job.id,msg).catch(()=>{})}finally{setFaceBusy(false)}
+    try{const health=await FaceEngine.healthCheck();if(!health.healthy)throw new Error(health.modelError||"Face recognition model is unavailable");await claimEnrollmentJob(registration,job.id);const capture=await captureSequence(false,true);const result=await FaceEngine.enroll(capture.photos,capture.challenge);await completeEnrollmentJob(registration,job.id,{...result,timings:{captureMs:capture.captureMs,...result.timings}});setFacePrompt("Enrollment saved");await syncFace();await refresh();setTimeout(()=>setFacePrompt(""),1600)}catch(e){const msg=e instanceof Error?e.message:String(e);setError(msg);await failEnrollmentJob(registration,job.id,msg).catch(()=>{})}finally{setFaceBusy(false)}
   }
 
   function tapLogo(){const next=logoTaps+1;if(next>=5){setExitOpen(true);setLogoTaps(0)}else{setLogoTaps(next);setTimeout(()=>setLogoTaps(0),2500)}}

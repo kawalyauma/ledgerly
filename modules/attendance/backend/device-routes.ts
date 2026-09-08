@@ -67,22 +67,26 @@ attendanceDeviceRoutes.get("/face/state",async c=>{
       LEFT JOIN school_departments dep ON sp.department_id=dep.id
       WHERE j.organization_id=? AND j.device_id=? AND j.status IN ('pending','claimed')
       ORDER BY CASE j.status WHEN 'claimed' THEN 0 ELSE 1 END,j.requested_at LIMIT 1`).bind(d.organization_id,d.id).first(),
-    db.prepare(`SELECT COUNT(*) count,MAX(t.updated_at) version FROM att_biometric_templates t
-      JOIN att_biometric_profiles p ON p.id=t.profile_id
-      WHERE t.organization_id=? AND t.active=1 AND p.status='active'
-        AND (?='mixed' OR (?='students' AND t.person_type='student') OR (?='staff' AND t.person_type='staff'))`).bind(d.organization_id,pop,pop,pop).first()
+    db.prepare(`SELECT SUM(count) count,MAX(version) version FROM (
+      SELECT COUNT(*) count,MAX(t.updated_at) version FROM att_biometric_templates t JOIN att_biometric_profiles p ON p.id=t.profile_id
+        WHERE t.organization_id=? AND t.active=1 AND p.status='active' AND (?='mixed' OR (?='students' AND t.person_type='student') OR (?='staff' AND t.person_type='staff'))
+      UNION ALL
+      SELECT COUNT(*) count,MAX(t.updated_at) version FROM att_biometric_template_samples t JOIN att_biometric_profiles p ON p.id=t.profile_id
+        WHERE t.organization_id=? AND t.active=1 AND p.status='active' AND (?='mixed' OR (?='students' AND t.person_type='student') OR (?='staff' AND t.person_type='staff'))
+    )`).bind(d.organization_id,pop,pop,pop,d.organization_id,pop,pop,pop).first()
   ]);
   return c.json({data:{settings:S.camel(settings||{algorithm_version:'facenet-128-v1',match_threshold:.78,ambiguity_margin:.05,liveness_threshold:.70,quality_threshold:.55}),enrollmentJob:job?S.camel(job):null,templates:{count:Number(templateMeta?.count||0),version:templateMeta?.version||null}}});
 });
 
 attendanceDeviceRoutes.get("/face/templates",async c=>{
   const d=await authenticate(c),db=c.env.FINANCE_DB,pop=String(d.population);
-  const rows=await db.prepare(`SELECT t.person_type,t.person_id,t.algorithm_version,t.embedding_ciphertext,t.embedding_iv,t.quality_score,t.updated_at
-    FROM att_biometric_templates t JOIN att_biometric_profiles p ON p.id=t.profile_id
-    WHERE t.organization_id=? AND t.active=1 AND p.status='active'
-      AND (?='mixed' OR (?='students' AND t.person_type='student') OR (?='staff' AND t.person_type='staff'))
-    ORDER BY t.person_type,t.person_id`).bind(d.organization_id,pop,pop,pop).all();
-  const templates=await Promise.all((rows.results as any[]).map(async r=>({personType:r.person_type,personId:r.person_id,algorithmVersion:r.algorithm_version,embeddingBase64:await decryptEmbedding(c.env,r.embedding_ciphertext,r.embedding_iv,`${d.organization_id}:${r.person_type}:${r.person_id}:${r.algorithm_version}`),qualityScore:r.quality_score,updatedAt:r.updated_at})));
+  const rows=await db.prepare(`SELECT t.person_type,t.person_id,'primary' sample_id,t.algorithm_version,t.embedding_ciphertext,t.embedding_iv,t.quality_score,t.updated_at
+    FROM att_biometric_templates t JOIN att_biometric_profiles p ON p.id=t.profile_id WHERE t.organization_id=? AND t.active=1 AND p.status='active' AND (?='mixed' OR (?='students' AND t.person_type='student') OR (?='staff' AND t.person_type='staff'))
+    UNION ALL
+    SELECT t.person_type,t.person_id,'pose-'||t.sample_index sample_id,t.algorithm_version,t.embedding_ciphertext,t.embedding_iv,t.quality_score,t.updated_at
+    FROM att_biometric_template_samples t JOIN att_biometric_profiles p ON p.id=t.profile_id WHERE t.organization_id=? AND t.active=1 AND p.status='active' AND (?='mixed' OR (?='students' AND t.person_type='student') OR (?='staff' AND t.person_type='staff'))
+    ORDER BY person_type,person_id,sample_id`).bind(d.organization_id,pop,pop,pop,d.organization_id,pop,pop,pop).all();
+  const templates=await Promise.all((rows.results as any[]).map(async r=>({personType:r.person_type,personId:r.person_id,sampleId:r.sample_id,algorithmVersion:r.algorithm_version,embeddingBase64:await decryptEmbedding(c.env,r.embedding_ciphertext,r.embedding_iv,r.sample_id==='primary'?`${d.organization_id}:${r.person_type}:${r.person_id}:${r.algorithm_version}`:`${d.organization_id}:${r.person_type}:${r.person_id}:${r.algorithm_version}:${r.sample_id}`),qualityScore:r.quality_score,updatedAt:r.updated_at})));
   const version=templates.length?String(Math.max(...(rows.results as any[]).map(r=>Date.parse(r.updated_at)||0))):"0";
   return c.json({data:{version,count:templates.length,replaceAll:true,templates}});
 });
@@ -97,7 +101,7 @@ attendanceDeviceRoutes.post("/face/enrollment-jobs/:id/claim",async c=>{
 
 attendanceDeviceRoutes.post("/face/enrollment-jobs/:id/complete",async c=>{
   const d=await authenticate(c),id=c.req.param("id"),db=c.env.FINANCE_DB;
-  const parsed=z.object({algorithmVersion:z.string().min(1).max(100),embeddingBase64:z.string().min(16).max(20000),qualityScore:z.number().min(0).max(1),livenessScore:z.number().min(0).max(1),poseCount:z.number().int().min(1).max(12)}).safeParse(await c.req.json().catch(()=>({})));
+  const parsed=z.object({algorithmVersion:z.string().min(1).max(100),embeddingBase64:z.string().min(16).max(20000),embeddingsBase64:z.array(z.string().min(16).max(20000)).min(3).max(5).optional(),qualityScore:z.number().min(0).max(1),livenessScore:z.number().min(0).max(1),poseCount:z.number().int().min(1).max(12),timings:z.record(z.string(),z.number()).optional()}).safeParse(await c.req.json().catch(()=>({})));
   if(!parsed.success)throw new AppError(422,"VALIDATION_ERROR","Invalid biometric enrollment result",parsed.error.flatten());
   const job:any=await db.prepare("SELECT * FROM att_biometric_enrollment_jobs WHERE id=? AND organization_id=? AND device_id=? AND status IN ('pending','claimed')").bind(id,d.organization_id,d.id).first();
   if(!job)throw new AppError(404,"ENROLLMENT_JOB_NOT_FOUND","Enrollment job is unavailable");
@@ -107,6 +111,7 @@ attendanceDeviceRoutes.post("/face/enrollment-jobs/:id/complete",async c=>{
   if(v.livenessScore<minL)throw new AppError(422,"LIVENESS_FAILED",`Liveness score must be at least ${minL}`);
   if(v.algorithmVersion!==String(settings?.algorithm_version||'facenet-128-v1'))throw new AppError(409,"FACE_ALGORITHM_MISMATCH","Kiosk face model does not match the school's configured algorithm");
   const secured=await encryptEmbedding(c.env,v.embeddingBase64,`${d.organization_id}:${job.person_type}:${job.person_id}:${v.algorithmVersion}`,v.algorithmVersion==='facenet-128-v1'?512:undefined);
+  const samples=await Promise.all((v.embeddingsBase64||[]).map(async(embedding,index)=>({index,secured:await encryptEmbedding(c.env,embedding,`${d.organization_id}:${job.person_type}:${job.person_id}:${v.algorithmVersion}:pose-${index}`,v.algorithmVersion==='facenet-128-v1'?512:undefined)})));
   const existing:any=await db.prepare("SELECT id FROM att_biometric_profiles WHERE organization_id=? AND person_type=? AND person_id=?").bind(d.organization_id,job.person_type,job.person_id).first();
   const profileId=existing?.id||createId("abp"),templateId=createId("abt"),enrollmentId=createId("abe");
   await db.batch([
@@ -115,9 +120,12 @@ attendanceDeviceRoutes.post("/face/enrollment-jobs/:id/complete",async c=>{
       ON CONFLICT(organization_id,person_type,person_id) DO UPDATE SET provider_profile_ref=excluded.provider_profile_ref,algorithm_version=excluded.algorithm_version,quality_score=excluded.quality_score,consent_status=excluded.consent_status,status='active',enrolled_by=excluded.enrolled_by,enrolled_at=CURRENT_TIMESTAMP,deleted_at=NULL,updated_at=CURRENT_TIMESTAMP`).bind(profileId,d.organization_id,job.person_type,job.person_id,`local:${profileId}`,v.algorithmVersion,v.qualityScore,job.consent_status,job.requested_by),
     db.prepare(`INSERT INTO att_biometric_templates(id,organization_id,profile_id,person_type,person_id,algorithm_version,embedding_ciphertext,embedding_iv,embedding_bytes,quality_score,liveness_score)
       VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(organization_id,person_type,person_id) DO UPDATE SET profile_id=excluded.profile_id,algorithm_version=excluded.algorithm_version,embedding_ciphertext=excluded.embedding_ciphertext,embedding_iv=excluded.embedding_iv,embedding_bytes=excluded.embedding_bytes,quality_score=excluded.quality_score,liveness_score=excluded.liveness_score,version=att_biometric_templates.version+1,active=1,updated_at=CURRENT_TIMESTAMP`).bind(templateId,d.organization_id,profileId,job.person_type,job.person_id,v.algorithmVersion,secured.ciphertext,secured.iv,secured.bytes,v.qualityScore,v.livenessScore),
+    db.prepare("UPDATE att_biometric_template_samples SET active=0,updated_at=CURRENT_TIMESTAMP WHERE organization_id=? AND person_type=? AND person_id=?").bind(d.organization_id,job.person_type,job.person_id),
+    ...samples.map(x=>db.prepare(`INSERT INTO att_biometric_template_samples(id,organization_id,profile_id,person_type,person_id,sample_index,algorithm_version,embedding_ciphertext,embedding_iv,embedding_bytes,quality_score,active)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,1) ON CONFLICT(organization_id,person_type,person_id,sample_index) DO UPDATE SET profile_id=excluded.profile_id,algorithm_version=excluded.algorithm_version,embedding_ciphertext=excluded.embedding_ciphertext,embedding_iv=excluded.embedding_iv,embedding_bytes=excluded.embedding_bytes,quality_score=excluded.quality_score,active=1,updated_at=CURRENT_TIMESTAMP`).bind(createId("abs"),d.organization_id,profileId,job.person_type,job.person_id,x.index,v.algorithmVersion,x.secured.ciphertext,x.secured.iv,x.secured.bytes,v.qualityScore)),
     db.prepare("INSERT INTO att_biometric_enrollments(id,organization_id,profile_id,provider_enrollment_ref,algorithm_version,pose_count,quality_score,liveness_score,status,enrolled_by) VALUES (?,?,?,?,?,?,?,?,'completed',?)").bind(enrollmentId,d.organization_id,profileId,`device:${d.id}`,v.algorithmVersion,v.poseCount,v.qualityScore,v.livenessScore,job.requested_by),
     db.prepare("UPDATE att_biometric_enrollment_jobs SET status='completed',completed_at=CURRENT_TIMESTAMP,result_profile_id=?,result_quality_score=?,result_liveness_score=?,failure_reason=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(profileId,v.qualityScore,v.livenessScore,id),
-    db.prepare("INSERT INTO att_audit(id,organization_id,actor_type,actor_id,action,entity_type,entity_id,details_json) VALUES (?,?,'device',?,'biometric.enrolled','biometric_profile',?,?)").bind(createId("ata"),d.organization_id,d.id,profileId,JSON.stringify({personType:job.person_type,personId:job.person_id,algorithmVersion:v.algorithmVersion,qualityScore:v.qualityScore,livenessScore:v.livenessScore}))
+    db.prepare("INSERT INTO att_audit(id,organization_id,actor_type,actor_id,action,entity_type,entity_id,details_json) VALUES (?,?,'device',?,'biometric.enrolled','biometric_profile',?,?)").bind(createId("ata"),d.organization_id,d.id,profileId,JSON.stringify({personType:job.person_type,personId:job.person_id,algorithmVersion:v.algorithmVersion,qualityScore:v.qualityScore,livenessScore:v.livenessScore,sampleCount:samples.length,timings:v.timings||{}}))
   ]);
   return c.json({data:{jobId:id,profileId,status:"completed",qualityScore:v.qualityScore,livenessScore:v.livenessScore}},201);
 });

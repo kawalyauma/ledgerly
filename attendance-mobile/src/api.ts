@@ -8,5 +8,5 @@ export const syncEvents=(reg:Registration,clientBatchId:string,events:Attendance
 export const fetchFaceState=(reg:Registration)=>request<FaceState>(reg,"/face/state");
 export const fetchFaceTemplates=(reg:Registration)=>request<FaceTemplateSync>(reg,"/face/templates");
 export const claimEnrollmentJob=(reg:Registration,id:string)=>request<{id:string;status:string}>(reg,`/face/enrollment-jobs/${id}/claim`,{method:"POST",body:"{}"});
-export const completeEnrollmentJob=(reg:Registration,id:string,result:{algorithmVersion:string;embeddingBase64:string;qualityScore:number;livenessScore:number;poseCount:number})=>request<{jobId:string;profileId:string;status:string}>(reg,`/face/enrollment-jobs/${id}/complete`,{method:"POST",body:JSON.stringify(result)});
+export const completeEnrollmentJob=(reg:Registration,id:string,result:{algorithmVersion:string;embeddingBase64:string;embeddingsBase64?:string[];qualityScore:number;livenessScore:number;poseCount:number;timings?:Record<string,number>})=>request<{jobId:string;profileId:string;status:string}>(reg,`/face/enrollment-jobs/${id}/complete`,{method:"POST",body:JSON.stringify(result)});
 export const failEnrollmentJob=(reg:Registration,id:string,reason:string)=>request<{id:string;status:string}>(reg,`/face/enrollment-jobs/${id}/fail`,{method:"POST",body:JSON.stringify({reason})});

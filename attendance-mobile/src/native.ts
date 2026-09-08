@@ -9,9 +9,10 @@ export const FaceEngine=NativeModules.FaceEngine as {
   configure(matchThreshold:number,ambiguityMargin:number,livenessThreshold:number,qualityThreshold:number):Promise<boolean>;
   healthCheck():Promise<{healthy:boolean;provider:string;livenessRequired:boolean;templateCount:number;modelError?:string|null}>;
   replaceTemplates(templatesJson:string):Promise<number>;
-  inspect(imagePath:string):Promise<{quality:number;yaw:number;roll:number;leftEyeOpen:number;rightEyeOpen:number}>;
-  enroll(imagePaths:string[],challenge:"EYES_CLOSED"|"TURN_HEAD"):Promise<{algorithmVersion:string;embeddingBase64:string;qualityScore:number;livenessScore:number;poseCount:number}>;
-  identify(imagePaths:string[],testMode:boolean,allowScreenImage:boolean,allowPrintedImage:boolean,challenge:"EYES_CLOSED"|"TURN_HEAD"):Promise<{personId:string;personType:"student"|"staff";confidence:number;secondBestConfidence:number;matchMargin:number;livenessScore:number;testMode:boolean}>;
+  inspect(imagePath:string):Promise<{quality:number;yaw:number;roll:number;leftEyeOpen:number;rightEyeOpen:number;brightness:number;sharpness:number;faceArea:number;guidance:string;ready:boolean;detectionMs:number}>;
+  enroll(imagePaths:string[],challenge:"EYES_CLOSED"|"TURN_HEAD"):Promise<{algorithmVersion:string;embeddingBase64:string;embeddingsBase64:string[];qualityScore:number;livenessScore:number;poseCount:number;timings:FaceTimings}>;
+  identify(imagePaths:string[],testMode:boolean,allowScreenImage:boolean,allowPrintedImage:boolean,challenge:"EYES_CLOSED"|"TURN_HEAD"):Promise<{personId:string;personType:"student"|"staff";confidence:number;secondBestConfidence:number;matchMargin:number;livenessScore:number;testMode:boolean;timings:FaceTimings}>;
   verify(personType:"student"|"staff",personId:string,imagePaths:string[],testMode:boolean,allowScreenImage:boolean,allowPrintedImage:boolean,challenge:"EYES_CLOSED"|"TURN_HEAD"):Promise<{matched:boolean;confidence:number;livenessScore:number;testMode:boolean}>;
 };
+export type FaceTimings={detectionMs:number;inferenceMs:number;searchMs?:number;totalMs:number;templates?:number};
 export const nfcEvents=new NativeEventEmitter(NativeModules.LedgerlyNfc);
