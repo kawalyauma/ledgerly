@@ -1,29 +1,28 @@
-# Printerly
+# Printerly v1.2
 
-Printerly is Ledgerly's remote print-management module. It is designed for institutions that may own only one physical printer but need many authorized users to print to it from anywhere in the world.
+Printerly is Ledgerly's secure institution-wide print and scan platform.
 
-```text
-Ledgerly web/mobile → Printerly cloud queue → outbound HTTPS → Printerly Node → CUPS → USB/LAN printer
-```
+## Architecture
 
-The first implementation includes node pairing, machine-token authentication, heartbeat/printer discovery, remote queue submission, priority jobs, secure hold/release, atomic job claiming, lifecycle events, cancellation, a live dashboard, and a Linux/CUPS appliance agent.
+`Ledgerly user → Printerly cloud queue → outbound Printerly Node → CUPS printer / SANE scanner`
 
-## Security model
+No printer, scanner or school computer needs a public IP or inbound router port.
 
-The school does not open inbound ports. A node pairs with a short-lived six-digit code, receives a high-entropy machine token, and thereafter initiates all communication to Ledgerly over HTTPS. Tokens and pairing codes are stored server-side only as SHA-256 hashes.
+## Capabilities
 
-## Queue lifecycle
+- Remote printing and secure release.
+- Global **Print with Printerly** from Ledgerly screens.
+- Project and department charging using existing Ledgerly dimensions.
+- Estimated and actual paper/toner/maintenance/electricity costing.
+- Optional idempotent posting of completed print costs into Ledgerly journals.
+- Printer health telemetry, node-offline detection and fault alerts.
+- In-app, email, SMS and WhatsApp alert preferences using Ledgerly notification infrastructure.
+- Scannerly: SANE discovery, flatbed/ADF scan jobs, private R2 storage and scan inboxes.
+- Direct scan routing to student/staff documents or Finance, Academics, Examinations and School Management destinations.
+- Claim leases, SHA-256 verification and restart-safe duplicate prevention.
 
-`held → queued → claimed → downloading → spooling → printing → completed`
+## Deployment
 
-Jobs may also become `cancelled` before claim or `failed` after a node execution error. Secure-release jobs begin in `held` and require an authorized Ledgerly user to release them.
+Apply the newest Printerly migration, deploy Ledgerly, then install `printerly-node/` on the always-on Linux computer beside the devices. Pair that node from the Printerly UI.
 
-## Next hardening milestones
-
-- move document submission from external URL to Ledgerly's shared R2/document service
-- signed one-use document download URLs
-- claim lease recovery for nodes that die after claiming
-- real page-count feedback where printer drivers expose it
-- quotas, departmental budgets and approval workflows
-- node self-update channel and immutable appliance image/installer
-- optional local touch-screen release UI/PIN
+PDF is the preferred print format. Scannerly supports PDF, PNG and JPEG results; ADF jobs are normalized to PDF.

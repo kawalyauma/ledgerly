@@ -1,8 +1,21 @@
 import{useEffect,useState,type ReactNode}from"react";
 import{BarChart3,Bell,ChevronDown,ChevronRight,LogOut,Menu,Search,X}from"lucide-react";
-import{get,post,can,type Principal,type Session}from"../api";import{useAuth}from"../auth";import{appNavigation}from"../../modules/frontend-registry";import type{FrontendNavigationGroup as Group,FrontendNavigationItem as Item}from"../../modules/frontend-types";
+import{get,post,can,type Principal,type Session}from"../api";
+import{useAuth}from"../auth";
+import{appGlobalActions,appNavigation}from"../../modules/frontend-registry";
+import type{FrontendGlobalAction as GlobalAction,FrontendNavigationGroup as Group,FrontendNavigationItem as Item}from"../../modules/frontend-types";
+
 const allowed=(i:Item,p:Principal|null)=>(!i.scope||can(p,i.scope))&&(!i.admin||!!p&&["owner","admin"].includes(p.role));
-function NavGroup({group,active,principal,onNavigate}:{group:Group;active:string;principal:Principal|null;onNavigate:(p:string)=>void}){const items=group.items.filter(i=>allowed(i,principal)),hasActive=items.some(i=>i.path===active),[open,setOpen]=useState(hasActive);useEffect(()=>{if(hasActive)setOpen(true)},[hasActive]);if(!items.length)return null;const Icon=group.icon;if(items.length===1)return <button className={`nav-parent ${hasActive?"active":""}`} onClick={()=>onNavigate(items[0]!.path)}><Icon size={18}/><span>{group.label}</span></button>;return <div className={`nav-group ${hasActive?"current":""}`}><button className="nav-parent" aria-expanded={open} onClick={()=>setOpen(!open)}><Icon size={18}/><span>{group.label}</span>{open?<ChevronDown size={15}/>:<ChevronRight size={15}/>}</button>{open&&<div className="nav-children">{items.map(i=><button key={`${i.path}-${i.label}`} className={i.path===active?"active":""} onClick={()=>onNavigate(i.path)}><span>{i.label}</span></button>)}</div>}</div>}
+const actionAllowed=(a:GlobalAction,p:Principal|null)=>(!a.scope||can(p,a.scope))&&(!a.admin||!!p&&["owner","admin"].includes(p.role));
+
+function NavGroup({group,active,principal,onNavigate}:{group:Group;active:string;principal:Principal|null;onNavigate:(p:string)=>void}){
+ const items=group.items.filter(i=>allowed(i,principal)),hasActive=items.some(i=>i.path===active),[open,setOpen]=useState(hasActive);
+ useEffect(()=>{if(hasActive)setOpen(true)},[hasActive]);
+ if(!items.length)return null;const Icon=group.icon;
+ if(items.length===1)return <button className={`nav-parent ${hasActive?"active":""}`} onClick={()=>onNavigate(items[0]!.path)}><Icon size={18}/><span>{group.label}</span></button>;
+ return <div className={`nav-group ${hasActive?"current":""}`}><button className="nav-parent" aria-expanded={open} onClick={()=>setOpen(!open)}><Icon size={18}/><span>{group.label}</span>{open?<ChevronDown size={15}/>:<ChevronRight size={15}/>}</button>{open&&<div className="nav-children">{items.map(i=><button key={`${i.path}-${i.label}`} className={i.path===active?"active":""} onClick={()=>onNavigate(i.path)}><span>{i.label}</span></button>)}</div>}</div>;
+}
+
 type Org={id:string;name:string};
 export function AppShell({children,active,onNavigate}:{children:ReactNode;active:string;onNavigate:(p:string)=>void}){
  const[mobile,setMobile]=useState(false),[account,setAccount]=useState(false),[orgs,setOrgs]=useState<Org[]>([]),[switching,setSwitching]=useState(false),[name,setName]=useState("Current user"),[chatUnread,setChatUnread]=useState(0);
@@ -23,9 +36,13 @@ export function AppShell({children,active,onNavigate}:{children:ReactNode;active
    <header className="topbar">
     {focusedMode?<button className="school-ledgerly-back" onClick={()=>navigate("dashboards")}><BarChart3 size={18}/><span>Ledgerly</span></button>:<button className="menu-button" aria-label="Open navigation" onClick={()=>setMobile(true)}><Menu size={20}/></button>}
     <label className="global-search"><Search size={18}/><input placeholder={schoolMode?"Search school workspace…":workMode?"Search tasks & work…":examMode?"Search examinations…":communicationsMode?"Search messages & notifications…":academicsMode?"Search academics…":attendanceMode?"Search attendance…":"Search workspace…"}/></label>
-    <div className="topbar__actions"><button className="icon-button app-chat-bell" aria-label={`${chatUnread} unread chat messages`} onClick={()=>{sessionStorage.setItem("ledgerly.work.view","chats");navigate("work")}}><Bell size={19}/>{chatUnread>0&&<b>{chatUnread>99?"99+":chatUnread}</b>}</button><div className="account-wrap"><button className="profile" onClick={()=>setAccount(!account)}><span className="avatar">{name.slice(0,2).toUpperCase()}</span><span><strong>{name}</strong><small>{principal?.role}</small></span><ChevronDown size={14}/></button>{account&&<div className="account-menu"><p><b>{principal?.role}</b><small>{principal?.scopes.length?principal.scopes.join(", "):"Full organization access"}</small></p><button onClick={logout}><LogOut size={15}/> Log out</button></div>}</div></div>
+    <div className="topbar__actions">
+     {appGlobalActions.filter(a=>actionAllowed(a,principal)).map(action=>{const Action=action.component;return <Action key={action.key} activePath={active}/>})}
+     <button className="icon-button app-chat-bell" aria-label={`${chatUnread} unread chat messages`} onClick={()=>{sessionStorage.setItem("ledgerly.work.view","chats");navigate("work")}}><Bell size={19}/>{chatUnread>0&&<b>{chatUnread>99?"99+":chatUnread}</b>}</button>
+     <div className="account-wrap"><button className="profile" onClick={()=>setAccount(!account)}><span className="avatar">{name.slice(0,2).toUpperCase()}</span><span><strong>{name}</strong><small>{principal?.role}</small></span><ChevronDown size={14}/></button>{account&&<div className="account-menu"><p><b>{principal?.role}</b><small>{principal?.scopes.length?principal.scopes.join(", "):"Full organization access"}</small></p><button onClick={logout}><LogOut size={15}/> Log out</button></div>}</div>
+    </div>
    </header>
    <main>{children}</main>
   </div>
- </div>
+ </div>;
 }

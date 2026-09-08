@@ -1,7 +1,7 @@
-import type { FrontendModuleDefinition, FrontendNavigationGroup, FrontendRoute } from "./frontend-types";
+import type { FrontendGlobalAction, FrontendModuleDefinition, FrontendNavigationGroup, FrontendRoute } from "./frontend-types";
 
 // Vite expands this at build time. Adding modules/<name>/frontend/module.tsx is enough
-// for the UI routes/navigation to be discovered without touching App.tsx or AppShell.tsx.
+// for UI routes/navigation/global actions to be discovered without hard-coding modules in App.tsx or AppShell.tsx.
 const discovered = import.meta.glob<{ default: FrontendModuleDefinition }>("./*/frontend/module.tsx", { eager: true });
 
 export const frontendModules = Object.values(discovered)
@@ -20,3 +20,7 @@ for (const module of frontendModules) {
 export const appNavigation: FrontendNavigationGroup[] = frontendModules
   .flatMap(module => module.navigation)
   .sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.label.localeCompare(b.label));
+
+export const appGlobalActions: FrontendGlobalAction[] = frontendModules
+  .flatMap(module => module.globalActions ?? [])
+  .sort((a,b)=>(a.order??100)-(b.order??100)||a.label.localeCompare(b.label));

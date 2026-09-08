@@ -1,200 +1,42 @@
 import {execFile} from "node:child_process";
 import {promisify} from "node:util";
-import {mkdir,readFile,writeFile,rm} from "node:fs/promises";
+import {mkdir,readFile,writeFile,rm,readdir,stat} from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
-import {buildLpArgs,extensionForMime,parseLpRequestId,sha256} from "./lib.mjs";
+import {buildLpArgs,buildScanArgs,extensionForMime,parseCupsCompletedSheets,parseLpRequestId,parseMarkerLevels,parsePrinterHealth,parseSaneDevices,sha256} from "./lib.mjs";
 
-const exec=promisify(execFile);
-const configFile=process.env.PRINTERLY_CONFIG||"/etc/printerly/config.json";
-const stateRoot=process.env.PRINTERLY_STATE_DIR||"/var/lib/printerly";
-const stateFile=path.join(stateRoot,"state.json");
-const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const exec=promisify(execFile),configFile=process.env.PRINTERLY_CONFIG||"/etc/printerly/config.json",stateRoot=process.env.PRINTERLY_STATE_DIR||"/var/lib/printerly",stateFile=path.join(stateRoot,"state.json"),sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let config,state={};
+const workDir=()=>config.workDir||path.join(stateRoot,"jobs"),scanDir=()=>config.scanDir||path.join(stateRoot,"scans"),baseUrl=()=>config.ledgerlyBaseUrl.replace(/\/$/,"");
 
-async function load(){
-  config=JSON.parse(await readFile(configFile,"utf8"));
-  if(!config.ledgerlyBaseUrl)throw new Error("ledgerlyBaseUrl is missing from Printerly config");
-  await mkdir(config.workDir||path.join(stateRoot,"jobs"),{recursive:true});
-  await mkdir(stateRoot,{recursive:true});
-  state=JSON.parse(await readFile(stateFile,"utf8").catch(()=>"{}"));
-  if(!state.nodeToken)throw new Error("Printerly Node is not paired. Run: sudo printerly-pair <six-digit-code>");
-}
+async function load(){config=JSON.parse(await readFile(configFile,"utf8"));if(!config.ledgerlyBaseUrl)throw new Error("ledgerlyBaseUrl is missing from Printerly config");await mkdir(workDir(),{recursive:true});await mkdir(scanDir(),{recursive:true});await mkdir(stateRoot,{recursive:true});state=JSON.parse(await readFile(stateFile,"utf8").catch(()=>"{}"));if(!state.nodeToken)throw new Error("Printerly Node is not paired. Run: sudo printerly-pair <six-digit-code>")}
+async function save(){await mkdir(stateRoot,{recursive:true});const tmp=`${stateFile}.tmp`;await writeFile(tmp,JSON.stringify(state,null,2),{mode:0o600});await import("node:fs/promises").then(fs=>fs.rename(tmp,stateFile))}
+async function request(route,body={}){const response=await fetch(`${baseUrl()}/api/v1/printerly${route}`,{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${state.nodeToken}`},body:JSON.stringify(body)});const payload=await response.json().catch(()=>({}));if(!response.ok)throw new Error(payload?.error?.message||payload?.message||`${route}: HTTP ${response.status}`);return payload.data}
 
-async function save(){
-  await mkdir(stateRoot,{recursive:true});
-  await writeFile(stateFile,JSON.stringify(state,null,2),{mode:0o600});
-}
+async function downloadDocument(job){const response=await fetch(`${baseUrl()}/api/v1/printerly/node/jobs/${encodeURIComponent(job.id)}/document`,{headers:{Authorization:`Bearer ${state.nodeToken}`,"X-Printerly-Claim":job.claim_token}});if(!response.ok){const p=await response.json().catch(()=>({}));throw new Error(p?.error?.message||`Document download failed: HTTP ${response.status}`)}const buffer=Buffer.from(await response.arrayBuffer()),expected=String(response.headers.get("X-Printerly-SHA256")||job.document_sha256||"").toLowerCase(),actual=sha256(buffer);if(expected&&actual!==expected)throw new Error(`Document checksum mismatch (expected ${expected}, got ${actual})`);return buffer}
 
-function baseUrl(){
-  return config.ledgerlyBaseUrl.replace(/\/$/,"");
-}
+async function printerHealth(systemName,baseStatus){let detail="";try{detail=(await exec("lpstat",["-p",systemName,"-l"],{timeout:5000})).stdout}catch{}let ipp="";try{ipp=(await exec("ipptool",["-tv",`ipp://localhost/printers/${encodeURIComponent(systemName)}`,"/usr/share/cups/ipptool/get-printer-attributes.test"],{timeout:5000,maxBuffer:1024*1024})).stdout}catch{}const reasons=parsePrinterHealth(`${detail}\n${ipp}`),markers=parseMarkerLevels(ipp);return {reasons,markers,message:reasons.join(", ")||baseStatus}}
+async function printers(){try{const {stdout}=await exec("lpstat",["-p"],{timeout:5000});const out=[];for(const line of stdout.split("\n").filter(Boolean)){const match=line.match(/^printer\s+(\S+)\s+(.*)$/);if(!match)continue;const status=/disabled|not connected/i.test(match[2])?"offline":"ready";out.push({id:match[1],name:match[1],systemName:match[1],status,capabilities:{cups:true},health:await printerHealth(match[1],status)})}return out}catch{return []}}
+async function scanners(){try{const {stdout}=await exec("scanimage",["-L"],{timeout:10000});return parseSaneDevices(stdout)}catch{return []}}
+async function heartbeat(){try{await request("/node/heartbeat",{version:"1.2.0",nodeProtocol:3,printers:await printers(),scanners:await scanners()})}catch(error){console.error("heartbeat",error.message)}}
 
-async function request(route,body={}){
-  const response=await fetch(`${baseUrl()}/api/v1/printerly${route}`,{
-    method:"POST",
-    headers:{"Content-Type":"application/json",Authorization:`Bearer ${state.nodeToken}`},
-    body:JSON.stringify(body)
-  });
-  const payload=await response.json().catch(()=>({}));
-  if(!response.ok)throw new Error(payload?.error?.message||payload?.message||`${route}: HTTP ${response.status}`);
-  return payload.data;
-}
+async function printStatus(job,next,errorMessage="",cupsJobId=null,usage={}){return request(`/node/jobs/${job.id}/status`,{status:next,claimToken:job.claim_token,errorMessage,cupsJobId,...usage})}
+async function cupsState(cupsJobId){try{const {stdout}=await exec("lpstat",["-W","not-completed","-o",cupsJobId],{timeout:5000});if(stdout.includes(cupsJobId))return "active"}catch{}try{const {stdout}=await exec("lpstat",["-W","completed","-o",cupsJobId],{timeout:5000});if(stdout.includes(cupsJobId))return "completed"}catch{}return "unknown"}
+async function cupsUsage(cupsJobId,job){let detail="";try{detail=(await exec("lpstat",["-W","completed","-l","-o",cupsJobId],{timeout:5000})).stdout}catch{}const fallback=Math.max(1,Number(job.estimated_impressions)||Number(job.estimated_pages||1)*Number(job.copies||1)),impressions=parseCupsCompletedSheets(detail,fallback),sheets=job.duplex?Math.ceil(impressions/2):impressions;return {impressionsCompleted:impressions,sheetsCompleted:sheets}}
+async function waitForCupsCompletion(cupsJobId){const deadline=Date.now()+Math.max(60_000,Number(config.printCompletionTimeoutMs)||30*60_000);let unknown=0;while(Date.now()<deadline){const current=await cupsState(cupsJobId);if(current==="completed")return;if(current==="unknown"){if(++unknown>=4)throw new Error(`CUPS no longer reports ${cupsJobId}; print completion could not be confirmed`)}else unknown=0;await sleep(Math.max(1500,Number(config.cupsStatusIntervalMs)||3000))}throw new Error(`Timed out waiting for CUPS job ${cupsJobId} to finish`)}
 
-async function downloadDocument(job){
-  const response=await fetch(`${baseUrl()}/api/v1/printerly/node/jobs/${encodeURIComponent(job.id)}/document`,{
-    headers:{Authorization:`Bearer ${state.nodeToken}`,"X-Printerly-Claim":job.claim_token}
-  });
-  if(!response.ok){
-    const payload=await response.json().catch(()=>({}));
-    throw new Error(payload?.error?.message||`Document download failed: HTTP ${response.status}`);
-  }
-  const buffer=Buffer.from(await response.arrayBuffer());
-  const expected=String(response.headers.get("X-Printerly-SHA256")||job.document_sha256||"").toLowerCase();
-  const actual=sha256(buffer);
-  if(expected&&actual!==expected)throw new Error(`Document checksum mismatch (expected ${expected}, got ${actual})`);
-  return buffer;
-}
+async function processPrint(job,{recovering=false}={}){const file=path.join(workDir(),`${job.id}${extensionForMime(job.document_mime)}`);try{if(!recovering){state.activeJob={job,stage:"claimed",cupsJobId:null};await save()}await printStatus(job,"downloading");state.activeJob={job,stage:"downloading",cupsJobId:null};await save();const document=await downloadDocument(job);await writeFile(file,document,{mode:0o600});await printStatus(job,"spooling");state.activeJob={job,stage:"spooling",cupsJobId:null};await save();const {stdout}=await exec("lp",buildLpArgs(job,file),{timeout:60000}),cupsJobId=parseLpRequestId(stdout);if(!cupsJobId)throw new Error(`CUPS accepted no identifiable job: ${stdout.trim()||"empty lp response"}`);state.activeJob={job,stage:"printing",cupsJobId};await save();await printStatus(job,"printing","",cupsJobId);await waitForCupsCompletion(cupsJobId);await printStatus(job,"completed","",cupsJobId,await cupsUsage(cupsJobId,job));console.log(`Completed Printerly job ${job.id}`);delete state.activeJob;await save()}catch(error){console.error(`print ${job.id}`,error);try{await printStatus(job,"failed",String(error.message||error),state.activeJob?.cupsJobId||null)}catch(e){console.error("print status",e.message)}delete state.activeJob;await save().catch(()=>{})}finally{await rm(file,{force:true}).catch(()=>{})}}
+async function recoverPrint(){const active=state.activeJob;if(!active?.job)return;const {job,stage,cupsJobId}=active;console.warn(`Recovering Printerly job ${job.id} from ${stage}`);if(stage==="claimed"||stage==="downloading"){await processPrint(job,{recovering:true});return}if(cupsJobId){try{await printStatus(job,"printing","",cupsJobId);await waitForCupsCompletion(cupsJobId);await printStatus(job,"completed","",cupsJobId,await cupsUsage(cupsJobId,job))}catch(error){try{await printStatus(job,"failed",`Recovery could not confirm the prior CUPS job: ${String(error.message||error)}`,cupsJobId)}catch{}}}else try{await printStatus(job,"failed","Node restarted during CUPS submission. Printerly intentionally did not reprint because the prior submission may already have reached the printer.")}catch{}delete state.activeJob;await save()}
 
-async function printers(){
-  try{
-    const {stdout}=await exec("lpstat",["-p"]);
-    return stdout.split("\n").filter(Boolean).map(line=>{
-      const match=line.match(/^printer\s+(\S+)\s+(.*)$/);
-      if(!match)return null;
-      return {id:match[1],name:match[1],systemName:match[1],status:/disabled/i.test(match[2])?"offline":"ready",capabilities:{cups:true}};
-    }).filter(Boolean);
-  }catch{
-    return [];
-  }
-}
+async function scanStatus(job,next,errorMessage=""){return request(`/node/scans/${job.id}/status`,{status:next,claimToken:job.claim_token,errorMessage})}
+async function scanFlatbed(job,dir){const out=path.join(dir,"page-0001.png"),{stdout}=await exec("scanimage",buildScanArgs(job),{encoding:"buffer",timeout:Math.max(60000,Number(config.scanTimeoutMs)||30*60_000),maxBuffer:100*1024*1024});await writeFile(out,stdout,{mode:0o600});return [out]}
+async function scanAdf(job,dir){const pattern=path.join(dir,"page-%04d.png");let error=null;try{await exec("scanimage",buildScanArgs(job,{batchPattern:pattern}),{timeout:Math.max(60000,Number(config.scanTimeoutMs)||30*60_000),maxBuffer:4*1024*1024})}catch(e){error=e}const pages=(await readdir(dir)).filter(n=>/^page-\d+\.png$/i.test(n)).sort().map(n=>path.join(dir,n));if(!pages.length)throw error||new Error("ADF returned no pages");return pages}
+async function convertScan(job,pages,dir){const format=String(job.output_format||"pdf");if(format==="png"&&pages.length===1)return {file:pages[0],mime:"image/png"};if(format==="jpeg"&&pages.length===1){const file=path.join(dir,"scan.jpg");await exec("convert",[pages[0],file],{timeout:120000});return {file,mime:"image/jpeg"}}const file=path.join(dir,"scan.pdf");await exec("img2pdf",[...pages,"-o",file],{timeout:120000,maxBuffer:4*1024*1024});return {file,mime:"application/pdf"}}
+async function uploadScan(job,file,mime){const bytes=await readFile(file),form=new FormData();form.append("file",new Blob([bytes],{type:mime}),`${job.scan_number||job.id}.${mime==="application/pdf"?"pdf":mime==="image/jpeg"?"jpg":"png"}`);const response=await fetch(`${baseUrl()}/api/v1/printerly/node/scans/${encodeURIComponent(job.id)}/upload`,{method:"POST",headers:{Authorization:`Bearer ${state.nodeToken}`,"X-Printerly-Scan-Claim":job.claim_token},body:form});const payload=await response.json().catch(()=>({}));if(!response.ok)throw new Error(payload?.error?.message||`Scannerly upload failed: HTTP ${response.status}`);return payload.data}
+async function processScan(job){const dir=path.join(scanDir(),job.id);await mkdir(dir,{recursive:true});try{state.activeScan={job,stage:"claimed"};await save();await scanStatus(job,"scanning");state.activeScan={job,stage:"scanning"};await save();const pages=job.source==="adf"?await scanAdf(job,dir):await scanFlatbed(job,dir);const result=await convertScan(job,pages,dir);await scanStatus(job,"uploading");state.activeScan={job,stage:"uploading"};await save();await uploadScan(job,result.file,result.mime);console.log(`Completed Scannerly job ${job.id}`);delete state.activeScan;await save()}catch(error){console.error(`scan ${job.id}`,error);try{await scanStatus(job,"failed",String(error.message||error))}catch(e){console.error("scan status",e.message)}delete state.activeScan;await save().catch(()=>{})}finally{await rm(dir,{recursive:true,force:true}).catch(()=>{})}}
+async function recoverScan(){const active=state.activeScan;if(!active?.job)return;try{await scanStatus(active.job,"failed",`Printerly Node restarted while Scannerly job was ${active.stage}. It was not automatically rescanned to avoid duplicate/confidential document capture; verify the scanner and retry manually.`)}catch{}delete state.activeScan;await save()}
 
-async function heartbeat(){
-  try{await request("/node/heartbeat",{version:"1.1.0",printers:await printers()})}
-  catch(error){console.error("heartbeat",error.message)}
-}
-
-async function status(job,next,errorMessage="",cupsJobId=null){
-  return request(`/node/jobs/${job.id}/status`,{status:next,claimToken:job.claim_token,errorMessage,cupsJobId});
-}
-
-async function cupsState(cupsJobId){
-  try{
-    const {stdout}=await exec("lpstat",["-W","not-completed","-o",cupsJobId]);
-    if(stdout.includes(cupsJobId))return "active";
-  }catch{}
-  try{
-    const {stdout}=await exec("lpstat",["-W","completed","-o",cupsJobId]);
-    if(stdout.includes(cupsJobId))return "completed";
-  }catch{}
-  return "unknown";
-}
-
-async function waitForCupsCompletion(cupsJobId){
-  const timeout=Math.max(60_000,Number(config.printCompletionTimeoutMs)||30*60_000);
-  const deadline=Date.now()+timeout;
-  let unknownChecks=0;
-  while(Date.now()<deadline){
-    const current=await cupsState(cupsJobId);
-    if(current==="completed")return;
-    if(current==="unknown"){
-      unknownChecks++;
-      if(unknownChecks>=4)throw new Error(`CUPS no longer reports ${cupsJobId}; print completion could not be confirmed`);
-    }else unknownChecks=0;
-    await sleep(Math.max(1500,Number(config.cupsStatusIntervalMs)||3000));
-  }
-  throw new Error(`Timed out waiting for CUPS job ${cupsJobId} to finish`);
-}
-
-async function processJob(job,{recovering=false}={}){
-  const dir=config.workDir||path.join(stateRoot,"jobs");
-  const file=path.join(dir,`${job.id}${extensionForMime(job.document_mime)}`);
-  try{
-    if(!recovering){
-      state.activeJob={job,stage:"claimed",cupsJobId:null};
-      await save();
-    }
-
-    await status(job,"downloading");
-    state.activeJob={job,stage:"downloading",cupsJobId:null};
-    await save();
-
-    const document=await downloadDocument(job);
-    await writeFile(file,document,{mode:0o600});
-
-    await status(job,"spooling");
-    state.activeJob={job,stage:"spooling",cupsJobId:null};
-    await save();
-
-    const {stdout}=await exec("lp",buildLpArgs(job,file));
-    const cupsJobId=parseLpRequestId(stdout);
-    if(!cupsJobId)throw new Error(`CUPS accepted no identifiable job: ${stdout.trim()||"empty lp response"}`);
-
-    state.activeJob={job,stage:"printing",cupsJobId};
-    await save();
-    await status(job,"printing","",cupsJobId);
-    console.log(`Printing ${job.id} as CUPS job ${cupsJobId}`);
-
-    await waitForCupsCompletion(cupsJobId);
-    await status(job,"completed","",cupsJobId);
-    console.log(`Completed Printerly job ${job.id}`);
-    delete state.activeJob;
-    await save();
-  }catch(error){
-    console.error(`job ${job.id}`,error);
-    try{await status(job,"failed",String(error.message||error),state.activeJob?.cupsJobId||null)}catch(statusError){console.error("status",statusError.message)}
-    delete state.activeJob;
-    await save().catch(()=>{});
-  }finally{
-    await rm(file,{force:true}).catch(()=>{});
-  }
-}
-
-async function recoverActiveJob(){
-  const active=state.activeJob;
-  if(!active?.job)return;
-  const {job,stage,cupsJobId}=active;
-  console.warn(`Recovering Printerly job ${job.id} from ${stage}`);
-  if(stage==="claimed"||stage==="downloading"){
-    await processJob(job,{recovering:true});
-    return;
-  }
-  if(cupsJobId){
-    try{
-      await status(job,"printing","",cupsJobId);
-      await waitForCupsCompletion(cupsJobId);
-      await status(job,"completed","",cupsJobId);
-    }catch(error){
-      console.error(`recovery ${job.id}`,error);
-      try{await status(job,"failed",`Recovery could not confirm the prior CUPS job: ${String(error.message||error)}`,cupsJobId)}catch{}
-    }
-  }else{
-    // We may have crashed immediately around `lp`. Reprinting automatically would
-    // risk duplicate examination papers, reports, receipts or payroll documents.
-    try{await status(job,"failed","Node restarted during CUPS submission. Printerly intentionally did not reprint because the previous submission may already have reached the printer.")}catch{}
-  }
-  delete state.activeJob;
-  await save();
-}
-
-async function loop(){
-  await load();
-  await recoverActiveJob();
-  await heartbeat();
-  setInterval(()=>void heartbeat(),Math.max(5000,Number(config.heartbeatIntervalMs)||15000));
-  for(;;){
-    try{
-      const available=await printers();
-      const names=available.filter(item=>item.status==="ready").map(item=>item.systemName);
-      if(!names.length){await sleep(Math.max(5000,Number(config.pollIntervalMs)||3000));continue}
-      const job=await request("/node/jobs/claim",{printerSystemNames:names});
-      if(job)await processJob(job);
-      else await sleep(Math.max(1000,Number(config.pollIntervalMs)||3000));
-    }catch(error){
-      console.error("poll",error.message);
-      await sleep(Math.max(5000,Number(config.pollIntervalMs)||3000));
-    }
-  }
-}
-
-loop().catch(error=>{console.error(error);process.exit(1)});
+async function printLoop(){for(;;){try{const available=await printers(),names=available.filter(x=>x.status==="ready").map(x=>x.systemName);if(!names.length){await sleep(5000);continue}const job=await request("/node/jobs/claim",{printerSystemNames:names});if(job)await processPrint(job);else await sleep(Math.max(1000,Number(config.pollIntervalMs)||3000))}catch(error){console.error("print poll",error.message);await sleep(5000)}}}
+async function scanLoop(){for(;;){try{const available=await scanners(),names=available.filter(x=>x.status==="ready").map(x=>x.systemName);if(!names.length){await sleep(5000);continue}const job=await request("/node/scans/claim",{scannerSystemNames:names});if(job)await processScan(job);else await sleep(Math.max(1000,Number(config.pollIntervalMs)||3000))}catch(error){console.error("scan poll",error.message);await sleep(5000)}}}
+async function main(){await load();await recoverPrint();await recoverScan();await heartbeat();setInterval(()=>void heartbeat(),Math.max(5000,Number(config.heartbeatIntervalMs)||15000));await Promise.all([printLoop(),scanLoop()])}
+main().catch(error=>{console.error(error);process.exit(1)});

@@ -1,24 +1,33 @@
 {
   "key": "printerly",
   "name": "Printerly",
-  "version": "1.1.0",
-  "description": "Secure remote print management for Ledgerly with always-online Printerly Nodes connected to local USB or network printers.",
+  "version": "1.2.0",
+  "description": "Secure remote printing, Scannerly, printer-health monitoring and print-cost accounting for Ledgerly using always-online local Printerly Nodes.",
   "category": "operations",
   "core": false,
   "active": true,
   "manifest": {
     "standalone": true,
-    "sharedCore": ["organizations", "users", "permissions", "files"],
+    "sharedCore": ["organizations", "users", "permissions", "files", "projects", "dimensions", "journals", "notifications"],
     "features": [
       "remote-printing",
+      "global-print-with-printerly",
+      "department-project-charging",
+      "estimated-and-actual-print-costs",
+      "ledger-journal-posting",
+      "printer-health",
+      "toner-paper-jam-status",
+      "in-app-email-sms-whatsapp-alerts",
+      "scannerly",
+      "sane-scanner-discovery",
+      "student-staff-scan-routing",
+      "finance-academics-exams-scan-inbox",
       "private-r2-print-documents",
       "printerly-node-pairing",
       "central-print-queue",
       "priority-jobs",
       "secure-release",
       "copies-page-size-duplex-color",
-      "node-heartbeats",
-      "printer-status",
       "tenant-safe-printer-identities",
       "idempotent-job-claiming",
       "claim-lease-recovery",
@@ -26,8 +35,7 @@
       "cups-completion-tracking",
       "restart-safe-duplicate-prevention",
       "job-event-audit-trail",
-      "usage-reporting",
-      "linux-cups-appliance"
+      "linux-cups-sane-appliance"
     ]
   }
 }

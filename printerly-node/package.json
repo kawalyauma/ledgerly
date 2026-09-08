@@ -1,13 +1,9 @@
 {
   "name":"@ledgerly/printerly-node",
-  "version":"1.1.0",
+  "version":"1.2.0",
   "private":true,
   "type":"module",
-  "description":"Always-online Ledgerly Printerly appliance agent for Linux/CUPS",
-  "scripts":{
-    "start":"node src/agent.mjs",
-    "check":"node --check src/agent.mjs && node --check src/pair.mjs && node --check src/lib.mjs",
-    "test":"node --test test/*.test.mjs"
-  },
+  "description":"Always-online Ledgerly Printerly and Scannerly appliance agent for Linux/CUPS/SANE",
+  "scripts":{"start":"node src/agent.mjs","check":"node --check src/agent.mjs && node --check src/pair.mjs && node --check src/lib.mjs","test":"node --test test/*.test.mjs"},
   "engines":{"node":">=20"}
 }

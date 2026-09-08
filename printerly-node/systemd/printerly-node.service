@@ -1,5 +1,5 @@
 [Unit]
-Description=Ledgerly Printerly Node
+Description=Ledgerly Printerly / Scannerly Node
 After=network-online.target cups.service
 Wants=network-online.target cups.service
 
@@ -7,7 +7,7 @@ Wants=network-online.target cups.service
 Type=simple
 User=printerly
 Group=printerly
-SupplementaryGroups=lp
+SupplementaryGroups=lp scanner
 Environment=PRINTERLY_CONFIG=/etc/printerly/config.json
 Environment=PRINTERLY_STATE_DIR=/var/lib/printerly
 ExecStart=/usr/bin/node /opt/printerly/src/agent.mjs
