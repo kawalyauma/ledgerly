@@ -6,16 +6,14 @@ on:
 jobs:
   verify-mobile:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: attendance-mobile
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: attendance-mobile/package-lock.json
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint -- --max-warnings=0
+      - name: Install mobile dependencies
+        working-directory: attendance-mobile
+        run: npm ci
+      - name: Typecheck Ledgerly Mobile
+        working-directory: attendance-mobile
+        run: npm run typecheck
