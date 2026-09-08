@@ -1,35 +1,70 @@
 # Ledgerly Camera Server
 
-The Camera Server is the on-premise NVR side of Ledgerly Security Cameras. Android phones stream on the local network to this machine; this machine records to local disks and only opens a remote live path when an authorized Ledgerly user requests one.
+Local-first NVR appliance for Ledgerly Security Cameras. Camera video is recorded on the local computer; Ledgerly cloud services coordinate identity, configuration and remote viewing requests without becoming the primary recording store.
 
-## Current foundation
+## Requirements
 
-- Local storage root and health API.
-- Storage capacity/free-space reporting.
-- Separate package so the NVR can run as an always-on appliance without loading the Ledgerly web application.
-- No inbound internet exposure is required by the intended architecture.
+- Node.js 20+
+- FFmpeg available as `ffmpeg` (or set `FFMPEG_BIN`)
+- A local disk with enough free space for the chosen retention window
 
-## Runtime target
-
-The next slices will add camera-server QR pairing, authenticated outbound control-channel heartbeats, FFmpeg/GStreamer ingest, 2–5 minute recording segmentation, recording index synchronization, retention/protected clips, offline-gap reconciliation, and WebRTC signaling/relay for on-demand live viewing.
-
-## Run
+## Start
 
 ```bash
 cd camera-server
-CAMERA_STORAGE_ROOT=/srv/ledgerly-camera npm start
+CAMERA_SERVER_KEY='replace-with-a-long-random-secret' \
+CAMERA_SERVER_HOST=0.0.0.0 \
+CAMERA_STORAGE_ROOT=/srv/ledgerly-cameras \
+npm start
 ```
 
-Health check:
+Optional settings:
 
-```bash
-curl http://127.0.0.1:8789/health
+```text
+CAMERA_SERVER_PORT=8789
+CAMERA_SEGMENT_SECONDS=300
+CAMERA_RETENTION_DAYS=30
+CAMERA_MAX_STORAGE_PERCENT=90
+CAMERA_CLEANUP_INTERVAL_MS=3600000
+FFMPEG_BIN=ffmpeg
 ```
 
-Environment variables:
+## Recording model
 
-- `CAMERA_SERVER_HOST` defaults to `127.0.0.1`.
-- `CAMERA_SERVER_PORT` defaults to `8789`.
-- `CAMERA_STORAGE_ROOT` defaults to `./camera-storage`.
+Each camera is recorded by FFmpeg into independent MP4 segments under:
 
-The server intentionally binds to loopback by default until authenticated LAN ingest and server pairing are implemented.
+```text
+<storage-root>/<camera-id>/YYYY-MM-DD_HH-MM-SS.mp4
+```
+
+Segments are indexed directly from the local filesystem, so a server restart does not lose the recording timeline. A `.protected` sidecar marks important footage that automatic retention must not delete.
+
+## Local API
+
+Public read endpoints:
+
+- `GET /health`
+- `GET /v1/storage`
+- `GET /v1/recorders`
+- `GET /v1/cameras`
+- `GET /v1/cameras/:id/summary`
+- `GET /v1/cameras/:id/recordings?from=&to=&limit=`
+- `GET /v1/cameras/:id/recording/status`
+
+Authenticated control endpoints require `X-Ledgerly-Server-Key`:
+
+- `POST /v1/cameras/:id/recording/start` with `{ "inputUrl": "rtsp://..." }`
+- `POST /v1/cameras/:id/recording/stop`
+- `POST /v1/cameras/:id/recordings/:segment/protect` with `{ "protected": true }`
+- `POST /v1/retention/cleanup`
+
+The recording input currently accepts RTSP/RTSPS, SRT, HTTP or HTTPS sources. Ledgerly Camera mobile transport will provide the local NVR ingest source in the next runtime slice.
+
+## Retention
+
+Cleanup runs periodically and follows two rules:
+
+1. Delete unprotected recordings older than `CAMERA_RETENTION_DAYS`.
+2. If the disk is still above `CAMERA_MAX_STORAGE_PERCENT`, remove the oldest unprotected segments until the disk falls below that threshold.
+
+Protected footage is never removed by automatic retention.
