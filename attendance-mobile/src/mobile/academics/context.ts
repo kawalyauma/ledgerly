@@ -1,0 +1,13 @@
+import type {AcademicsSetup} from "./types";
+export const truthy=(v:unknown)=>v===true||v===1||v==="1";
+export const today=()=>{const d=new Date(),y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),day=String(d.getDate()).padStart(2,"0");return`${y}-${m}-${day}`};
+export const options=(items:any[]=[])=>items.map(x=>({label:x.name||x.title||x.code||x.id,value:x.id,detail:x.code||x.staffNumber||undefined}));
+export function defaults(setup:AcademicsSetup){const year=setup.years.find(x=>truthy(x.isCurrent))||setup.years[0];const terms=setup.terms.filter(x=>!year||x.academicYearId===year.id),term=terms.find(x=>truthy(x.isCurrent))||terms[0];const classes=setup.classes.filter(x=>!year||!x.academicYearId||x.academicYearId===year.id);return{yearId:year?.id||"",termId:term?.id||"",classId:classes[0]?.id||""}}
+export function termsFor(setup:AcademicsSetup|null,yearId:string){return(setup?.terms||[]).filter(x=>!yearId||x.academicYearId===yearId)}
+export function classesFor(setup:AcademicsSetup|null,yearId:string){return(setup?.classes||[]).filter(x=>!yearId||!x.academicYearId||x.academicYearId===yearId)}
+export function streamsFor(setup:AcademicsSetup|null,classId:string){return(setup?.streams||[]).filter(x=>!classId||x.classId===classId)}
+export function allocationsFor(setup:AcademicsSetup|null,yearId:string,termId:string,classId:string,streamId=""){return(setup?.teacherAllocations||[]).filter(x=>(!yearId||!x.academicYearId||x.academicYearId===yearId)&&(!termId||!x.termId||x.termId===termId)&&(!classId||x.classId===classId)&&(!streamId||!x.streamId||x.streamId===streamId))}
+export function subjectsFor(setup:AcademicsSetup|null,yearId:string,termId:string,classId:string,streamId=""){const ids=new Set(allocationsFor(setup,yearId,termId,classId,streamId).map(x=>x.subjectId));return ids.size?(setup?.subjects||[]).filter(x=>ids.has(x.id)):(setup?.subjects||[])}
+export function teachersFor(setup:AcademicsSetup|null,yearId:string,termId:string,classId:string,streamId:string,subjectId:string){const ids=new Set(allocationsFor(setup,yearId,termId,classId,streamId).filter(x=>!subjectId||x.subjectId===subjectId).map(x=>x.teacherUserId));return ids.size?(setup?.teachers||[]).filter(x=>ids.has(x.id)):(setup?.teachers||[])}
+export function allocationStaffId(setup:AcademicsSetup|null,teacherUserId:string,classId:string,subjectId:string){return setup?.teacherAllocations.find(x=>x.teacherUserId===teacherUserId&&x.classId===classId&&x.subjectId===subjectId)?.staffId||setup?.teachers.find(x=>x.id===teacherUserId)?.staffId||""}
+export function errText(e:any){return e?.message||"Request failed. Check your connection and access permissions."}
