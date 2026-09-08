@@ -119,14 +119,18 @@ export async function assertOwnedActiveDevice(db: D1Database, principal: AuthPri
 export async function exchangeOfflineGrant(env: Env, input: { deviceId: string; offlineGrant: string; appVersion?: string; clientSchemaVersion?: number }) {
   const tokenHash = await sha256(input.offlineGrant);
   const row = await env.FINANCE_DB.prepare(`SELECT g.id AS grantId,g.device_id AS deviceId,d.organization_id AS organizationId,d.user_id AS userId,
-      d.status AS deviceStatus,u.status AS userStatus
+      d.status AS deviceStatus,u.status AS userStatus,o.status AS organizationStatus
     FROM mobile_offline_grants g
     JOIN mobile_sync_devices d ON d.id=g.device_id
     JOIN users u ON u.id=d.user_id
+    JOIN organizations o ON o.id=d.organization_id
     WHERE g.device_id=? AND g.token_hash=? AND g.revoked_at IS NULL AND g.expires_at>CURRENT_TIMESTAMP`)
-    .bind(input.deviceId, tokenHash).first<{ grantId: string; deviceId: string; organizationId: string; userId: string; deviceStatus: string; userStatus: string }>();
+    .bind(input.deviceId, tokenHash).first<{ grantId: string; deviceId: string; organizationId: string; userId: string; deviceStatus: string; userStatus: string; organizationStatus: string }>();
   if (!row || row.deviceStatus !== "active" || row.userStatus !== "active") {
     throw new AppError(401, "INVALID_OFFLINE_GRANT", "Offline device grant is invalid, expired or revoked. Sign in online again.");
+  }
+  if (row.organizationStatus !== "active") {
+    throw new AppError(403, "ORGANIZATION_INACTIVE", "This organization is inactive and cannot reconnect mobile devices");
   }
   const membership = await env.FINANCE_DB.prepare("SELECT role,scopes FROM memberships WHERE organization_id=? AND user_id=?")
     .bind(row.organizationId, row.userId).first<{ role: string; scopes: string }>();
