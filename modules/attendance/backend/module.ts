@@ -1,3 +1,4 @@
+import "./mobile-sync-adapter";
 import type { BackendModuleDefinition } from "../../backend-types";
 import { attendanceRoutes } from "./routes";
 import { attendanceDeviceRoutes } from "./device-routes";
