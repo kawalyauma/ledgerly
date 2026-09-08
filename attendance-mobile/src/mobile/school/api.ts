@@ -91,5 +91,6 @@ export const schoolApi={
  bootstrapIam:(c:Client)=>req<any>(c,"/iam/bootstrap",json("POST",{})),
  files:(c:Client,limit=200)=>list<SchoolFile>(c,"/files/",{limit}),
  file:(c:Client,id:string)=>req<SchoolFile>(c,`/files/${id}`),
+ uploadFile:(c:Client,file:{uri:string;name:string;mimeType:string},purpose="document")=>{const form=new FormData();form.append("purpose",purpose);form.append("file",{uri:file.uri,name:file.name,type:file.mimeType} as any);return req<SchoolFile>(c,"/files/",{method:"POST",body:form})},
  deleteFile:(c:Client,id:string)=>req<void>(c,`/files/${id}`,{method:"DELETE"}),
 };
