@@ -1,0 +1,4 @@
+import{AppError}from'../../../src/lib/errors';import type{MobileSyncAuthorizationContext}from'../../mobile-sync/backend/contracts';
+function ok(c:MobileSyncAuthorizationContext,l:'read'|'write'){const p=c.principal;if(p.role==='owner'||p.role==='admin'||p.scopes.includes('work:*')||p.scopes.includes(`work:${l}`)||(l==='read'&&p.scopes.includes('work:write'))||p.scopes.includes('work:manage'))return true;return l==='read'?['manager','accountant','viewer'].includes(p.role):['manager','accountant'].includes(p.role)}
+export async function requireWorkRead(c:MobileSyncAuthorizationContext){if(!ok(c,'read'))throw new AppError(403,'FORBIDDEN','Missing Tasks & Work read permission')}
+export async function requireWorkWrite(c:MobileSyncAuthorizationContext){if(!ok(c,'write'))throw new AppError(403,'FORBIDDEN','Missing Tasks & Work write permission')}
