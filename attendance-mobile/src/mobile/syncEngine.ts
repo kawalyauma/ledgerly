@@ -77,7 +77,22 @@ async function pushPending(maxBatches:number){
 
 async function pullCollections(collections:CollectionRef[],maxRounds:number,pullLimit:number){
   let rounds=0,changes=0;
-  while(rounds<maxRounds){const response=await pullMobileSync(id("mpr"),collections.map(c=>({...c,limit:pullLimit}))) as any;await MobileSyncStore.applyPull(JSON.stringify(response));const delivered=(response?.collections||[]) as Array<{changes?:unknown[];hasMore?:boolean}>;changes+=delivered.reduce((n,c)=>n+(Array.isArray(c.changes)?c.changes.length:0),0);await flushPullAcks();rounds+=1;if(!delivered.some(c=>Boolean(c.hasMore)))break}
+  while(rounds<maxRounds){
+    const response=await pullMobileSync(id("mpr"),collections.map(c=>({...c,limit:pullLimit}))) as any;
+    const delivered=Array.isArray(response?.collections)?response.collections as Array<any>:[];
+    const applicable=delivered.filter(c=>Number.isFinite(Number(c?.schemaVersion))&&Array.isArray(c?.changes));
+    const failures=delivered.filter(c=>c?.error||c?.schemaRequired!==undefined||!Number.isFinite(Number(c?.schemaVersion))||!Array.isArray(c?.changes));
+    if(applicable.length){
+      await MobileSyncStore.applyPull(JSON.stringify({...response,collections:applicable}));
+      changes+=applicable.reduce((n,c)=>n+c.changes.length,0);
+      await flushPullAcks();
+    }
+    rounds+=1;
+    if(failures.length){
+      throw new MobileApiError(409,"MOBILE_PULL_PARTIAL_FAILURE","One or more mobile collections could not be synchronized. Successful collections were preserved and acknowledged.",failures.map(c=>({moduleKey:c?.moduleKey,collectionKey:c?.collectionKey,error:c?.error??null,schemaRequired:c?.schemaRequired??null})));
+    }
+    if(!applicable.some(c=>Boolean(c.hasMore)))break;
+  }
   return{rounds,changes};
 }
 
