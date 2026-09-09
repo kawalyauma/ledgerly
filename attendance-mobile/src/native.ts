@@ -22,6 +22,7 @@ export const MobileSyncStore=NativeModules.MobileSyncStore as {
   collectionStates():Promise<MobileSyncCollectionState[]>;
   pendingOperationCount():Promise<number>;
 };
+export const MobileSyncStoreAdmin=NativeModules.MobileSyncStoreAdmin as {reset():Promise<boolean>};
 export const KioskManager=NativeModules.KioskManager as {status():Promise<{deviceOwner:boolean;lockTaskPermitted:boolean}>;enter():Promise<boolean>;exit():Promise<boolean>};
 export const LedgerlyNfc=NativeModules.LedgerlyNfc as {isSupported():Promise<boolean>;enable():Promise<boolean>;disable():Promise<boolean>};
 export const FilePicker=NativeModules.FilePicker as {pick():Promise<{uri:string;name:string;mimeType:string;size:number}|null>};
