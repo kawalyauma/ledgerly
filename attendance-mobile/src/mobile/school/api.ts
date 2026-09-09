@@ -1,5 +1,6 @@
 import type {MobileSession} from "../auth";
 import {ledgerlyRequest,query,type SessionUpdater} from "../apiClient";
+import {offlineDemographicsReport,offlineEnrollmentReport,offlineGuardians,offlineSetupList,offlineStudent,offlineStudents,queueOfflineStudentUpdate,withOfflineFallback} from "./offline";
 import type {Admission,BootstrapStatus,DisciplineIncident,DisciplineSummary,FeeDashboard,Guardian,PromotionRun,SchoolFile,SchoolProfile,SchoolRole,SchoolUser,SetupBundle,SetupKey,Staff,Student} from "./types";
 
 type Client={session:MobileSession;onSession?:SessionUpdater};
@@ -13,7 +14,7 @@ export const schoolApi={
  saveProfile:async(c:Client,body:any)=>{const current=await req<SchoolProfile|null>(c,"/setup/profile");const preserved={logoUrl:current?.logoUrl??null,logoFileId:current?.logoFileId??null,postalAddress:current?.postalAddress??null,locationText:current?.locationText??null,language:current?.language||"en",dateFormat:current?.dateFormat||"DD/MM/YYYY",timeFormat:current?.timeFormat||"24h",multiCampusEnabled:Boolean(current?.multiCampusEnabled),branding:current?.branding||{},systemPreferences:current?.systemPreferences||{}};return req<SchoolProfile>(c,"/setup/profile",json("PUT",{...body,...preserved}))},
  bootstrapStatus:(c:Client)=>optional(req<BootstrapStatus>(c,"/setup/bootstrap/status"),{}),
  restoreDefaults:(c:Client)=>req<any>(c,"/setup/bootstrap/defaults",json("POST",{})),
- setupList:(c:Client,key:SetupKey,params:Record<string,any>={limit:500})=>list<any>(c,`/setup/${key}`,params),
+ setupList:(c:Client,key:SetupKey,params:Record<string,any>={limit:500})=>withOfflineFallback(()=>list<any>(c,`/setup/${key}`,params),()=>offlineSetupList(key)),
  setupGet:(c:Client,key:SetupKey,id:string)=>req<any>(c,`/setup/${key}/${id}`),
  setupCreate:(c:Client,key:SetupKey,body:any)=>req<any>(c,`/setup/${key}`,json("POST",body)),
  setupUpdate:(c:Client,key:SetupKey,id:string,body:any)=>req<any>(c,`/setup/${key}/${id}`,json("PUT",body)),
@@ -21,10 +22,10 @@ export const schoolApi={
  settings:(c:Client)=>list<any>(c,"/setup/settings/all"),
  saveSetting:(c:Client,body:{group:string;key:string;value:any})=>req<any>(c,"/setup/settings/value",json("PUT",body)),
  setupBundle:async(c:Client):Promise<SetupBundle>=>{const keys:[keyof SetupBundle,SetupKey][]=[["branches","branches"],["academicYears","academicYears"],["terms","terms"],["departments","departments"],["classLevels","classLevels"],["classes","classes"],["streams","streams"],["subjects","subjects"],["lessonPeriods","lessonPeriods"],["feeCategories","feeCategories"],["paymentMethods","paymentMethods"]];const pairs=await Promise.all(keys.map(async([name,key])=>[name,await schoolApi.setupList(c,key)] as const));return Object.fromEntries(pairs) as SetupBundle},
- students:(c:Client,params:Record<string,any>={})=>list<Student>(c,"/student-management/students",{limit:200,...params}),
- student:(c:Client,id:string)=>req<Student>(c,`/student-management/students/${id}`),
+ students:(c:Client,params:Record<string,any>={})=>withOfflineFallback(()=>list<Student>(c,"/student-management/students",{limit:200,...params}),()=>offlineStudents(params) as Promise<Student[]>),
+ student:(c:Client,id:string)=>withOfflineFallback(()=>req<Student>(c,`/student-management/students/${id}`),()=>offlineStudent(id) as Promise<Student>),
  createStudent:(c:Client,body:any)=>req<any>(c,"/student-management/students",json("POST",body)),
- updateStudent:(c:Client,id:string,body:any)=>req<any>(c,`/student-management/students/${id}`,json("PUT",body)),
+ updateStudent:(c:Client,id:string,body:any)=>withOfflineFallback(()=>req<any>(c,`/student-management/students/${id}`,json("PUT",body)),()=>queueOfflineStudentUpdate(id,body)),
  changeStudentStatus:(c:Client,id:string,body:any)=>req<any>(c,`/student-management/students/${id}/status`,json("POST",body)),
  transferStudent:(c:Client,id:string,body:any)=>req<any>(c,`/student-management/students/${id}/transfer`,json("POST",body)),
  promoteStudent:(c:Client,id:string,body:any)=>req<any>(c,`/student-management/students/${id}/promote`,json("POST",body)),
@@ -35,9 +36,9 @@ export const schoolApi={
  createAdmission:(c:Client,body:any)=>req<Admission>(c,"/student-management/admissions",json("POST",body)),
  decideAdmission:(c:Client,id:string,body:any)=>req<any>(c,`/student-management/admissions/${id}/decision`,json("POST",body)),
  enrollAdmission:(c:Client,id:string,body:any)=>req<any>(c,`/student-management/admissions/${id}/enroll`,json("POST",body)),
- guardians:(c:Client,params:Record<string,any>={})=>list<Guardian>(c,"/student-management/guardians",{limit:200,...params}),
- enrollmentReport:(c:Client)=>list<any>(c,"/student-management/reports/enrollment"),
- demographicsReport:(c:Client)=>list<any>(c,"/student-management/reports/demographics"),
+ guardians:(c:Client,params:Record<string,any>={})=>withOfflineFallback(()=>list<Guardian>(c,"/student-management/guardians",{limit:200,...params}),()=>offlineGuardians() as Promise<Guardian[]>),
+ enrollmentReport:(c:Client)=>withOfflineFallback(()=>list<any>(c,"/student-management/reports/enrollment"),offlineEnrollmentReport),
+ demographicsReport:(c:Client)=>withOfflineFallback(()=>list<any>(c,"/student-management/reports/demographics"),offlineDemographicsReport),
  staff:(c:Client,params:Record<string,any>={})=>list<Staff>(c,"/staff-management/staff",{limit:200,...params}),
  staffMember:(c:Client,id:string)=>req<Staff>(c,`/staff-management/staff/${id}`),
  createStaff:(c:Client,body:any)=>req<any>(c,"/staff-management/staff",json("POST",body)),
