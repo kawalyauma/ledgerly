@@ -1,0 +1,7 @@
+import{OfflineStore}from"../native";import type{MobileSession}from"./auth";import{MobileApiError}from"./auth";import{ledgerlyRequest,type SessionUpdater}from"./apiClient";
+export type EnabledModule={moduleKey:string;name:string;version:string;category:string;core:boolean};
+export type ModuleAvailability={modules:EnabledModule[]|null;source:"server"|"cache"|"unverified"};
+function cacheKey(session:MobileSession){return`mobile.modules.enabled:${session.organizationId||"default"}:${session.apiUrl.trim().replace(/\/$/,"")}`}
+async function readCache(session:MobileSession){try{const raw=await OfflineStore.getSecure(cacheKey(session));if(!raw)return null;const parsed=JSON.parse(raw);return Array.isArray(parsed)?parsed.filter(x=>x&&typeof x.moduleKey==="string") as EnabledModule[]:null}catch{return null}}
+async function writeCache(session:MobileSession,modules:EnabledModule[]){try{await OfflineStore.putSecure(cacheKey(session),JSON.stringify(modules))}catch{}}
+export async function enabledMobileModules(session:MobileSession,onSession?:SessionUpdater):Promise<ModuleAvailability>{try{const modules=await ledgerlyRequest<EnabledModule[]>(session,"/modules/enabled",{},onSession);await writeCache(session,modules);return{modules,source:"server"}}catch(e){if(e instanceof MobileApiError&&e.status!==0)throw e;const cached=await readCache(session);return cached?{modules:cached,source:"cache"}:{modules:null,source:"unverified"}}}
