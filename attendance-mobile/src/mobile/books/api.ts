@@ -1,29 +1,20 @@
-import type {MobileSession} from "../auth";
-import {ledgerlyRequest,ledgerlyTextRequest,query,type SessionUpdater} from "../apiClient";
-import type {BookReference,BookStudent,BooksOverview,BookType,ClassReport,Distribution,DistributionBatch,LearnerReport,Paged,PeriodReport,StockMovement,StockRow,UnissuedReport} from "./types";
-type Client={session:MobileSession;onSession?:SessionUpdater};
-type Filters={bookType?:BookType;studentId?:string;classId?:string;streamId?:string;academicYearId?:string;termId?:string;from?:string;to?:string;limit?:number;offset?:number};
-const req=<T>(c:Client,path:string,init:RequestInit={})=>ledgerlyRequest<T>(c.session,`/books${path}`,init,c.onSession);
-const text=(c:Client,path:string)=>ledgerlyTextRequest(c.session,`/books${path}`,{},c.onSession);
-const json=(method:string,body?:unknown):RequestInit=>({method,body:body===undefined?undefined:JSON.stringify(body)});
-export const booksApi={
- overview:(c:Client)=>req<BooksOverview>(c,"/overview"),
- reference:(c:Client)=>req<BookReference>(c,"/reference"),
- students:(c:Client,filters:{classId?:string;streamId?:string;q?:string;limit?:number}={})=>req<BookStudent[]>(c,`/students${query(filters)}`),
- stock:(c:Client)=>req<StockRow[]>(c,"/stock"),
- stockMovements:(c:Client,filters:Filters={})=>req<Paged<StockMovement>>(c,`/stock-movements${query(filters)}`),
- addStockMovement:(c:Client,body:{bookType:BookType;movementType:"receipt"|"adjustment";quantityDelta:number;movementOn:string;referenceText?:string|null;notes?:string|null})=>req<StockMovement>(c,"/stock-movements",json("POST",body)),
- reverseStockMovement:(c:Client,id:string,reason:string)=>req<StockMovement>(c,`/stock-movements/${id}/reverse`,json("POST",{reason})),
- distributions:(c:Client,filters:Filters={})=>req<Paged<Distribution>>(c,`/distributions${query(filters)}`),
- batches:(c:Client,filters:Filters={})=>req<DistributionBatch[]>(c,`/distribution-batches${query(filters)}`),
- issueLearner:(c:Client,body:{studentId:string;bookType:BookType;quantity:number;academicYearId?:string|null;termId?:string|null;distributedOn:string;notes?:string|null})=>req<Distribution>(c,"/distributions",json("POST",body)),
- bulkIssue:(c:Client,body:{classId:string;streamId?:string|null;bookType:BookType;quantityPerLearner:number;academicYearId?:string|null;termId?:string|null;distributedOn:string;notes?:string|null})=>req<any>(c,"/distributions/bulk",json("POST",body)),
- reverseDistribution:(c:Client,id:string,reason:string)=>req<Distribution>(c,`/distributions/${id}/reverse`,json("POST",{reason})),
- reverseBatch:(c:Client,id:string,reason:string)=>req<any>(c,`/distribution-batches/${id}/reverse`,json("POST",{reason})),
- learnerReport:(c:Client,studentId:string,filters:Filters={})=>req<LearnerReport>(c,`/reports/learner${query({...filters,studentId})}`),
- classReport:(c:Client,classId:string,filters:Filters={})=>req<ClassReport>(c,`/reports/class${query({...filters,classId})}`),
- unissued:(c:Client,classId:string,filters:Filters={})=>req<UnissuedReport>(c,`/reports/unissued${query({...filters,classId})}`),
- periodReport:(c:Client,filters:Filters={})=>req<PeriodReport>(c,`/reports/period${query(filters)}`),
- stockReport:(c:Client,filters:Filters={})=>req<{stock:StockRow[];movements:StockMovement[]}>(c,`/reports/stock${query(filters)}`),
- exportCsv:(c:Client,report:"distributions"|"class"|"unissued"|"learner"|"stock"|"period",filters:Filters={})=>text(c,`/reports/export${query({report,...filters})}`),
+import{booksApi as onlineBooksApi}from"./onlineApi";
+import{booksOfflineFallback,offlineBatches,offlineClassReport,offlineLearnerReport,offlineMovements,offlineOverview,offlinePagedDistributions,offlinePagedMovements,offlinePeriod,offlineReference,offlineStock,offlineStudents,offlineUnissued,queueBookIntent}from"./offline";
+type C=Parameters<typeof onlineBooksApi.overview>[0];
+export const booksApi={...onlineBooksApi,
+ overview:(c:C)=>booksOfflineFallback(()=>onlineBooksApi.overview(c),offlineOverview),
+ reference:(c:C)=>booksOfflineFallback(()=>onlineBooksApi.reference(c),offlineReference),
+ students:(c:C,f:any={})=>booksOfflineFallback(()=>onlineBooksApi.students(c,f),()=>offlineStudents(f)),
+ stock:(c:C)=>booksOfflineFallback(()=>onlineBooksApi.stock(c),offlineStock),
+ stockMovements:(c:C,f:any={})=>booksOfflineFallback(()=>onlineBooksApi.stockMovements(c,f),()=>offlinePagedMovements(f)),
+ addStockMovement:(c:C,b:any)=>booksOfflineFallback(()=>onlineBooksApi.addStockMovement(c,b),()=>queueBookIntent({kind:"stock_movement",...b}) as any),
+ distributions:(c:C,f:any={})=>booksOfflineFallback(()=>onlineBooksApi.distributions(c,f),()=>offlinePagedDistributions(f)),
+ batches:(c:C,f:any={})=>booksOfflineFallback(()=>onlineBooksApi.batches(c,f),async()=>{const x=await offlineBatches();return x.filter(r=>(!f.bookType||r.bookType===f.bookType)&&(!f.classId||r.classId===f.classId)&&(!f.streamId||r.streamId===f.streamId)&&(!f.academicYearId||r.academicYearId===f.academicYearId)&&(!f.termId||r.termId===f.termId))}),
+ issueLearner:(c:C,b:any)=>booksOfflineFallback(()=>onlineBooksApi.issueLearner(c,b),()=>queueBookIntent({kind:"individual_issue",...b}) as any),
+ bulkIssue:(c:C,b:any)=>booksOfflineFallback(()=>onlineBooksApi.bulkIssue(c,b),()=>queueBookIntent({kind:"bulk_issue",...b})),
+ learnerReport:(c:C,id:string,f:any={})=>booksOfflineFallback(()=>onlineBooksApi.learnerReport(c,id,f),()=>offlineLearnerReport(id,f)),
+ classReport:(c:C,id:string,f:any={})=>booksOfflineFallback(()=>onlineBooksApi.classReport(c,id,f),()=>offlineClassReport(id,f)),
+ unissued:(c:C,id:string,f:any={})=>booksOfflineFallback(()=>onlineBooksApi.unissued(c,id,f),()=>offlineUnissued(id,f)),
+ periodReport:(c:C,f:any={})=>booksOfflineFallback(()=>onlineBooksApi.periodReport(c,f),()=>offlinePeriod(f)),
+ stockReport:(c:C,f:any={})=>booksOfflineFallback(()=>onlineBooksApi.stockReport(c,f),async()=>({stock:await offlineStock(),movements:await offlineMovements()})),
 };
