@@ -1,6 +1,6 @@
 {
-  "key":"printerly","name":"Printerly","version":"1.7.0",
-  "description":"Secure remote printing and scanning with accounting, governance, scheduling, batch printing and unified audit/compliance reporting.",
+  "key":"printerly","name":"Printerly","version":"1.8.0",
+  "description":"Secure remote printing and scanning with accounting, governance, scheduling, audit, printer pools and smart load-aware routing.",
   "category":"operations","core":false,"active":true,
-  "manifest":{"standalone":true,"sharedCore":["organizations","users","permissions","files","projects","dimensions","journals","notifications","reports"],"features":["remote-printing","global-print-with-printerly","scannerly","department-project-charging","print-cost-accounting","ledger-journal-posting","printer-health","multi-channel-alerts","usage-reporting","csv-usage-export","monthly-print-quotas","automatic-print-rules","approval-workflows","scheduled-printing","multi-document-batches","batch-dispatch-leases","batch-idempotency","audit-compliance-center","cross-printerly-event-timeline","csv-audit-export","secure-release","priority-queue","cups-node","sane-scanner","restart-safe-duplicate-prevention"]}
+  "manifest":{"standalone":true,"sharedCore":["organizations","users","permissions","files","projects","dimensions","journals","notifications","reports"],"features":["remote-printing","global-print-with-printerly","scannerly","department-project-charging","print-cost-accounting","ledger-journal-posting","printer-health","multi-channel-alerts","usage-reporting","monthly-print-quotas","automatic-print-rules","approval-workflows","scheduled-printing","multi-document-batches","audit-compliance-center","printer-pools","default-auto-pool","load-aware-smart-routing","capability-aware-routing","pool-priority-routing","automatic-printer-failover","routing-audit-events","secure-release","priority-queue","cups-node","sane-scanner","restart-safe-duplicate-prevention"]}
 }
