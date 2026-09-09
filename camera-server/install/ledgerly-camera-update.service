@@ -1,0 +1,8 @@
+[Unit]
+Description=Update Ledgerly Camera Server from its configured Git checkout
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=__SERVER_DIR__/install/update.sh __REPO_DIR__

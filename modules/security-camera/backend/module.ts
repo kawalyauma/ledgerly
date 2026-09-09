@@ -7,11 +7,12 @@ import { securityCameraServerOperationsRoutes } from "./server-operations-routes
 import { securityCameraDeviceOperationsRoutes } from "./device-operations-routes";
 import { securityCameraEventRoutes } from "./event-routes";
 import { securityCameraServerEventRoutes } from "./server-event-routes";
+import { securityCameraFleetAdminRoutes } from "./fleet-admin-routes";
 
 export const moduleDefinition: BackendModuleDefinition = {
   key: "security-camera",
   name: "Security Cameras",
-  version: "0.7.0",
+  version: "0.8.0",
   order: 43,
   publicRoutes: [
     { basePath: "/api/v1/security-camera", router: securityCameraDeviceRoutes },
@@ -24,5 +25,6 @@ export const moduleDefinition: BackendModuleDefinition = {
     { basePath: "/api/v1/security-camera", router: securityCameraRoutes },
     { basePath: "/api/v1/security-camera", router: securityCameraOperationsRoutes },
     { basePath: "/api/v1/security-camera", router: securityCameraEventRoutes },
+    { basePath: "/api/v1/security-camera", router: securityCameraFleetAdminRoutes },
   ],
 };

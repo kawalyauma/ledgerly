@@ -1,0 +1,21 @@
+[Unit]
+Description=Optional Ledgerly local person/object detector
+After=ledgerly-camera.service
+Requires=ledgerly-camera.service
+
+[Service]
+Type=simple
+User=ledgerly-camera
+Group=ledgerly-camera
+WorkingDirectory=__SERVER_DIR__
+EnvironmentFile=/etc/ledgerly-camera/camera.env
+ExecStart=__SERVER_DIR__/.venv-detector/bin/python detectors/person_detector.py
+Restart=always
+RestartSec=8
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

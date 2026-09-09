@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Ledgerly Camera Server update check
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=20m
+Persistent=true
+Unit=ledgerly-camera-update.service
+
+[Install]
+WantedBy=timers.target

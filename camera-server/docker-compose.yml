@@ -5,5 +5,5 @@ services:
     network_mode: host
     volumes:
       - ./mediamtx.yml:/mediamtx.yml:ro
-      - ./camera-storage:/recordings
+      - ${CAMERA_STORAGE_ROOT:-./camera-storage}:/recordings
     command: ["/mediamtx.yml"]

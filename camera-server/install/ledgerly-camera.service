@@ -1,0 +1,26 @@
+[Unit]
+Description=Ledgerly Camera Server NVR control daemon
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=ledgerly-camera
+Group=ledgerly-camera
+SupplementaryGroups=docker
+WorkingDirectory=__SERVER_DIR__
+EnvironmentFile=/etc/ledgerly-camera/camera.env
+ExecStartPre=/usr/bin/docker compose up -d
+ExecStart=/usr/bin/node src/index.mjs
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target
