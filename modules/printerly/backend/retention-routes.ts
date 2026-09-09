@@ -1,0 +1,14 @@
+// @ts-nocheck
+import{Hono}from"hono";import type{MiddlewareHandler}from"hono";import type{AppVariables,Env}from"../../../src/types";import{requireModuleEnabled}from"../../../src/lib/modules";import{AppError}from"../../../src/lib/errors";import*as R from"./retention";
+export const printerlyRetentionRoutes=new Hono<{Bindings:Env;Variables:AppVariables}>();const json=async(c:any)=>c.req.json().catch(()=>({}));
+const access:MiddlewareHandler<{Bindings:Env;Variables:AppVariables}>=async(c,next)=>{const p=c.get("principal");if(["owner","admin","manager","accountant","viewer"].includes(p.role)||p.scopes.some((s:string)=>["documents:read","reports:read","school:read"].includes(s)))return next();throw new AppError(403,"FORBIDDEN","You do not have permission to view Printerly retention")};
+const admin:MiddlewareHandler<{Bindings:Env;Variables:AppVariables}>=async(c,next)=>{const p=c.get("principal");if(p.role==="owner"||p.role==="admin"||p.scopes.includes("admin:write"))return next();throw new AppError(403,"FORBIDDEN","Only organization owners and administrators can change Printerly privacy controls")};const read=[requireModuleEnabled("printerly"),access],write=[requireModuleEnabled("printerly"),admin];
+printerlyRetentionRoutes.get("/retention/policy",...read,async c=>c.json({data:await R.getPolicy(c.env.FINANCE_DB,c.get("principal").organizationId)}));
+printerlyRetentionRoutes.put("/retention/policy",...write,async c=>{const p=c.get("principal");return c.json({data:await R.updatePolicy(c.env.FINANCE_DB,p.organizationId,p.userId,await json(c))})});
+printerlyRetentionRoutes.get("/retention/inventory",...read,async c=>c.json({data:await R.inventory(c.env.FINANCE_DB,c.get("principal").organizationId)}));
+printerlyRetentionRoutes.get("/retention/holds",...read,async c=>c.json({data:await R.listHolds(c.env.FINANCE_DB,c.get("principal").organizationId,c.req.query("active")!=="false")}));
+printerlyRetentionRoutes.post("/retention/holds",...write,async c=>{const p=c.get("principal");return c.json({data:await R.createHold(c.env.FINANCE_DB,p.organizationId,p.userId,await json(c))},201)});
+printerlyRetentionRoutes.post("/retention/holds/:id/release",...write,async c=>{const p=c.get("principal");return c.json({data:await R.releaseHold(c.env.FINANCE_DB,p.organizationId,p.userId,c.req.param("id"))})});
+printerlyRetentionRoutes.post("/retention/purge",...write,async c=>{const p=c.get("principal");return c.json({data:await R.manualPurge(c.env.FINANCE_DB,c.env.WORK_FILES_BUCKET,p.organizationId,p.userId,await json(c))})});
+printerlyRetentionRoutes.post("/retention/sweep",...write,async c=>c.json({data:await R.sweepOrganization(c.env.FINANCE_DB,c.env.WORK_FILES_BUCKET,c.get("principal").organizationId)}));
+printerlyRetentionRoutes.get("/retention/events",...read,async c=>c.json({data:await R.listEvents(c.env.FINANCE_DB,c.get("principal").organizationId,Number(c.req.query("limit"))||150)}));
