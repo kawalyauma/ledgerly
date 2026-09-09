@@ -18,7 +18,7 @@ async function pendingStudentPatches(){
 }
 async function studentsWithPending(){
   const rows=await localMobileRecords<R>(MODULE,"students",1000,0),patches=await pendingStudentPatches();
-  return rows.map(row=>({...row.payload,...(patches.get(row.id)||{}),id:row.id}));
+  return rows.map(row=>({...(row.payload||{}),...(patches.get(row.id)||{}),id:row.id}));
 }
 
 export async function offlineSetupList(key:string){
@@ -38,7 +38,7 @@ export async function offlineStudents(params:R={}){
 }
 export async function offlineStudent(id:string){
   const row=await localMobileRecord<R>(MODULE,"students",id);if(!row)throw new MobileApiError(404,"STUDENT_NOT_FOUND","Learner is not available in the offline replica.");
-  const patches=await pendingStudentPatches();return{...row.payload,...(patches.get(id)||{}),id};
+  const patches=await pendingStudentPatches();return{...(row.payload||{}),...(patches.get(id)||{}),id};
 }
 export async function offlineGuardians(){
   const rows=await localMobileRecords<R>(MODULE,"student-guardians",1000,0),byId=new Map<string,R>();
