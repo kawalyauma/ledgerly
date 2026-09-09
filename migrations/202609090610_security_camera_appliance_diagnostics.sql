@@ -1,0 +1,10 @@
+ALTER TABLE security_cameras ADD COLUMN charging INTEGER;
+ALTER TABLE security_cameras ADD COLUMN thermal_status INTEGER;
+ALTER TABLE security_cameras ADD COLUMN device_owner INTEGER;
+ALTER TABLE security_cameras ADD COLUMN appliance_running INTEGER;
+ALTER TABLE security_cameras ADD COLUMN wake_lock INTEGER;
+ALTER TABLE security_cameras ADD COLUMN pending_segments INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE security_cameras ADD COLUMN spool_bytes INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE security_cameras ADD COLUMN spool_free_bytes INTEGER;
+ALTER TABLE security_cameras ADD COLUMN buffer_pressure INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE security_cameras ADD COLUMN diagnostics_updated_at TEXT;
