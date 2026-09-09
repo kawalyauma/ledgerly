@@ -1,14 +1,15 @@
 {
   "key": "security-camera",
   "name": "Security Cameras",
-  "version": "0.8.0",
-  "description": "Local-first Ledgerly CCTV with Android cameras, continuous NVR recording, live monitor walls, archive playback, events, evidence, visual zones and production fleet administration.",
+  "version": "0.9.0",
+  "description": "Local-first Ledgerly CCTV with Android cameras, NVR recording, monitor walls, events/evidence, visual zones, production fleet administration, security governance and alert escalation.",
   "category": "operations",
   "core": false,
   "active": true,
   "manifest": {
     "standalone": true,
-    "sharedCore": ["organizations", "users", "permissions", "mobile-sync"],
+    "sharedCore": ["organizations", "users", "permissions", "mobile-sync", "communications"],
+    "securityScopes": ["security:read", "security:live", "security:export", "security:review", "security:manage"],
     "features": [
       "qr-camera-pairing",
       "one-time-nvr-pairing",
@@ -54,6 +55,12 @@
       "systemd-production-service",
       "health-watchdog-recovery",
       "optional-fast-forward-auto-update",
+      "camera-specific-permission-scopes",
+      "security-audit-trail",
+      "notification-escalation-policies",
+      "durable-notification-queue",
+      "bulk-fleet-actions",
+      "nvr-update-policies",
       "remote-live-session-requests",
       "outbound-only-nvr-cloud-connectivity"
     ]
