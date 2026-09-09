@@ -6,17 +6,8 @@ import { PrinterlyReportsWorkspace } from "./PrinterlyReportsWorkspace";
 import { PrinterlyQuotaWorkspace } from "./PrinterlyQuotaWorkspace";
 import { PrinterlyRulesWorkspace } from "./PrinterlyRulesWorkspace";
 import { PrinterlyBatchesWorkspace } from "./PrinterlyBatchesWorkspace";
+import { PrinterlyAuditWorkspace } from "./PrinterlyAuditWorkspace";
 import { PrintWithPrinterlyAction } from "./PrintWithPrinterlyAction";
 import { ScannerlyInboxAction } from "./ScannerlyInboxAction";
 import "./printerly.css";
-
-const moduleDefinition:FrontendModuleDefinition={
-  key:"printerly",name:"Printerly",version:"1.6.0",order:42,
-  routes:{printerly:{view:PrinterlyWorkspace},"printerly-operations":{view:PrinterlyOperationsWorkspace},"printerly-reports":{view:PrinterlyReportsWorkspace},"printerly-quotas":{view:PrinterlyQuotaWorkspace,admin:true},"printerly-rules":{view:PrinterlyRulesWorkspace},"printerly-batches":{view:PrinterlyBatchesWorkspace}},
-  navigation:[{label:"Printerly",icon:Printer,order:42,items:[{label:"Print Center",path:"printerly"},{label:"Operations & Scannerly",path:"printerly-operations"},{label:"Usage Reports",path:"printerly-reports"},{label:"Quotas & Governance",path:"printerly-quotas",admin:true},{label:"Rules & Approvals",path:"printerly-rules"},{label:"Schedules & Batches",path:"printerly-batches"}]}],
-  globalActions:[
-    {key:"printerly-global-print",label:"Print with Printerly",order:42,component:PrintWithPrinterlyAction},
-    {key:"printerly-global-scannerly",label:"Scannerly",order:43,component:ScannerlyInboxAction}
-  ]
-};
-export default moduleDefinition;
+const moduleDefinition:FrontendModuleDefinition={key:"printerly",name:"Printerly",version:"1.7.0",order:42,routes:{printerly:{view:PrinterlyWorkspace},"printerly-operations":{view:PrinterlyOperationsWorkspace},"printerly-reports":{view:PrinterlyReportsWorkspace},"printerly-quotas":{view:PrinterlyQuotaWorkspace,admin:true},"printerly-rules":{view:PrinterlyRulesWorkspace},"printerly-batches":{view:PrinterlyBatchesWorkspace},"printerly-audit":{view:PrinterlyAuditWorkspace}},navigation:[{label:"Printerly",icon:Printer,order:42,items:[{label:"Print Center",path:"printerly"},{label:"Operations & Scannerly",path:"printerly-operations"},{label:"Usage Reports",path:"printerly-reports"},{label:"Quotas & Governance",path:"printerly-quotas",admin:true},{label:"Rules & Approvals",path:"printerly-rules"},{label:"Schedules & Batches",path:"printerly-batches"},{label:"Audit & Compliance",path:"printerly-audit"}]}],globalActions:[{key:"printerly-global-print",label:"Print with Printerly",order:42,component:PrintWithPrinterlyAction},{key:"printerly-global-scannerly",label:"Scannerly",order:43,component:ScannerlyInboxAction}]};export default moduleDefinition;

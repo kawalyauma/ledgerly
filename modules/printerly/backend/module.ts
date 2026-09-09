@@ -1,17 +1,16 @@
 import type { BackendModuleDefinition } from "../../backend-types";
 import { printerlyRoutes } from "./routes";
 import { printerlyBatchRoutes } from "./batch-routes";
+import { printerlyAuditRoutes } from "./audit-routes";
 import { printerlyNodeRoutes } from "./node-routes";
 import { runHealthSweep } from "./health";
 import { dispatchDueBatches, syncBatchStatuses } from "./batches";
 
 export const moduleDefinition: BackendModuleDefinition = {
-  key: "printerly",
-  name: "Printerly",
-  version: "1.6.0",
-  order: 42,
+  key: "printerly", name: "Printerly", version: "1.7.0", order: 42,
   publicRoutes: [{ basePath: "/api/v1/printerly", router: printerlyNodeRoutes }],
   routes: [
+    { basePath: "/api/v1/printerly", router: printerlyAuditRoutes },
     { basePath: "/api/v1/printerly", router: printerlyBatchRoutes },
     { basePath: "/api/v1/printerly", router: printerlyRoutes },
   ],
