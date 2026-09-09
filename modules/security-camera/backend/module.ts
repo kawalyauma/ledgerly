@@ -9,24 +9,7 @@ import { securityCameraEventRoutes } from "./event-routes";
 import { securityCameraServerEventRoutes } from "./server-event-routes";
 import { securityCameraFleetAdminRoutes } from "./fleet-admin-routes";
 import { securityCameraGovernanceRoutes } from "./governance-routes";
-
-export const moduleDefinition: BackendModuleDefinition = {
-  key: "security-camera",
-  name: "Security Cameras",
-  version: "0.9.0",
-  order: 43,
-  publicRoutes: [
-    { basePath: "/api/v1/security-camera", router: securityCameraDeviceRoutes },
-    { basePath: "/api/v1/security-camera", router: securityCameraDeviceOperationsRoutes },
-    { basePath: "/api/v1/security-camera", router: securityCameraServerRoutes },
-    { basePath: "/api/v1/security-camera", router: securityCameraServerOperationsRoutes },
-    { basePath: "/api/v1/security-camera", router: securityCameraServerEventRoutes },
-  ],
-  routes: [
-    { basePath: "/api/v1/security-camera", router: securityCameraRoutes },
-    { basePath: "/api/v1/security-camera", router: securityCameraOperationsRoutes },
-    { basePath: "/api/v1/security-camera", router: securityCameraEventRoutes },
-    { basePath: "/api/v1/security-camera", router: securityCameraFleetAdminRoutes },
-    { basePath: "/api/v1/security-camera", router: securityCameraGovernanceRoutes },
-  ],
-};
+import { securityCameraRedundancyRoutes } from "./redundancy-routes";
+import { securityCameraServerRedundancyRoutes } from "./server-redundancy-routes";
+import {evaluateFailover} from "./redundancy-service";
+export const moduleDefinition: BackendModuleDefinition={key:"security-camera",name:"Security Cameras",version:"0.10.0",order:43,publicRoutes:[{basePath:"/api/v1/security-camera",router:securityCameraDeviceRoutes},{basePath:"/api/v1/security-camera",router:securityCameraDeviceOperationsRoutes},{basePath:"/api/v1/security-camera",router:securityCameraServerRoutes},{basePath:"/api/v1/security-camera",router:securityCameraServerOperationsRoutes},{basePath:"/api/v1/security-camera",router:securityCameraServerEventRoutes},{basePath:"/api/v1/security-camera",router:securityCameraServerRedundancyRoutes}],routes:[{basePath:"/api/v1/security-camera",router:securityCameraRoutes},{basePath:"/api/v1/security-camera",router:securityCameraOperationsRoutes},{basePath:"/api/v1/security-camera",router:securityCameraEventRoutes},{basePath:"/api/v1/security-camera",router:securityCameraFleetAdminRoutes},{basePath:"/api/v1/security-camera",router:securityCameraGovernanceRoutes},{basePath:"/api/v1/security-camera",router:securityCameraRedundancyRoutes}],scheduled:async(env,controller)=>{if(!controller||controller.cron==="* * * * *")await evaluateFailover(env.FINANCE_DB)}};

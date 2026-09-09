@@ -1,8 +1,8 @@
 {
   "key": "security-camera",
   "name": "Security Cameras",
-  "version": "0.9.0",
-  "description": "Local-first Ledgerly CCTV with Android cameras, NVR recording, monitor walls, events/evidence, visual zones, production fleet administration, security governance and alert escalation.",
+  "version": "0.10.0",
+  "description": "Local-first Ledgerly CCTV with Android cameras, NVR recording, monitor walls, events/evidence, production fleet administration, governance, provider-backed escalation and automatic NVR failover.",
   "category": "operations",
   "core": false,
   "active": true,
@@ -59,8 +59,14 @@
       "security-audit-trail",
       "notification-escalation-policies",
       "durable-notification-queue",
+      "communications-sms-whatsapp-delivery-bridge",
       "bulk-fleet-actions",
       "nvr-update-policies",
+      "automatic-primary-secondary-nvr-failover",
+      "automatic-primary-failback",
+      "manual-disaster-recovery-switch",
+      "nvr-self-validation",
+      "deployment-validation-history",
       "remote-live-session-requests",
       "outbound-only-nvr-cloud-connectivity"
     ]
