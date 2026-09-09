@@ -1,0 +1,58 @@
+name: Security Camera CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'modules/security-camera/**'
+      - 'attendance-mobile/src/mobile/camera/**'
+      - 'camera-server/**'
+      - 'migrations/*security_camera*'
+      - '.github/workflows/security-camera-ci.yml'
+      - 'package.json'
+      - 'package-lock.json'
+  pull_request:
+    paths:
+      - 'modules/security-camera/**'
+      - 'attendance-mobile/src/mobile/camera/**'
+      - 'camera-server/**'
+      - 'migrations/*security_camera*'
+      - '.github/workflows/security-camera-ci.yml'
+      - 'package.json'
+      - 'package-lock.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-camera-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  camera-policy-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Sync module registries
+        run: npm run modules:sync
+      - name: Run focused camera policy tests
+        run: npx vitest run modules/security-camera/backend/health-remediation.test.ts modules/security-camera/backend/readiness-policy.test.ts attendance-mobile/src/mobile/camera/healthPolicy.test.ts
+
+  nvr-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Syntax-check NVR runtime
+        run: npm --prefix camera-server run check
+      - name: Validate NVR deployment package
+        run: npm --prefix camera-server run smoke
