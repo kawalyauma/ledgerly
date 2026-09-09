@@ -63,8 +63,9 @@ export async function saveMobileSyncIdentity(identity:MobileSyncIdentity){await 
 export async function clearMobileSyncIdentity(){await OfflineStore.removeSecure(IDENTITY_KEY)}
 export async function clearMobileSyncAccountData(){
   // Touch the store first so its schema exists on fresh/partially upgraded installations, then purge it transactionally.
-  await MobileSyncStore.collectionStates().catch(()=>[]);
-  await MobileSyncStoreAdmin.reset().catch(()=>false);
+  await MobileSyncStore.collectionStates();
+  const reset=await MobileSyncStoreAdmin.reset();
+  if(reset!==true)throw new MobileApiError(500,"SYNC_ACCOUNT_RESET_FAILED","Ledgerly could not safely purge the previous account's offline synchronization data.");
   await clearMobileSyncIdentity();
 }
 
