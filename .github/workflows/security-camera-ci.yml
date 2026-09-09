@@ -45,7 +45,7 @@ jobs:
       - name: Sync module registries
         run: npm run modules:sync
       - name: Run focused camera policy tests
-        run: npx vitest run modules/security-camera/backend/health-remediation.test.ts modules/security-camera/backend/readiness-policy.test.ts attendance-mobile/src/mobile/camera/healthPolicy.test.ts
+        run: npx vitest run modules/security-camera/backend/health-remediation.test.ts modules/security-camera/backend/readiness-policy.test.ts modules/security-camera/backend/integrity-policy.test.ts attendance-mobile/src/mobile/camera/healthPolicy.test.ts
 
   nvr-validation:
     runs-on: ubuntu-latest

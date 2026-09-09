@@ -5,12 +5,17 @@ import { requireModuleEnabled } from "../../../src/lib/modules";
 import {securityRead,securityExport,securityManage,securityReview} from "./security-scope";
 import {auditFromContext} from "./audit";
 import * as O from "./operations-service";
+import * as I from "./integrity-service";
 
 export const securityCameraOperationsRoutes=new Hono<{Bindings:Env;Variables:AppVariables}>();
 const json=async(c:any)=>c.req.json<Record<string,any>>().catch(()=>({}));
 const read=[requireModuleEnabled("security-camera"),securityRead],manage=[requireModuleEnabled("security-camera"),securityManage],exportScope=[requireModuleEnabled("security-camera"),securityExport],review=[requireModuleEnabled("security-camera"),securityReview];
 const publicRecording=(row:any)=>{const{local_path:_localPath,localPath:_camelLocalPath,...safe}=row||{};return safe};
 securityCameraOperationsRoutes.get("/operations",...read,async c=>c.json({data:await O.getOperations(c.env.FINANCE_DB,c.get("principal").organizationId)}));
+securityCameraOperationsRoutes.get("/integrity-summary",...read,async c=>c.json({data:await I.integritySummary(c.env.FINANCE_DB,c.get("principal").organizationId)}));
+securityCameraOperationsRoutes.get("/cameras/:id/integrity",...read,async c=>c.json({data:await I.cameraIntegrity(c.env.FINANCE_DB,c.get("principal").organizationId,c.req.param("id"),c.req.query("from")||undefined,c.req.query("to")||undefined)}));
+securityCameraOperationsRoutes.get("/recordings/:id/integrity",...read,async c=>c.json({data:await I.recordingIntegrityHistory(c.env.FINANCE_DB,c.get("principal").organizationId,c.req.param("id"))}));
+securityCameraOperationsRoutes.get("/incidents/integrity",...read,async c=>c.json({data:await I.incidentIntegrity(c.env.FINANCE_DB,c.get("principal").organizationId)}));
 securityCameraOperationsRoutes.get("/cameras/:id/profile",...read,async c=>c.json({data:await O.getCameraProfile(c.env.FINANCE_DB,c.get("principal").organizationId,c.req.param("id"))}));
 securityCameraOperationsRoutes.post("/cameras/:id/profile",...manage,async c=>{const body=await json(c),data=await O.saveCameraProfile(c.env.FINANCE_DB,c.get("principal").organizationId,c.req.param("id"),body);await auditFromContext(c,"camera.profile.changed","camera",c.req.param("id"),{preferredFacing:body.preferredFacing,width:body.width,height:body.height,fps:body.fps,bitrateKbps:body.bitrateKbps,retentionDays:body.retentionDays});return c.json({data})});
 securityCameraOperationsRoutes.get("/cameras/:id/timeline",...read,async c=>{const data=await O.timeline(c.env.FINANCE_DB,c.get("principal").organizationId,c.req.param("id"),c.req.query("from")||undefined,c.req.query("to")||undefined,Number(c.req.query("limit"))||1000);return c.json({data:{...data,segments:(data.segments||[]).map(publicRecording)}})});
