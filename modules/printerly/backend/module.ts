@@ -8,6 +8,7 @@ import { printerlyRetentionRoutes } from "./retention-routes";
 import { printerlyMobileOptionsRoutes } from "./mobile-options-routes";
 import { printerlyConsumablesRoutes } from "./consumables-routes";
 import { printerlyProcurementRoutes } from "./procurement-routes";
+import { printerlyServiceDeskRoutes } from "./service-desk-routes";
 import { printerlyNodeRoutes } from "./node-routes";
 import { runHealthSweep } from "./health";
 import { dispatchDueBatches, syncBatchStatuses } from "./batches";
@@ -16,11 +17,13 @@ import { cleanupReleaseCredentials } from "./release";
 import { runRetentionSweep } from "./retention";
 import { runConsumablesSweep } from "./consumables";
 import { runProcurementSweep } from "./procurement";
+import { runServiceDeskSweep } from "./service-desk";
 
 export const moduleDefinition: BackendModuleDefinition = {
-  key: "printerly", name: "Printerly", version: "1.12.0", order: 42,
+  key: "printerly", name: "Printerly", version: "1.13.0", order: 42,
   publicRoutes: [{ basePath: "/api/v1/printerly", router: printerlyNodeRoutes }],
   routes: [
+    { basePath: "/api/v1/printerly", router: printerlyServiceDeskRoutes },
     { basePath: "/api/v1/printerly", router: printerlyProcurementRoutes },
     { basePath: "/api/v1/printerly", router: printerlyConsumablesRoutes },
     { basePath: "/api/v1/printerly", router: printerlyRetentionRoutes },
@@ -34,6 +37,7 @@ export const moduleDefinition: BackendModuleDefinition = {
   scheduled: async (env, controller) => {
     if (!controller || controller.cron === "*/5 * * * *" || controller.cron === "0 * * * *") {
       await Promise.allSettled([runHealthSweep(env), dispatchDueBatches(env), runRetentionSweep(env), runConsumablesSweep(env)]);
+      await runServiceDeskSweep(env);
       await rerouteQueuedPoolJobs(env.FINANCE_DB);
       await syncBatchStatuses(env.FINANCE_DB);
       if (!controller || controller.cron === "0 * * * *") {
