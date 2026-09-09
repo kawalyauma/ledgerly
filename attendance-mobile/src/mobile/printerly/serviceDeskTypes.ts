@@ -1,0 +1,11 @@
+export type ServiceDeskCapabilities={canWrite:boolean;canAdmin:boolean};
+export type ServiceDeskSettings={autoCreateFromAlerts:boolean;autoResolveRecovered:boolean;p1ResponseMinutes:number;p1ResolutionMinutes:number;p2ResponseMinutes:number;p2ResolutionMinutes:number;p3ResponseMinutes:number;p3ResolutionMinutes:number;p4ResponseMinutes:number;p4ResolutionMinutes:number;updatedAt?:string|null};
+export type ServiceDeskSummary={open:number;p1:number;breached:number;dueSoon:number;resolvedToday:number};
+export type ServiceDeskUser={id:string;displayName:string;email?:string|null;role:string};
+export type ServiceAsset={id:string;name:string;location?:string|null;status?:string|null};
+export type ServiceTicketStatus="new"|"assigned"|"in_progress"|"waiting"|"resolved"|"closed"|"cancelled";
+export type ServicePriority="p1"|"p2"|"p3"|"p4";
+export type ServiceTicket={id:string;ticketNumber:string;sourceType:string;sourceAlertId?:string|null;category:string;priority:ServicePriority;status:ServiceTicketStatus;title:string;description:string;printerId?:string|null;nodeId?:string|null;scannerId?:string|null;assigneeId?:string|null;assigneeName?:string|null;printerName?:string|null;nodeName?:string|null;scannerName?:string|null;responseDueAt:string;resolutionDueAt:string;firstRespondedAt?:string|null;responseBreachedAt?:string|null;resolutionBreachedAt?:string|null;scheduledStartAt?:string|null;scheduledEndAt?:string|null;resolvedAt?:string|null;closedAt?:string|null;resolutionNotes?:string|null;createdAt:string;updatedAt:string};
+export type ServiceTicketEvent={id:string;eventType:string;actorId?:string|null;actorName?:string|null;notes?:string|null;details?:Record<string,unknown>;createdAt:string};
+export type ServiceTicketDetail=ServiceTicket&{alertTitle?:string|null;alertBody?:string|null;alertResolvedAt?:string|null;events:ServiceTicketEvent[]};
+export type ServiceDeskDashboard={capabilities:ServiceDeskCapabilities;settings:ServiceDeskSettings;summary:ServiceDeskSummary;tickets:ServiceTicket[];users:ServiceDeskUser[];printers:ServiceAsset[];nodes:ServiceAsset[];scanners:ServiceAsset[]};
