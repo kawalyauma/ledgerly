@@ -1,30 +1,36 @@
-import type{MobileSession}from"../auth";
-import{ledgerlyRequest,query,type SessionUpdater}from"../apiClient";
-import{ idempotency }from"./context";
-import type{Account,AccountGroup,BankAccount,BankTransaction,Budget,Dimension,FinanceDashboard,FinanceDocument,FinanceProject,FinanceReference,FiscalPeriod,InventoryBalance,InventoryLocation,Journal,Product,ReportResult,TaxCode,TaxJurisdiction,TaxReturn}from"./types";
-type Client={session:MobileSession;onSession?:SessionUpdater};
-const req=<T>(c:Client,path:string,init:RequestInit={})=>ledgerlyRequest<T>(c.session,path,init,c.onSession);
-const json=(method:string,body?:unknown,headers:Record<string,string>={}):RequestInit=>({method,headers:{"Content-Type":"application/json",...headers},body:body===undefined?undefined:JSON.stringify(body)});
-const yes=(v:any)=>v===true||v===1||v==="1";
-const account=(x:any):Account=>({...x,allowPosting:yes(x.allowPosting),active:yes(x.active)});
-const product=(x:any):Product=>({...x,quantityOnHandMicros:Number(x.quantityOnHandMicros||0),averageCostMinor:Number(x.averageCostMinor||0),reorderPointMicros:Number(x.reorderPointMicros||0),active:yes(x.active)});
-const bank=(x:any):BankAccount=>({...x,openingBalanceMinor:Number(x.openingBalanceMinor||0),active:yes(x.active)});
+import {financeApi as onlineFinanceApi} from "./onlineApi";
+import {financeOfflineFallback,offlineAccounts,offlineBankAccounts,offlineContacts,offlineDashboard,offlineDimensions,offlineDocument,offlineDocuments,offlineJournal,offlineJournals,offlinePeriods,offlineProducts,offlineProjects,offlineReference,queueDocumentIntent,queueJournalIntent} from "./offline";
+
+type C=Parameters<typeof onlineFinanceApi.dashboard>[0];
+const empty=<T>(online:()=>Promise<T[]>)=>financeOfflineFallback(online,async()=>[] as T[]);
+
 export const financeApi={
- dashboard:(c:Client)=>req<FinanceDashboard>(c,"/dashboards/summary"),
- accounts:async(c:Client)=>(await req<any[]>(c,"/accounts?limit=500")).map(account),groups:async(c:Client)=>(await req<any[]>(c,"/accounts/groups")).map(x=>({...x,active:yes(x.active)} as AccountGroup)),
- createAccount:(c:Client,body:any)=>req<any>(c,"/accounts",json("POST",body)),updateAccount:(c:Client,id:string,body:any)=>req<any>(c,`/accounts/${id}`,json("PUT",body)),setAccountActive:(c:Client,id:string,active:boolean)=>req<any>(c,`/accounts/${id}/active`,json("PATCH",{active})),deleteAccount:(c:Client,id:string)=>req<any>(c,`/accounts/${id}`,{method:"DELETE"}),mergeAccount:(c:Client,id:string,targetAccountId:string)=>req<any>(c,`/accounts/${id}/merge`,json("POST",{targetAccountId})),
- createGroup:(c:Client,body:any)=>req<any>(c,"/accounts/groups",json("POST",body)),updateGroup:(c:Client,id:string,body:any)=>req<any>(c,`/accounts/groups/${id}`,json("PUT",body)),deleteGroup:(c:Client,id:string)=>req<any>(c,`/accounts/groups/${id}`,{method:"DELETE"}),openingBalances:(c:Client,body:any)=>req<any>(c,"/accounts/opening-balances",json("POST",body,{"Idempotency-Key":idempotency("opening")})),
- contacts:(c:Client)=>req<any[]>(c,"/contacts?limit=500"),products:async(c:Client)=>(await req<any[]>(c,"/products?limit=500")).map(product),projects:(c:Client)=>req<FinanceProject[]>(c,"/projects"),dimensions:(c:Client,type?:string)=>req<Dimension[]>(c,`/dimensions${query({type})}`),taxCodes:(c:Client)=>req<TaxCode[]>(c,"/tax/codes"),bankAccounts:async(c:Client)=>(await req<any[]>(c,"/banking/accounts")).map(bank),
- reference:async(c:Client):Promise<FinanceReference>=>{const[a,ct,p,pr,d,t,b]=await Promise.all([financeApi.accounts(c),financeApi.contacts(c),financeApi.products(c),financeApi.projects(c),financeApi.dimensions(c),financeApi.taxCodes(c),financeApi.bankAccounts(c)]);return{accounts:a,contacts:ct,products:p,projects:pr,dimensions:d,taxCodes:t,bankAccounts:b}},
- journals:(c:Client)=>req<Journal[]>(c,"/journals?limit=300"),journal:(c:Client,id:string)=>req<Journal>(c,`/journals/${id}`),createJournal:(c:Client,body:any)=>req<any>(c,"/journals",json("POST",body,{"Idempotency-Key":idempotency("journal")})),postJournal:(c:Client,id:string)=>req<any>(c,`/journals/${id}/post`,json("POST",{})),reversalPreview:(c:Client,id:string)=>req<any>(c,`/journals/${id}/reversal-preview`),reverseJournal:(c:Client,id:string,postingDate:string,reason:string)=>req<any>(c,`/journals/${id}/reverse`,json("POST",{postingDate,reason})),deleteJournal:(c:Client,id:string)=>req<any>(c,`/journals/${id}`,{method:"DELETE"}),
- documents:(c:Client,type?:string)=>req<FinanceDocument[]>(c,`/documents${query({type,limit:300})}`),document:(c:Client,id:string)=>req<any>(c,`/documents/${id}`),createDocument:(c:Client,body:any)=>req<any>(c,"/documents",json("POST",body)),postDocument:(c:Client,id:string,controlAccountId:string)=>req<any>(c,`/documents/${id}/post`,json("POST",{controlAccountId})),reverseDocument:(c:Client,id:string,postingDate:string,reason:string)=>req<any>(c,`/documents/${id}/reverse`,json("POST",{postingDate,reason})),deleteDocument:(c:Client,id:string)=>req<any>(c,`/documents/${id}`,{method:"DELETE"}),
- createBankAccount:(c:Client,body:any)=>req<any>(c,"/banking/accounts",json("POST",body)),updateBankAccount:(c:Client,id:string,body:any)=>req<any>(c,`/finance-mobile/banking/accounts/${id}`,json("PUT",body)),bankTransactions:(c:Client,id:string)=>req<BankTransaction[]>(c,`/banking/accounts/${id}/transactions`),bankMatchCandidates:(c:Client,id:string)=>req<any>(c,`/finance-mobile/banking/transactions/${id}/match-candidates`),matchBankTransaction:(c:Client,id:string,journalLineId:string)=>req<any>(c,`/banking/transactions/${id}/match`,json("POST",{journalLineId})),importStatement:(c:Client,id:string,body:any)=>req<any>(c,`/banking/accounts/${id}/statements`,json("POST",body)),reconcile:(c:Client,id:string,body:any)=>req<any>(c,`/banking/accounts/${id}/reconciliations`,json("POST",body)),reconciliations:(c:Client,id:string)=>req<any[]>(c,`/banking/accounts/${id}/reconciliation-statement`),bankCharge:(c:Client,id:string,body:any)=>req<any>(c,`/banking/accounts/${id}/charges`,json("POST",body,{"Idempotency-Key":idempotency("bank-charge")})),bankTransfer:(c:Client,body:any)=>req<any>(c,"/banking/transfers",json("POST",body,{"Idempotency-Key":idempotency("bank-transfer")})),
- periods:(c:Client)=>req<FiscalPeriod[]>(c,"/periods"),createPeriod:(c:Client,body:any)=>req<any>(c,"/periods",json("POST",body)),setPeriodStatus:(c:Client,id:string,status:string,reason?:string)=>req<any>(c,`/periods/${id}/status`,json("PATCH",{status,reason:reason||undefined})),
- budgets:(c:Client)=>req<Budget[]>(c,"/budgets"),budget:(c:Client,id:string)=>req<Budget>(c,`/finance-mobile/budgets/${id}`),createBudget:(c:Client,body:any)=>req<any>(c,"/budgets",json("POST",body)),updateBudget:(c:Client,id:string,body:any)=>req<any>(c,`/budgets/${id}`,json("PATCH",body)),submitBudget:(c:Client,id:string)=>req<any>(c,`/budgets/${id}/submit`,json("POST",{})),approveBudget:(c:Client,id:string)=>req<any>(c,`/budgets/${id}/approve`,json("POST",{})),reviseBudget:(c:Client,id:string,body:any)=>req<any>(c,`/budgets/${id}/revisions`,json("POST",body)),lockBudget:(c:Client,id:string)=>req<any>(c,`/budgets/${id}/lock`,json("POST",{})),archiveBudget:(c:Client,id:string)=>req<any>(c,`/budgets/${id}/archive`,json("POST",{})),
- createProduct:(c:Client,body:any)=>req<any>(c,"/products",json("POST",body)),updateProduct:(c:Client,id:string,body:any)=>req<any>(c,`/finance-mobile/products/${id}`,json("PUT",body)),setProductActive:(c:Client,id:string,active:boolean)=>req<any>(c,`/finance-mobile/products/${id}/active`,json("PATCH",{active})),
- inventoryLocations:(c:Client)=>req<InventoryLocation[]>(c,"/inventory/locations"),createInventoryLocation:(c:Client,body:any)=>req<any>(c,"/inventory/locations",json("POST",body)),inventoryBalances:(c:Client)=>req<InventoryBalance[]>(c,"/inventory/balances"),inventoryMovements:(c:Client,params:{productId?:string;locationId?:string}={})=>req<any[]>(c,`/finance-mobile/inventory/movements${query({...params,limit:300})}`),inventoryMovement:(c:Client,body:any)=>req<any>(c,"/inventory/movements",json("POST",body,{"Idempotency-Key":idempotency("inventory")})),inventoryTransfer:(c:Client,body:any)=>req<any>(c,"/inventory/transfers",json("POST",body,{"Idempotency-Key":idempotency("stock-transfer")})),
- taxJurisdictions:(c:Client)=>req<TaxJurisdiction[]>(c,"/tax/jurisdictions"),createTaxJurisdiction:(c:Client,body:any)=>req<any>(c,"/tax/jurisdictions",json("POST",body)),createTaxCode:(c:Client,body:any)=>req<any>(c,"/tax/codes",json("POST",body)),updateTaxCode:(c:Client,id:string,body:any)=>req<any>(c,`/tax/codes/${id}`,json("PUT",body)),taxExemptions:(c:Client)=>req<any[]>(c,"/finance-mobile/tax/exemptions"),createTaxExemption:(c:Client,body:any)=>req<any>(c,"/tax/exemptions",json("POST",body)),taxReturns:(c:Client)=>req<TaxReturn[]>(c,"/tax/returns"),prepareTaxReturn:(c:Client,body:any)=>req<any>(c,"/tax/returns/prepare",json("POST",body)),lockTaxReturn:(c:Client,id:string)=>req<any>(c,`/tax/returns/${id}/lock`,json("POST",{})),fileTaxReturn:(c:Client,id:string,filingReference:string)=>req<any>(c,`/tax/returns/${id}/file`,json("POST",{filingReference})),
- createProject:(c:Client,body:any)=>req<any>(c,"/projects",json("POST",body)),project:(c:Client,id:string)=>req<FinanceProject>(c,`/finance-mobile/projects/${id}`),addProjectTime:(c:Client,id:string,body:any)=>req<any>(c,`/projects/${id}/time-entries`,json("POST",body)),approveProjectTime:(c:Client,projectId:string,id:string)=>req<any>(c,`/projects/${projectId}/time-entries/${id}/approve`,json("PATCH",{})),
- createDimension:(c:Client,body:any)=>req<any>(c,"/dimensions",json("POST",body)),updateDimension:(c:Client,id:string,body:any)=>req<any>(c,`/dimensions/${id}`,json("PUT",body)),deleteDimension:(c:Client,id:string)=>req<any>(c,`/dimensions/${id}`,{method:"DELETE"}),
- reportTypes:async(c:Client)=>(await req<Array<{id:string}>>(c,"/reports")).map(x=>x.id),report:(c:Client,type:string,filters:any={})=>req<ReportResult>(c,`/reports/${encodeURIComponent(type)}${query(filters)}`),createReportExport:(c:Client,type:string,format:"json"|"csv"|"xlsx"|"pdf",filters:any={})=>req<any>(c,`/reports/${encodeURIComponent(type)}/exports`,json("POST",{format,filters})),reportExportStatus:(c:Client,id:string)=>req<any>(c,`/reports/exports/${id}/status`),
+ ...onlineFinanceApi,
+ dashboard:(c:C)=>financeOfflineFallback(()=>onlineFinanceApi.dashboard(c),offlineDashboard),
+ accounts:(c:C)=>financeOfflineFallback(()=>onlineFinanceApi.accounts(c),offlineAccounts),
+ groups:(c:C)=>empty(()=>onlineFinanceApi.groups(c)),
+ contacts:(c:C)=>financeOfflineFallback(()=>onlineFinanceApi.contacts(c),offlineContacts),
+ products:(c:C)=>financeOfflineFallback(()=>onlineFinanceApi.products(c),offlineProducts),
+ projects:(c:C)=>financeOfflineFallback(()=>onlineFinanceApi.projects(c),offlineProjects),
+ dimensions:(c:C,type?:string)=>financeOfflineFallback(()=>onlineFinanceApi.dimensions(c,type),()=>offlineDimensions(type)),
+ taxCodes:(c:C)=>empty(()=>onlineFinanceApi.taxCodes(c)),
+ bankAccounts:(c:C)=>financeOfflineFallback(()=>onlineFinanceApi.bankAccounts(c),offlineBankAccounts),
+ reference:(c:C)=>financeOfflineFallback(()=>onlineFinanceApi.reference(c),offlineReference),
+ journals:(c:C)=>financeOfflineFallback(()=>onlineFinanceApi.journals(c),offlineJournals),
+ journal:(c:C,id:string)=>financeOfflineFallback(()=>onlineFinanceApi.journal(c,id),()=>offlineJournal(id) as any),
+ createJournal:(c:C,body:any)=>financeOfflineFallback(()=>onlineFinanceApi.createJournal(c,body),()=>queueJournalIntent(body)),
+ documents:(c:C,type?:string)=>financeOfflineFallback(()=>onlineFinanceApi.documents(c,type),()=>offlineDocuments(type)),
+ document:(c:C,id:string)=>financeOfflineFallback(()=>onlineFinanceApi.document(c,id),()=>offlineDocument(id)),
+ createDocument:(c:C,body:any)=>financeOfflineFallback(()=>onlineFinanceApi.createDocument(c,body),()=>queueDocumentIntent(body)),
+ periods:(c:C)=>financeOfflineFallback(()=>onlineFinanceApi.periods(c),offlinePeriods),
+ bankTransactions:(c:C,id:string)=>empty(()=>onlineFinanceApi.bankTransactions(c,id)),
+ reconciliations:(c:C,id:string)=>empty(()=>onlineFinanceApi.reconciliations(c,id)),
+ budgets:(c:C)=>empty(()=>onlineFinanceApi.budgets(c)),
+ inventoryLocations:(c:C)=>empty(()=>onlineFinanceApi.inventoryLocations(c)),
+ inventoryBalances:(c:C)=>empty(()=>onlineFinanceApi.inventoryBalances(c)),
+ inventoryMovements:(c:C,params:any={})=>empty(()=>onlineFinanceApi.inventoryMovements(c,params)),
+ taxJurisdictions:(c:C)=>empty(()=>onlineFinanceApi.taxJurisdictions(c)),
+ taxExemptions:(c:C)=>empty(()=>onlineFinanceApi.taxExemptions(c)),
+ taxReturns:(c:C)=>empty(()=>onlineFinanceApi.taxReturns(c)),
+ reportTypes:(c:C)=>financeOfflineFallback(()=>onlineFinanceApi.reportTypes(c),async()=>[]),
 };
