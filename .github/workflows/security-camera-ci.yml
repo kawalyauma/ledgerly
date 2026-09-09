@@ -1,11 +1,13 @@
 name: Security Camera CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
       - 'modules/security-camera/**'
       - 'attendance-mobile/src/mobile/camera/**'
+      - 'attendance-mobile/src/mobile/security-cameras/**'
       - 'camera-server/**'
       - 'migrations/*security_camera*'
       - '.github/workflows/security-camera-ci.yml'
@@ -15,6 +17,7 @@ on:
     paths:
       - 'modules/security-camera/**'
       - 'attendance-mobile/src/mobile/camera/**'
+      - 'attendance-mobile/src/mobile/security-cameras/**'
       - 'camera-server/**'
       - 'migrations/*security_camera*'
       - '.github/workflows/security-camera-ci.yml'

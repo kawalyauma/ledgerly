@@ -1,0 +1,5 @@
+export type ReadinessGate={key:string;label:string;status:"passed"|"warning"|"failed";detail:string;required:boolean};
+export type DeploymentReadiness={score:number;status:"ready"|"caution"|"not_ready";gates:ReadinessGate[];generatedAt:string;certificate?:CommissioningRun};
+export type RecoveryDrillResult={cameraId:string;cameraName:string;primaryServerId:string;primaryServerName:string;secondaryServerId:string;secondaryServerName:string;primaryHealthy:boolean;secondaryHealthy:boolean;ready:boolean;predictedRtoSeconds:number;message:string};
+export type RecoveryDrill={generatedAt:string;protectedCameras:number;readyCameras:number;results:RecoveryDrillResult[];score?:number;status?:"passed"|"warning"|"failed";passed?:boolean;certificate?:CommissioningRun};
+export type CommissioningRun={id:string;run_type?:"readiness_certification"|"recovery_drill";runType?:"readiness_certification"|"recovery_drill";status:"passed"|"warning"|"failed";score:number;passed:boolean;actor_id?:string|null;actorId?:string|null;summary?:string|null;details?:any;created_at?:string;createdAt?:string};
