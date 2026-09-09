@@ -150,6 +150,12 @@ async function syncRequest<T>(path:string,init:RequestInit={},retry=true):Promis
 
 export async function fetchMobileSyncManifest(){return syncRequest<MobileSyncManifest>("/manifest")}
 
+export async function eligibleMobileSyncCollections(){
+  const identity=await ensureMobileSyncAccess();
+  const data=await syncRequest<{deviceId:string;collections:MobileSyncCollection[]}>(`/eligible/${encodeURIComponent(identity.deviceId)}`);
+  return data.collections;
+}
+
 export async function acknowledgeMobileSyncSchemas(manifest:MobileSyncManifest,collections?:Array<{moduleKey:string;collectionKey:string}>){
   const identity=await ensureMobileSyncAccess();
   const wanted=collections?.length?new Set(collections.map(c=>`${c.moduleKey}:${c.collectionKey}`)):null;

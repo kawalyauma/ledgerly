@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppVariables, Env } from "../../../src/types";
 import { AppError } from "../../../src/lib/errors";
-import { registerDevice, listDevices, revokeDevice } from "./device-service";
-import { getMobileSyncCollection } from "./registry";
+import { registerDevice, listDevices, revokeDevice, assertOwnedActiveDevice } from "./device-service";
+import { getMobileSyncCollection, listMobileSyncCollections } from "./registry";
 import { acknowledgeBootstrap, acknowledgePull, acknowledgeSchemas, bootstrap, mobileSyncManifest, pull, push, recoveryState } from "./sync-service";
 
 export const mobileSyncRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -59,7 +59,23 @@ async function authorizeCollections(c:any,deviceId:string,items:Array<{moduleKey
   }
 }
 
+function hasScope(principal:any,scope?:string){return !scope||principal.role==="owner"||principal.role==="admin"||Array.isArray(principal.scopes)&&principal.scopes.includes(scope)}
+
 mobileSyncRoutes.get("/manifest", c => c.json({ data: mobileSyncManifest() }));
+mobileSyncRoutes.get("/eligible/:deviceId", async c => {
+  const deviceId=c.req.param("deviceId"),principal=c.get("principal");
+  await assertOwnedActiveDevice(c.env.FINANCE_DB,principal,deviceId);
+  const eligible=[] as Array<{moduleKey:string;collectionKey:string;schemaVersion:number;minClientSchemaVersion:number;mode:string;sourceOfTruth:string;conflictPolicy:string}>;
+  for(const definition of listMobileSyncCollections()){
+    if(!hasScope(principal,definition.pullScope))continue;
+    if(definition.authorizePull){
+      try{await definition.authorizePull({db:c.env.FINANCE_DB,principal,organizationId:principal.organizationId,userId:principal.userId,deviceId})}
+      catch(error){if(error instanceof AppError&&(error.status===403||error.status===404))continue;throw error}
+    }
+    eligible.push({moduleKey:definition.moduleKey,collectionKey:definition.collectionKey,schemaVersion:definition.schemaVersion,minClientSchemaVersion:definition.minClientSchemaVersion??definition.schemaVersion,mode:definition.mode,sourceOfTruth:definition.sourceOfTruth,conflictPolicy:definition.conflictPolicy});
+  }
+  return c.json({data:{deviceId,collections:eligible}});
+});
 mobileSyncRoutes.post("/devices", async c => {
   const input = await json(c, registration);
   return c.json({ data: await registerDevice(c.env.FINANCE_DB, c.get("principal"), input) }, 201);
