@@ -2,7 +2,7 @@ import {useEffect,useRef} from "react";
 import {AppState,Platform} from "react-native";
 import type {MobileSession} from "./auth";
 import type {DevicePurpose} from "./device-purpose/devicePurpose";
-import {eligibleMobileSyncCollections,initializeMobileSync} from "./syncClient";
+import {clearMobileSyncAccountData,eligibleMobileSyncCollections,initializeMobileSync} from "./syncClient";
 import {syncMobileNow} from "./syncEngine";
 
 const ACTIVE_SYNC_INTERVAL_MS=5*60*1000;
@@ -22,20 +22,23 @@ export function useNormalMobileSync(session:MobileSession|null,purpose:DevicePur
 
   useEffect(()=>{
     if(purpose!=="normal"||!session)return;
-    let cancelled=false,running=false,collections:Array<{moduleKey:string;collectionKey:string}>|null=null;
-    const updateSession=async(next:MobileSession)=>{sessionRef.current=next;await onSessionRef.current(next)};
+    let cancelled=false,running=false;
+    const purgeIfCancelled=async()=>{if(!cancelled)return false;await clearMobileSyncAccountData().catch(()=>undefined);return true};
+    const updateSession=async(next:MobileSession)=>{if(cancelled)return;sessionRef.current=next;await onSessionRef.current(next)};
     const run=async()=>{
       if(cancelled||running)return;
       const current=sessionRef.current;if(!current)return;
       running=true;
       try{
         await initializeMobileSync(current,registration,updateSession);
-        if(!collections){
-          const eligible=await eligibleMobileSyncCollections();
-          collections=eligible.map(c=>({moduleKey:c.moduleKey,collectionKey:c.collectionKey}));
-        }
+        if(await purgeIfCancelled())return;
+        const eligible=await eligibleMobileSyncCollections();
+        if(await purgeIfCancelled())return;
+        const collections=eligible.map(c=>({moduleKey:c.moduleKey,collectionKey:c.collectionKey}));
         if(collections.length)await syncMobileNow(sessionRef.current||current,registration,collections,updateSession,{maxPushBatches:10,maxPullRounds:20,pullLimit:500});
+        await purgeIfCancelled();
       }catch(error:any){
+        if(cancelled){await clearMobileSyncAccountData().catch(()=>undefined);return}
         if(error?.code!=="NETWORK_ERROR")console.warn("Ledgerly mobile sync deferred",error?.code||error?.message||error);
       }finally{running=false}
     };
