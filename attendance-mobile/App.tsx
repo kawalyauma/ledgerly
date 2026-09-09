@@ -26,17 +26,20 @@ import {DevicePurposeScreen} from "./src/mobile/device-purpose/DevicePurposeScre
 import {clearDevicePurpose,readDevicePurpose,saveDevicePurpose,type DevicePurpose} from "./src/mobile/device-purpose/devicePurpose";
 import {CameraModeScreen} from "./src/mobile/camera/CameraModeScreen";
 import {clearCameraRegistration} from "./src/mobile/camera/api";
+import {clearMobileSyncAccountData} from "./src/mobile/syncClient";
+import {useNormalMobileSync} from "./src/mobile/syncRuntime";
 
 type Route="home"|"attendance"|"school"|"academics"|"exams"|"books"|"human-resources"|"payroll-payments"|"contacts"|"communications"|"tasks-work"|"finance-core"|"printerly"|"security-cameras";
 export default function App(){
   const[ready,setReady]=useState(false),[onboarded,setOnboarded]=useState(false),[session,setSession]=useState<MobileSession|null>(null),[purpose,setPurpose]=useState<DevicePurpose|null>(null),[route,setRoute]=useState<Route>("home"),[attendanceView,setAttendanceView]=useState<"landing"|"workspace"|"register"|"kiosk">("landing"),[registration,setRegistration]=useState<Registration|null|undefined>(undefined);
+  useNormalMobileSync(session,purpose,updateSession);
   useEffect(()=>{let live=true;(async()=>{const[seen,saved,device,savedPurpose]=await Promise.all([onboardingComplete().catch(()=>false),readMobileSession().catch(()=>null),DeviceManager.getRegistration().catch(()=>null),readDevicePurpose().catch(()=>null)]);if(!live)return;setOnboarded(seen);setRegistration(device);setPurpose(savedPurpose);if(saved){try{const renewed=await refreshMobile(saved);if(live){await saveMobileSession(renewed);setSession(renewed)}}catch(e:any){if(e?.status===401){await clearMobileSession()}else if(live)setSession(saved)}}setReady(true)})();return()=>{live=false}},[]);
   async function finishOnboarding(){await completeOnboarding();setOnboarded(true)}
   async function signedIn(next:MobileSession){await saveMobileSession(next);setSession(next);setRoute("home")}
   async function updateSession(next:MobileSession){await saveMobileSession(next);setSession(next)}
   async function choosePurpose(next:DevicePurpose){await saveDevicePurpose(next);setPurpose(next);setRoute(next==="attendance-kiosk"?"attendance":"home");setAttendanceView(next==="attendance-kiosk"?(registration?"kiosk":"register"):"landing")}
   async function changePurpose(){await Promise.all([clearDevicePurpose(),clearCameraRegistration()]);setPurpose(null);setRoute("home");setAttendanceView("landing")}
-  function requestLogout(){Alert.alert("Sign out?","You will need your Ledgerly credentials to sign in again.",[{text:"Cancel",style:"cancel"},{text:"Sign out",style:"destructive",onPress:()=>{const current=session;setSession(null);setRoute("home");void clearMobileSession();if(current)void logoutMobile(current)}}])}
+  function requestLogout(){Alert.alert("Sign out?","You will need your Ledgerly credentials to sign in again.",[{text:"Cancel",style:"cancel"},{text:"Sign out",style:"destructive",onPress:()=>{const current=session;setSession(null);setRoute("home");void Promise.all([clearMobileSession(),clearMobileSyncAccountData()]);if(current)void logoutMobile(current)}}])}
   if(!ready)return <View style={s.loading}><StatusBar barStyle="light-content" backgroundColor="#071c16"/><View style={s.loaderMark}><Text style={s.loaderLetter}>L</Text></View><ActivityIndicator color="#55c894" style={{marginTop:18}}/><Text style={s.loadingText}>Preparing Ledgerly Mobile</Text></View>;
   if(!onboarded)return <OnboardingScreen onDone={()=>void finishOnboarding()}/>;
   if(!purpose)return <DevicePurposeScreen onSelect={next=>void choosePurpose(next)}/>;
