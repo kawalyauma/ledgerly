@@ -3,15 +3,18 @@ import { printerlyRoutes } from "./routes";
 import { printerlyBatchRoutes } from "./batch-routes";
 import { printerlyAuditRoutes } from "./audit-routes";
 import { printerlyRoutingRoutes } from "./routing-routes";
+import { printerlyReleaseRoutes } from "./release-routes";
 import { printerlyNodeRoutes } from "./node-routes";
 import { runHealthSweep } from "./health";
 import { dispatchDueBatches, syncBatchStatuses } from "./batches";
 import { rerouteQueuedPoolJobs } from "./routing";
+import { cleanupReleaseCredentials } from "./release";
 
 export const moduleDefinition: BackendModuleDefinition = {
-  key: "printerly", name: "Printerly", version: "1.8.0", order: 42,
+  key: "printerly", name: "Printerly", version: "1.9.0", order: 42,
   publicRoutes: [{ basePath: "/api/v1/printerly", router: printerlyNodeRoutes }],
   routes: [
+    { basePath: "/api/v1/printerly", router: printerlyReleaseRoutes },
     { basePath: "/api/v1/printerly", router: printerlyRoutingRoutes },
     { basePath: "/api/v1/printerly", router: printerlyAuditRoutes },
     { basePath: "/api/v1/printerly", router: printerlyBatchRoutes },
@@ -22,6 +25,7 @@ export const moduleDefinition: BackendModuleDefinition = {
       await Promise.allSettled([runHealthSweep(env), dispatchDueBatches(env)]);
       await rerouteQueuedPoolJobs(env.FINANCE_DB);
       await syncBatchStatuses(env.FINANCE_DB);
+      if (!controller || controller.cron === "0 * * * *") await cleanupReleaseCredentials(env.FINANCE_DB);
     }
   },
 };

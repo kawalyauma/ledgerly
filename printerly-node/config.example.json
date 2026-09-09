@@ -5,6 +5,8 @@
   "cupsStatusIntervalMs": 3000,
   "printCompletionTimeoutMs": 1800000,
   "scanTimeoutMs": 1800000,
+  "releaseStationHost": "127.0.0.1",
+  "releaseStationPort": 8791,
   "workDir": "/var/lib/printerly/jobs",
   "scanDir": "/var/lib/printerly/scans"
 }

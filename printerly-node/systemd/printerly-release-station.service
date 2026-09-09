@@ -1,0 +1,24 @@
+[Unit]
+Description=Ledgerly Printerly Secure Release Station
+After=network-online.target cups.service printerly-node.service
+Wants=network-online.target cups.service
+
+[Service]
+Type=simple
+User=printerly
+Group=printerly
+SupplementaryGroups=lp
+Environment=PRINTERLY_CONFIG=/etc/printerly/config.json
+Environment=PRINTERLY_STATE_DIR=/var/lib/printerly
+ExecStart=/usr/bin/node /opt/printerly/src/release-station.mjs
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/printerly
+ReadOnlyPaths=/var/lib/printerly
+
+[Install]
+WantedBy=multi-user.target
