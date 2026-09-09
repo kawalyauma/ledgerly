@@ -44,6 +44,7 @@ export const requireAuth: MiddlewareHandler<{ Bindings: Env; Variables: AppVaria
     organizationId: payload.org,
     role: payload.role as AuthPrincipal["role"],
     scopes: Array.isArray(payload.scopes) ? payload.scopes.filter((v:unknown): v is string => typeof v === "string") : [],
+    mobileDeviceId: typeof payload.mobileDeviceId === "string" ? payload.mobileDeviceId : undefined,
   };
   c.set("principal", principal);
   await next();

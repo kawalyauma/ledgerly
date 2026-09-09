@@ -27,6 +27,8 @@ export interface AuthPrincipal {
   organizationId: string;
   role: "owner" | "admin" | "accountant" | "manager" | "viewer" | "integration";
   scopes: string[];
+  /** Present only on short-lived access tokens minted from a revocable mobile offline grant. */
+  mobileDeviceId?: string;
 }
 
 export interface AppVariables {

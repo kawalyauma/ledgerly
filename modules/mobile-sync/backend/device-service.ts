@@ -109,6 +109,9 @@ export async function revokeDevice(db: D1Database, principal: AuthPrincipal, dev
 }
 
 export async function assertOwnedActiveDevice(db: D1Database, principal: AuthPrincipal, deviceId: string) {
+  if (principal.mobileDeviceId && principal.mobileDeviceId !== deviceId) {
+    throw new AppError(403, "MOBILE_DEVICE_TOKEN_MISMATCH", "This mobile access token is bound to a different device");
+  }
   const device = await loadDevice(db, principal.organizationId, deviceId);
   if (!device) throw new AppError(404, "DEVICE_NOT_FOUND", "Mobile device not found");
   if (device.status !== "active") throw new AppError(403, "DEVICE_NOT_ACTIVE", "This mobile device is revoked or inactive");
