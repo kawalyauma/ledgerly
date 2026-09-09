@@ -1,8 +1,8 @@
 {
   "key": "security-camera",
   "name": "Security Cameras",
-  "version": "0.6.0",
-  "description": "Local-first Ledgerly CCTV with QR-paired Android cameras, continuous NVR WebRTC recording, timeline playback, exports, multi-disk storage and operational health.",
+  "version": "0.7.0",
+  "description": "Local-first Ledgerly CCTV with QR-paired Android cameras, continuous NVR recording, live viewing, archive playback, multi-disk storage, events, evidence and incidents.",
   "category": "operations",
   "core": false,
   "active": true,
@@ -36,6 +36,15 @@
       "storage-retention",
       "nvr-runtime-health",
       "operational-alerts",
+      "motion-event-heuristic",
+      "local-detector-webhook",
+      "person-intrusion-tamper-event-ingest",
+      "evidence-snapshots",
+      "event-review-workflow",
+      "incident-protection-windows",
+      "camera-zones",
+      "detection-schedules",
+      "event-alert-rules",
       "remote-live-session-requests",
       "outbound-only-nvr-cloud-connectivity"
     ]
