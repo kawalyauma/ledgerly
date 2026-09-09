@@ -1,5 +1,5 @@
 import type { MobileSyncRecord, MobileSyncSnapshotContext } from "../../mobile-sync/backend/contracts";
-import { camelizeRow, parseJson } from "./common";
+import { camelizeRow } from "./common";
 type R = Record<string, any>;
 
 function version(row:R){return Math.max(1,Number(row.syncVersion??1));}
@@ -11,7 +11,7 @@ function safeStudent(row:R){
     preferredName:row.preferredName,gender:row.gender,dateOfBirth:row.dateOfBirth,nationality:row.nationality,placeOfBirth:row.placeOfBirth,
     religion:row.religion,homeLanguage:row.homeLanguage,phone:row.phone,email:row.email,physicalAddress:row.physicalAddress,previousSchool:row.previousSchool,
     previousClass:row.previousClass,admissionDate:row.admissionDate,studentCategory:row.studentCategory,residencyStatus:row.residencyStatus,house:row.house,
-    status:row.status,profilePhotoUrl:row.profilePhotoUrl,customFields:typeof row.customFieldsJson==="string"?parseJson(row.customFieldsJson,{}):row.customFields??{},
+    status:row.status,profilePhotoUrl:row.profilePhotoUrl,
     campusId:row.campusId,campusName:row.campusName,currentAcademicYearId:row.currentAcademicYearId,academicYearName:row.academicYearName,
     currentClassId:row.currentClassId,className:row.className,currentStreamId:row.currentStreamId,streamName:row.streamName,
     updatedAt:row.updatedAt,
