@@ -1,0 +1,17 @@
+export type PrinterlyNode={id:string;name:string;location?:string|null;status:string;last_seen_at?:string|null;lastSeenAt?:string|null};
+export type PrinterlyPrinter={id:string;name:string;status:string;healthStatus?:string|null;healthMessage?:string|null;location?:string|null;nodeId?:string|null;nodeName?:string|null;systemName?:string|null};
+export type PrintJob={id:string;jobNumber:string;title:string;documentName?:string|null;status:string;priority:string;copies:number;estimatedPages?:number;totalSheets?:number;createdAt:string;secureRelease?:boolean;pageSize?:string;colorMode?:string;duplex?:boolean;costing?:any;quota?:any};
+export type UploadedDocument={id:string;originalName:string;mimeType:string;sizeBytes:number;checksum:string};
+export type CostProfile={currency:string;paperCostMinor:number;bwTonerCostMinor:number;colorTonerCostMinor:number;maintenanceCostMinor:number;electricityCostMinor:number;expenseAccountId?:string|null;offsetAccountId?:string|null;autoPostAccounting:boolean};
+export type CostingOptions={projects:Array<{id:string;code:string;name:string}>;financeDepartments:Array<{id:string;code:string;name:string}>;schoolDepartments:Array<{id:string;code:string;name:string}>;accounts:Array<{id:string;code:string;name:string;type:string;subtype?:string}>;profile:CostProfile};
+export type QuotaMetric={key:"impressions"|"sheets"|"cost";limit:number;used:number;request:number;projected:number;percent:number;exceeded:boolean};
+export type QuotaStatus={id:string;name:string;mode:"soft"|"hard";scope_type:string;scope_id?:string|null;scope_name?:string;warning_percent:number;periodKey:string;usage:{metrics:QuotaMetric[];peakPercent:number;warning:boolean;exceeded:boolean}};
+export type QuotaCheck={periodKey:string;requested:{impressions:number;sheets:number;costMinor:number};allowed:boolean;quotas:QuotaStatus[]};
+export type QuotaRow=QuotaStatus&{max_impressions:number;max_sheets:number;max_cost_minor:number;period?:any};
+export type ScannerRow={id:string;name:string;status:string;nodeName?:string|null;nodeLocation?:string|null};
+export type ScanJob={id:string;scanNumber:string;title:string;status:string;scannerName?:string|null;targetType?:string|null;targetModule?:string|null;documentId?:string|null;documentName?:string|null;notes?:string|null;createdAt?:string|null;completedAt?:string|null;error?:string|null};
+export type ScanInboxItem={id:string;scanNumber:string;title:string;documentId:string;documentName:string;mimeType:string;sizeBytes:number;createdAt:string;completedAt?:string;scannerName?:string;notes?:string};
+export type AlertRow={id:string;severity:string;title:string;body:string;eventType?:string;acknowledgedAt?:string|null;resolvedAt?:string|null;createdAt?:string|null};
+export type AlertPreference={eventType:string;enabled:boolean;email:boolean;sms:boolean;whatsapp:boolean};
+export type UsageReport={range:{from:string;to:string};currency:string;summary:Record<string,any>;daily:Record<string,any>[];byRequester:Record<string,any>[];byProject:Record<string,any>[];byDepartment:Record<string,any>[];byPrinter:Record<string,any>[]};
+export type PrinterlyOverview={nodes:{online:number;total:number};printers?:{ready:number;total:number};jobs:{active?:number;total?:number;sheets?:number};costing?:{currency:string;totalCostMinor:number};health?:{printers:{healthy:number;total:number}};scannerly?:{scanners:{ready:number;total:number}}};
