@@ -11,6 +11,11 @@ export type PrintJobOptions={
 export type QuotaMetric={key:"impressions"|"sheets"|"cost";limit:number;used:number;request:number;projected:number;percent:number;exceeded:boolean};
 export type QuotaStatus={id:string;name:string;mode:"soft"|"hard";scope_type:string;scope_name?:string;warning_percent:number;periodKey:string;usage:{metrics:QuotaMetric[];peakPercent:number;warning:boolean;exceeded:boolean}};
 export type QuotaCheck={periodKey:string;requested:{impressions:number;sheets:number;costMinor:number};allowed:boolean;quotas:QuotaStatus[]};
+export type PolicyPreview={
+  policy:{blocked:boolean;blockedReason?:string;requiresApproval:boolean;messages:string[];applied:Array<{id:string;name:string;actions:string[]}>;effective:PrintJobOptions};
+  quota:QuotaCheck;
+  costing:{estimatedImpressions:number;estimatedSheets:number;estimate:{totalCostMinor:number;currency:string}};
+};
 
 type UploadedDocument={id:string;originalName:string;mimeType:string;sizeBytes:number;checksum:string};
 
@@ -36,6 +41,12 @@ export async function loadQuickPrintContext(){
 export async function checkPrinterlyQuota(options:PrintJobOptions){
   return post<QuotaCheck>("/printerly/quotas/check",{copies:options.copies||1,estimatedPages:options.estimatedPages||1,colorMode:options.colorMode||"monochrome",duplex:Boolean(options.duplex),
     projectId:options.projectId||null,departmentType:options.departmentType||null,departmentId:options.departmentId||null});
+}
+
+export async function previewPrinterlyPolicy(options:PrintJobOptions){
+  return post<PolicyPreview>("/printerly/rules/preview",{title:options.title,copies:options.copies||1,estimatedPages:options.estimatedPages||1,printerId:options.printerId||null,
+    priority:options.priority||"normal",secureRelease:Boolean(options.secureRelease),pageSize:options.pageSize||"A4",colorMode:options.colorMode||"monochrome",duplex:Boolean(options.duplex),
+    projectId:options.projectId||null,departmentType:options.departmentType||null,departmentId:options.departmentId||null,sourceModule:options.sourceModule||null,sourceReference:options.sourceReference||null});
 }
 
 export function estimateCost(profile:CostProfile,pages:number,copies:number,duplex:boolean,colorMode:"monochrome"|"color"){

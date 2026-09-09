@@ -6,7 +6,7 @@ import { runHealthSweep } from "./health";
 export const moduleDefinition: BackendModuleDefinition = {
   key: "printerly",
   name: "Printerly",
-  version: "1.4.0",
+  version: "1.5.0",
   order: 42,
   publicRoutes: [{ basePath: "/api/v1/printerly", router: printerlyNodeRoutes }],
   routes: [{ basePath: "/api/v1/printerly", router: printerlyRoutes }],
