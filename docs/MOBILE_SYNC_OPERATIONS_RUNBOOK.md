@@ -23,7 +23,7 @@ The expected long-outage flow is:
 7. Flush any locally persisted bootstrap/pull acknowledgements left from an earlier interrupted session.
 8. Push pending operations in sequence order. A dependency block does not consume sequence; terminal validation/conflict outcomes do consume sequence so later work is not permanently deadlocked.
 9. Retry the same operation/batch IDs after network uncertainty. The server replays stored terminal results rather than applying the domain mutation twice.
-10. Pull server changes from each collection's acknowledged cursor, apply them locally, persist the pull acknowledgement, and only then acknowledge the exact delivery cursor to the server.
+10. Pull server changes from each collection's acknowledged cursor, apply successful collection deliveries locally, persist their pull acknowledgements, and only then acknowledge the exact delivery cursors to the server. A denied or schema-blocked collection does not roll back successful collections from the same pull response.
 11. Continue until the local queue and pending acknowledgement stores are empty.
 
 This design tolerates the server changing extensively while the device is away. Server-owned configuration, accounting, payroll, shared stock and other control state is revalidated when offline intents are converted.
@@ -34,11 +34,13 @@ This design tolerates the server changing extensively while the device is away. 
 | --- | --- |
 | Device crashes before local enqueue commit | No operation exists and no sequence was consumed. |
 | Device crashes after local enqueue | Operation and sequence persist together and are sent later. |
+| Native SQLite operation throws after beginning a transaction | The transaction is explicitly closed/rolled back before the error is returned, preventing a persistent database lock. |
 | Request never reaches server | Retry the same operation/batch IDs. |
 | Server commits push but response is lost | Stored operation/batch result is replayed; domain mutation is not repeated. |
 | Push conflicts with newer server version | Conflict becomes a terminal result and consumes that sequence. |
 | Dependency is still pending | Operation remains blocked/retryable and does not consume sequence. |
 | Pull is received but app crashes before local apply | Server cursor is unchanged; delivery can be requested again. |
+| Pull contains both successful and denied/schema-blocked collections | Successful collections are applied and acknowledged first; the failed collection is then surfaced as `MOBILE_PULL_PARTIAL_FAILURE` with collection-specific details. |
 | Pull is applied locally but HTTP acknowledgement is lost | Local pending ACK survives; startup resends the exact delivery ID/cursor. Equal-version replay is idempotent. |
 | Bootstrap is applied locally but server ACK is lost | Local pending bootstrap ACK survives and is flushed on startup. |
 | Server worker crashes during an asynchronous module intent | Hardened processors retry/recover stale work using stable IDs/idempotency keys. |
@@ -49,6 +51,12 @@ This design tolerates the server changing extensively while the device is away. 
 `clearMobileSyncAccountData()` must never ignore a local reset failure. The native reset removes records, operations, bootstrap/pull acknowledgements, collection state and resets the next sequence in one SQLite transaction. The TypeScript client clears the stored mobile-sync identity only after that transaction succeeds.
 
 This prevents queued operations or replicated records from one organization surviving into a newly registered organization on the same installation.
+
+## Authorization model
+
+Static collection scopes are only the first authorization layer. Collection definitions may also provide `authorizePull` and `authorizePush` hooks for domain-specific rules such as teacher ownership or payroll access. The mobile-sync route layer executes these hooks before bootstrap, pull and push, while the eligible-collections endpoint evaluates `authorizePull` before advertising a collection to a device.
+
+The sync service still performs device ownership/activity checks, protocol/schema checks and static scope checks. Do not bypass the route layer when exposing generic Mobile Sync externally.
 
 ## Source-of-truth summary
 
@@ -69,7 +77,7 @@ This prevents queued operations or replicated records from one organization surv
 
 Verified durable mobile snapshots do not include raw biometric templates, provider API credentials, camera/node secrets, R2 payslip object keys, HR banking/tax data, or arbitrary sensitive financial-control fields.
 
-Payroll payment-batch snapshot items contain employee ID and amount only. Communications snapshots contain message/campaign/delivery state rather than provider secrets. Attendance biometric settings contain thresholds/configuration, not template bytes.
+Payroll payment-batch snapshot items contain employee/payroll-line identifiers, amount, resulting payment/journal identifiers and processing status; they do not contain employee bank account numbers or provider credentials. Communications snapshots contain message/campaign/delivery state rather than provider secrets. Attendance biometric settings contain thresholds/configuration, not template bytes.
 
 Security Camera recording list/timeline API responses deliberately omit NVR filesystem `local_path`. Playback and export use separate short-lived grants instead.
 
@@ -119,9 +127,13 @@ Every collection is registered by the tuple `moduleKey:collectionKey`. The regis
 
 The generated backend registry includes Academics, Attendance, Books, Communications, Contacts, Exams, Human Resources, Ledgerly Finance Core, Mobile Sync, Payroll & Payments, Printerly, School Management, Security Camera and Tasks & Work.
 
+Historical migrations may share old numeric prefixes, but they remain distinct filenames and predate the generic Mobile Sync sequence. Do not rename already-shipped migrations merely to make numeric prefixes globally unique.
+
 ## Tombstones and long-offline deletion
 
-Server deletes are represented by durable tombstones/change events. The native store retains the record version with `deleted=true`, while normal local reads exclude deleted rows. Privacy/schema migrations that remove data must scrub historical change payloads, republish sanitized current rows and replay retained tombstones.
+Server deletes are represented by durable tombstones/change events. The native store retains the record version with `deleted=true`, while normal local reads exclude deleted rows. A stale upsert based on a pre-deletion version conflicts against the current deleted server version instead of resurrecting the row.
+
+Privacy/schema migrations that remove data must scrub historical change payloads, republish sanitized current rows and replay retained tombstones. The audited generic sync data currently has no age-based tombstone/change cleanup that would silently hide a deletion from a device returning after roughly one year.
 
 Do not introduce changelog/tombstone compaction based only on age. Any future compaction must prove that all supported long-offline devices have crossed a safe acknowledged watermark or force a safe rebootstrap.
 
@@ -131,11 +143,21 @@ A device must acknowledge the exact current collection schema before bootstrap/p
 
 The native record store is intentionally JSON-shaped, so many collection payload shape upgrades do not require SQLite column changes. If the native database schema itself changes in future, implement an explicit Android database migration before increasing its database version.
 
+## Replay and duplicate-prevention guarantees
+
+- Reusing a completed `batchId` with the same request body replays the stored batch result.
+- Reusing a `batchId` with different data returns `IDEMPOTENCY_MISMATCH`.
+- Reusing an `operationId` with a different request hash or sequence returns `IDEMPOTENCY_MISMATCH`.
+- Reusing a device sequence for another operation returns `SEQUENCE_REUSE`.
+- Missing sequence numbers produce `SYNC_SEQUENCE_GAP` and stop later work until the gap is resolved.
+- A dependency that is merely pending blocks retryably; a dependency that terminally conflicted/rejected causes a terminal dependency failure.
+- Record dependencies remain blocked until the required record/version exists and is not deleted.
+
 ## Verification performed
 
-The audit verified source-level behavior for authentication/revocation, local encryption, queue sequence allocation, bootstrap/pull ACK durability, push idempotency, dependency ordering, conflict/CAS behavior, tombstones, account isolation, module registration, migration numbering, sensitive snapshots, scheduled intent recovery, Printerly credential/payload boundaries, and Security Camera pairing/live/playback/export boundaries.
+The audit verified source-level behavior for authentication/revocation, dynamic collection authorization, local encryption, queue sequence allocation, native transaction recovery, bootstrap/pull ACK durability, partial-pull preservation, push idempotency, dependency ordering, conflict/CAS behavior, tombstones, account isolation, module registration, migration numbering, sensitive snapshots, scheduled intent recovery, Printerly credential/payload boundaries, and Security Camera pairing/live/playback/export boundaries.
 
-A full repository `npm`/mobile Gradle build was not executed in the audit environment because the available container could not resolve `github.com`, and the audited GitHub head exposed no CI status checks. Do not interpret this runbook as a replacement for the normal developer command suite. Before release, run the repository's current module sync/validation, TypeScript checks, unit tests, web build, Android checks, migration dry-run/apply tests, and an API-level device bootstrap/push/retry/pull/ack smoke test in an environment with dependencies installed.
+A full repository `npm`/mobile Gradle build was not executed in the audit environment because the available container could not resolve `github.com`, and the audited GitHub head exposed no general CI status checks. Do not interpret this runbook as a replacement for the normal developer command suite. Before release, run the repository's current module sync/validation, TypeScript checks, unit tests, web build, Android checks, migration dry-run/apply tests, and an API-level device bootstrap/push/retry/pull/ack smoke test in an environment with dependencies installed.
 
 ## Release smoke test
 
@@ -148,8 +170,10 @@ For each release that changes sync behavior, exercise this sequence with a test 
 5. Queue one safe offline mutation and one append-only intent.
 6. Push them; discard the HTTP response; retry the exact same batch and confirm no duplicate domain rows.
 7. Make a server-side update and deletion, pull them, apply locally, discard the ACK response, resend the pending ACK and confirm exact-cursor idempotency.
-8. Create a stale base-version mutation and verify a conflict rather than silent overwrite.
-9. Create a dependency-blocked operation and verify its sequence is not consumed until the dependency resolves.
-10. Disable/revoke the device or user and confirm the next grant exchange is denied.
-11. Attempt an account switch while forcing local reset failure and confirm the app refuses to register the second tenant.
-12. Verify Printerly and Security Camera real-time/appliance commands do not appear in the generic Mobile Sync manifest.
+8. In the same pull response, make one collection unauthorized or schema-blocked and confirm successful collections are still applied/acked before `MOBILE_PULL_PARTIAL_FAILURE` is surfaced.
+9. Create a stale base-version mutation and verify a conflict rather than silent overwrite.
+10. Create a dependency-blocked operation and verify its sequence is not consumed until the dependency resolves.
+11. Disable/revoke the device or user and confirm the next grant exchange is denied.
+12. Attempt an account switch while forcing local reset failure and confirm the app refuses to register the second tenant.
+13. Force a native SQLite exception after transaction start and confirm later queue/sync operations can still open and use the database without an app restart.
+14. Verify Printerly and Security Camera real-time/appliance commands do not appear in the generic Mobile Sync manifest.
