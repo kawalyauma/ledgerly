@@ -5,6 +5,7 @@ import { printerlyAuditRoutes } from "./audit-routes";
 import { printerlyRoutingRoutes } from "./routing-routes";
 import { printerlyReleaseRoutes } from "./release-routes";
 import { printerlyRetentionRoutes } from "./retention-routes";
+import { printerlyMobileOptionsRoutes } from "./mobile-options-routes";
 import { printerlyNodeRoutes } from "./node-routes";
 import { runHealthSweep } from "./health";
 import { dispatchDueBatches, syncBatchStatuses } from "./batches";
@@ -17,6 +18,7 @@ export const moduleDefinition: BackendModuleDefinition = {
   publicRoutes: [{ basePath: "/api/v1/printerly", router: printerlyNodeRoutes }],
   routes: [
     { basePath: "/api/v1/printerly", router: printerlyRetentionRoutes },
+    { basePath: "/api/v1/printerly", router: printerlyMobileOptionsRoutes },
     { basePath: "/api/v1/printerly", router: printerlyReleaseRoutes },
     { basePath: "/api/v1/printerly", router: printerlyRoutingRoutes },
     { basePath: "/api/v1/printerly", router: printerlyAuditRoutes },
