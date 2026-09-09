@@ -1,8 +1,27 @@
 import {NativeEventEmitter,NativeModules} from "react-native";
 import type {Registration} from "./types";
 type QueueRow={id:string;payload:string;attempts:number;lastError?:string|null};
+type MobileSyncOperationRow={operationId:string;sequence:number;moduleKey:string;collectionKey:string;recordId:string;kind:"upsert"|"delete";schemaVersion:number;baseVersion:number;clientTimestamp:string;payloadJson?:string|null;dependenciesJson:string;attempts:number;lastError?:string|null};
+type MobileSyncRecordRow={id:string;version:number;deleted?:boolean;payloadJson?:string|null;updatedAt?:string|null};
+type MobileSyncCollectionState={moduleKey:string;collectionKey:string;schemaVersion:number;cursor:number};
 export const DeviceManager=NativeModules.DeviceManager as {deviceFingerprint():Promise<string>;saveRegistration(apiUrl:string,deviceId:string,credential:string,exitPin:string):Promise<boolean>;getRegistration():Promise<Registration|null>;verifyExitPin(pin:string):Promise<boolean>;clearRegistration():Promise<boolean>};
 export const OfflineStore=NativeModules.OfflineStore as {enqueue(id:string,payload:string):Promise<string>;pending(limit:number):Promise<QueueRow[]>;failed(limit:number):Promise<QueueRow[]>;acknowledge(ids:string[]):Promise<number>;fail(ids:string[],message:string):Promise<number>;reject(ids:string[],message:string):Promise<number>;retryFailed():Promise<boolean>;count():Promise<number>;failedCount():Promise<number>;putSecure(key:string,value:string):Promise<boolean>;getSecure(key:string):Promise<string|null>;removeSecure(key:string):Promise<number>};
+export const MobileSyncStore=NativeModules.MobileSyncStore as {
+  setCollectionSchemas(schemasJson:string):Promise<number>;
+  enqueueOperation(operationJson:string):Promise<number>;
+  pendingOperations(limit:number):Promise<MobileSyncOperationRow[]>;
+  applyPushResults(resultsJson:string):Promise<number>;
+  applyBootstrap(bootstrapJson:string):Promise<string>;
+  applyPull(pullJson:string):Promise<string>;
+  pendingPullAcks():Promise<Array<{deliveryId:string;cursor:number}>>;
+  clearPullAcks(ids:string[]):Promise<number>;
+  pendingBootstrapAcks():Promise<string[]>;
+  clearBootstrapAck(id:string):Promise<number>;
+  getRecord(moduleKey:string,collectionKey:string,recordId:string):Promise<MobileSyncRecordRow|null>;
+  listRecords(moduleKey:string,collectionKey:string,limit:number,offset:number):Promise<MobileSyncRecordRow[]>;
+  collectionStates():Promise<MobileSyncCollectionState[]>;
+  pendingOperationCount():Promise<number>;
+};
 export const KioskManager=NativeModules.KioskManager as {status():Promise<{deviceOwner:boolean;lockTaskPermitted:boolean}>;enter():Promise<boolean>;exit():Promise<boolean>};
 export const LedgerlyNfc=NativeModules.LedgerlyNfc as {isSupported():Promise<boolean>;enable():Promise<boolean>;disable():Promise<boolean>};
 export const FilePicker=NativeModules.FilePicker as {pick():Promise<{uri:string;name:string;mimeType:string;size:number}|null>};
