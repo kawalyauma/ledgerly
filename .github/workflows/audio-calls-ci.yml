@@ -20,12 +20,25 @@ on:
     paths:
       - "modules/audio-calls/**"
       - "attendance-mobile/src/mobile/audio-calls/**"
+      - "attendance-mobile/android/app/src/main/java/com/ledgerlyattendance/AudioCallAudioModule.kt"
+      - "attendance-mobile/android/app/src/main/java/com/ledgerlyattendance/AttendanceNativePackage.kt"
+      - "attendance-mobile/android/app/src/main/AndroidManifest.xml"
+      - "attendance-mobile/App.tsx"
+      - "attendance-mobile/src/mobile/HomeScreen.tsx"
       - "migrations/*audio_calls*"
+      - "src/lib/auth.ts"
+      - "src/types.ts"
+      - "docs/audio-calls-deployment.md"
       - ".github/workflows/audio-calls-ci.yml"
+
+concurrency:
+  group: audio-calls-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   web-and-backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,10 +48,11 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build:web
-      - run: npm test -- --runInBand
+      - run: npm test
 
   android:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: attendance-mobile
@@ -53,7 +67,8 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
       - run: npm ci
       - run: npm run typecheck
       - run: chmod +x android/gradlew
-      - run: ./android/gradlew -p android assembleDebug --no-daemon
+      - run: ./android/gradlew -p android assembleDebug --no-daemon --stacktrace
