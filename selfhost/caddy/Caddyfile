@@ -1,0 +1,21 @@
+{
+  admin off
+}
+
+{$LEDGERLY_SITE_ADDRESS:http://localhost} {
+  encode zstd gzip
+
+  header {
+    X-Content-Type-Options nosniff
+    X-Frame-Options DENY
+    Referrer-Policy no-referrer
+    -Server
+  }
+
+  respond /healthz 200 {
+    body "ledgerly-selfhost-edge-ok"
+    close
+  }
+
+  respond "Ledgerly self-hosted edge is running. API/web cutover is not enabled yet." 503
+}

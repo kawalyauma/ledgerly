@@ -3,6 +3,7 @@ node_modules/
 dist/
 coverage/
 .dev.vars
+.env.selfhost
 *.log
 .DS_Store
 
