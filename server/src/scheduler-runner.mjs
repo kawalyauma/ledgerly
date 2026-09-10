@@ -29,8 +29,8 @@ export class SchedulerRunner {
     this.logger = logger;
   }
 
-  async tick(now = new Date()) {
-    if (this.#running || this.#stopped) return { skipped: true };
+  async runOnce(now = new Date()) {
+    if (this.#running) return { skipped: true };
     this.#running = true;
     let claimed = [];
     let dispatched = 0;
@@ -91,7 +91,7 @@ export class SchedulerRunner {
   start() {
     if (!this.#stopped) return;
     this.#stopped = false;
-    void this.tick().catch((error) => {
+    void this.runOnce().catch((error) => {
       this.logger.error(JSON.stringify({
         level: "error",
         component: "scheduler",
@@ -99,7 +99,7 @@ export class SchedulerRunner {
       }));
     });
     this.#timer = setInterval(() => {
-      void this.tick().catch((error) => {
+      void this.runOnce().catch((error) => {
         this.logger.error(JSON.stringify({
           level: "error",
           component: "scheduler",
