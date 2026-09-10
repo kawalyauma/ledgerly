@@ -1,9 +1,10 @@
 import{describe,expect,it}from"vitest";
-import{advancePlayhead,clampPlayhead,playbackOffsetMs,segmentAt,timelinePercent}from"./nvrPlaybackPolicy";
+import{advancePlayhead,clampPlayhead,historyWindowAt,playbackOffsetMs,segmentAt,timelinePercent}from"./nvrPlaybackPolicy";
 const segments=[{id:"a",started_at:"2026-09-10T08:00:00.000Z",ended_at:"2026-09-10T08:05:00.000Z"},{id:"b",started_at:"2026-09-10T08:06:00.000Z",ended_at:"2026-09-10T08:10:00.000Z"}];
 describe("NVR playback policy",()=>{
  it("selects coverage and preserves gaps",()=>{expect(segmentAt(segments,Date.parse("2026-09-10T08:02:00Z"))?.id).toBe("a");expect(segmentAt(segments,Date.parse("2026-09-10T08:05:30Z"))).toBeNull();expect(segmentAt(segments,Date.parse("2026-09-10T08:07:00Z"))?.id).toBe("b")});
  it("clamps scrubbing to the visible time window",()=>{const from=1000,to=5000;expect(clampPlayhead(0,from,to)).toBe(from);expect(clampPlayhead(3000,from,to)).toBe(3000);expect(clampPlayhead(9000,from,to)).toBe(to)});
  it("advances the shared playhead at playback speed without crossing the window end",()=>{expect(advancePlayhead(1000,1000,2,10000)).toBe(3000);expect(advancePlayhead(9000,1000,4,10000)).toBe(10000)});
- it("maps coverage and seek offsets deterministically",()=>{const from=Date.parse("2026-09-10T08:00:00Z"),to=Date.parse("2026-09-10T09:00:00Z"),time=Date.parse("2026-09-10T08:30:00Z");expect(timelinePercent(time,from,to)).toBeCloseTo(50);expect(playbackOffsetMs(segments[0],Date.parse("2026-09-10T08:02:30Z"))).toBe(150000)})
+ it("maps coverage and seek offsets deterministically",()=>{const from=Date.parse("2026-09-10T08:00:00Z"),to=Date.parse("2026-09-10T09:00:00Z"),time=Date.parse("2026-09-10T08:30:00Z");expect(timelinePercent(time,from,to)).toBeCloseTo(50);expect(playbackOffsetMs(segments[0],Date.parse("2026-09-10T08:02:30Z"))).toBe(150000)});
+ it("reanchors live-to-history playback at the current live edge",()=>{const now=10*60*60*1000,w=historyWindowAt(now,6*60*60*1000,1000);expect(w.to).toBe(now);expect(w.from).toBe(now-6*60*60*1000);expect(w.playhead).toBe(now-1000)})
 });
