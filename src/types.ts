@@ -20,6 +20,12 @@ export interface Env {
   RESEND_API_KEY?: string;
   RESEND_FROM_EMAIL?: string;
   BIOMETRIC_ENCRYPTION_KEY?: string;
+  /** Comma separated STUN urls used by the standalone Audio Calls module. */
+  AUDIO_CALL_STUN_URLS?: string;
+  /** Comma separated TURN/TURNS urls. Keep credentials in Worker secrets. */
+  AUDIO_CALL_TURN_URLS?: string;
+  AUDIO_CALL_TURN_USERNAME?: string;
+  AUDIO_CALL_TURN_CREDENTIAL?: string;
 }
 
 export interface AuthPrincipal {
