@@ -1,0 +1,16 @@
+import {useEffect,useRef,useState} from "react";
+import {StyleSheet,Text,TouchableOpacity,View} from "react-native";
+import type {MobileSession} from "../auth";
+import {ledgerlyRequest,type SessionUpdater} from "../apiClient";
+import type {MobileIncomingCall} from "./AudioCallsWorkspaceScreenV2";
+import {audioRouting} from "./audioRouting";
+
+export function GlobalIncomingCallOverlay({session,onSession,enabled,onOpen}:{session:MobileSession;onSession:SessionUpdater;enabled:boolean;onOpen:(call:MobileIncomingCall)=>void}){
+ const[call,setCall]=useState<MobileIncomingCall|null>(null),busy=useRef(false);
+ useEffect(()=>{if(call)audioRouting.startRinging();else audioRouting.stopRinging();return()=>audioRouting.stopRinging()},[call?.id]);
+ useEffect(()=>{let live=true;const heartbeat=()=>ledgerlyRequest(session,"/audio-calls/presence/heartbeat",{method:"POST",body:JSON.stringify({availability:"available",deviceId:"android-global"})},onSession).catch(()=>{});const poll=async()=>{if(busy.current)return;busy.current=true;try{const incoming=await ledgerlyRequest<MobileIncomingCall|null>(session,"/audio-calls/incoming",{},onSession);if(live)setCall(incoming)}catch{}finally{busy.current=false}};void heartbeat();void poll();const p=setInterval(()=>void poll(),1700),h=setInterval(()=>void heartbeat(),15000);return()=>{live=false;clearInterval(p);clearInterval(h);audioRouting.stopRinging()}},[session.accessToken,session.organizationId]);
+ if(!enabled||!call)return null;
+ const decline=async()=>{const current=call;audioRouting.stopRinging();setCall(null);try{await ledgerlyRequest(session,`/audio-calls/calls/${current.id}/decline`,{method:"POST",body:"{}"},onSession)}catch{}};
+ return <View pointerEvents="box-none" style={s.layer}><View style={s.card}><View style={s.avatar}><Text style={s.avatarText}>{call.callerName.trim().split(/\s+/).slice(0,2).map(x=>x[0]).join("").toUpperCase()}</Text></View><View style={s.copy}><Text style={s.label}>INCOMING LEDGERLY CALL</Text><Text style={s.name} numberOfLines={1}>{call.callerName}</Text><Text style={s.detail}>Audio call · open call controls to answer</Text></View><TouchableOpacity style={[s.action,s.reject]} onPress={()=>void decline()}><Text style={s.actionText}>Decline</Text></TouchableOpacity><TouchableOpacity style={[s.action,s.answer]} onPress={()=>{audioRouting.stopRinging();setCall(null);onOpen(call)}}><Text style={s.actionText}>Open</Text></TouchableOpacity></View></View>;
+}
+const s=StyleSheet.create({layer:{position:"absolute",left:0,right:0,top:16,zIndex:999,paddingHorizontal:12},card:{backgroundColor:"#071c16",borderRadius:20,padding:12,flexDirection:"row",alignItems:"center",gap:9,shadowColor:"#000",shadowOpacity:.25,shadowRadius:18,shadowOffset:{width:0,height:8},elevation:12},avatar:{width:42,height:42,borderRadius:14,backgroundColor:"#174535",alignItems:"center",justifyContent:"center"},avatarText:{color:"#c9f1dc",fontSize:13,fontWeight:"900"},copy:{flex:1,minWidth:0},label:{color:"#55c894",fontSize:8,fontWeight:"900",letterSpacing:1},name:{color:"white",fontSize:14,fontWeight:"900",marginTop:2},detail:{color:"#9fb9ae",fontSize:8,marginTop:2},action:{borderRadius:12,paddingHorizontal:10,paddingVertical:10},reject:{backgroundColor:"#823a36"},answer:{backgroundColor:"#168d5a"},actionText:{color:"white",fontSize:9,fontWeight:"900"}});
