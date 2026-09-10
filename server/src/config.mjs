@@ -27,6 +27,13 @@ function readBoolean(value, fallback = false) {
   throw new Error(`Invalid boolean value: ${value}`);
 }
 
+function readCsv(value) {
+  return String(value ?? "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 export function loadConfig(env = process.env) {
   const environment = env.LEDGERLY_ENVIRONMENT ?? "development";
   const runtimeMode = env.LEDGERLY_RUNTIME_MODE ?? "foundation";
@@ -79,6 +86,27 @@ export function loadConfig(env = process.env) {
       claimLimit: readPositiveInt(env.LEDGERLY_SCHEDULER_CLAIM_LIMIT, 20, "LEDGERLY_SCHEDULER_CLAIM_LIMIT"),
       lockTimeoutMs: readPositiveInt(env.LEDGERLY_SCHEDULER_LOCK_TIMEOUT_MS, 300000, "LEDGERLY_SCHEDULER_LOCK_TIMEOUT_MS"),
       workerId: env.LEDGERLY_SCHEDULER_WORKER_ID || null,
+    }),
+    notifications: Object.freeze({
+      timeoutMs: readPositiveInt(env.LEDGERLY_NOTIFICATION_TIMEOUT_MS, 10000, "LEDGERLY_NOTIFICATION_TIMEOUT_MS"),
+      requiredChannels: Object.freeze(readCsv(env.LEDGERLY_NOTIFICATION_REQUIRED_CHANNELS)),
+      sms: Object.freeze({
+        apiUrl: env.EGOSMS_API_URL || "https://www.egosms.co/api/v1/plain/",
+        username: env.EGOSMS_USERNAME || "",
+        password: env.EGOSMS_PASSWORD || "",
+        senderId: env.EGOSMS_SENDER_ID || "",
+      }),
+      whatsapp: Object.freeze({
+        hubUrl: env.WHATSAPP_SUPPORT_HUB_URL || "",
+        appKey: env.WHATSAPP_SUPPORT_APP_KEY || "",
+        templateName: env.LEDGERLY_WHATSAPP_TEMPLATE || "general_app_update",
+        language: env.LEDGERLY_WHATSAPP_LANGUAGE || "en_US",
+      }),
+      email: Object.freeze({
+        apiUrl: env.RESEND_API_URL || "https://api.resend.com/emails",
+        apiKey: env.RESEND_API_KEY || "",
+        fromEmail: env.RESEND_FROM_EMAIL || "",
+      }),
     }),
     objectStorage: Object.freeze({
       host: env.LEDGERLY_OBJECT_STORAGE_HOST ?? "127.0.0.1",
