@@ -1,13 +1,18 @@
 {
   "name": "@ledgerly/selfhost-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Self-hosted Ledgerly Node runtime foundation",
   "scripts": {
     "start": "node src/index.mjs",
-    "check": "node --check src/index.mjs && node --check src/config.mjs && node --check src/contracts.mjs && node --check src/runtime.mjs && node --check src/adapters/foundation-services.mjs && node --check src/adapters/local-storage.mjs && node --check src/adapters/memory-cache.mjs && node --check src/adapters/memory-queue.mjs && node --check src/adapters/tcp-health.mjs",
+    "check": "node --check src/index.mjs && node --check src/config.mjs && node --check src/contracts.mjs && node --check src/runtime.mjs && node --check src/adapters/foundation-services.mjs && node --check src/adapters/local-storage.mjs && node --check src/adapters/memory-cache.mjs && node --check src/adapters/memory-queue.mjs && node --check src/adapters/postgres-database.mjs && node --check src/adapters/redis-cache.mjs && node --check src/adapters/redis-queue.mjs && node --check src/adapters/minio-storage.mjs && node --check src/adapters/tcp-health.mjs",
     "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "minio": "8.0.7",
+    "pg": "8.23.0",
+    "redis": "6.2.1"
   },
   "engines": {
     "node": ">=20.0.0"
