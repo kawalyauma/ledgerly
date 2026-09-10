@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 export const ACTOR_TYPES = Object.freeze(["human", "ai_agent", "system", "integration"]);
-export const SERVICE_CONTRACT_VERSION = 2;
+export const SERVICE_CONTRACT_VERSION = 3;
 
 function requireText(value, name) {
   if (typeof value !== "string" || value.trim() === "") {
@@ -56,10 +56,10 @@ const REQUIRED_METHODS = Object.freeze({
   cache: ["get", "set", "delete", "remember", "invalidateTag", "health"],
   storage: ["put", "get", "head", "delete", "list", "createDownloadUrl", "health"],
   queue: ["enqueue", "take", "ack", "retry", "deadLetter", "size", "deadLetterSize", "health"],
-  scheduler: ["register", "cancel", "health"],
+  scheduler: ["register", "cancel", "list", "claimDue", "markDispatched", "releaseClaim", "nextRun", "health"],
   events: ["publish", "subscribe", "health"],
   notifications: ["send", "health"],
-  audit: ["write", "health"],
+  audit: ["write", "list", "health"],
 });
 
 export function assertServiceContracts(services) {
