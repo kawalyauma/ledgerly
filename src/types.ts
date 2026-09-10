@@ -20,12 +20,19 @@ export interface Env {
   RESEND_API_KEY?: string;
   RESEND_FROM_EMAIL?: string;
   BIOMETRIC_ENCRYPTION_KEY?: string;
-  /** Comma separated STUN urls used by the standalone Audio Calls module. */
+  /** Comma-separated STUN URLs used by the standalone Audio Calls module. */
   AUDIO_CALL_STUN_URLS?: string;
-  /** Comma separated TURN/TURNS urls. Keep credentials in Worker secrets. */
+  /** Comma-separated TURN/TURNS URLs used when peer-to-peer ICE cannot connect. */
   AUDIO_CALL_TURN_URLS?: string;
+  /** Preferred coturn TURN REST shared secret. Generates short-lived per-user credentials. */
+  AUDIO_CALL_TURN_SECRET?: string;
+  /** Lifetime in seconds for generated TURN REST credentials. Defaults to 3600. */
+  AUDIO_CALL_TURN_TTL_SECONDS?: string;
+  /** Legacy/static TURN credentials supported as a fallback only. */
   AUDIO_CALL_TURN_USERNAME?: string;
   AUDIO_CALL_TURN_CREDENTIAL?: string;
+  /** Ring duration before an unanswered call becomes missed. Defaults to 35 seconds. */
+  AUDIO_CALL_RING_TIMEOUT_SECONDS?: string;
 }
 
 export interface AuthPrincipal {
