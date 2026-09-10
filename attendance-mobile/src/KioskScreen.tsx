@@ -11,7 +11,7 @@ type Result={person:RosterPerson;method:CaptureMethod;verificationMode?:"STANDAR
 const sleep=(ms:number)=>new Promise<void>(resolve=>setTimeout(()=>resolve(),ms));
 type Inspection=Awaited<ReturnType<typeof FaceEngine.inspect>>;
 
-export function KioskScreen({registration,onReset}:{registration:Registration;onReset:()=>void}){
+export function KioskScreen({registration,onReset,onOpenSettings}:{registration:Registration;onReset:()=>void;onOpenSettings?:()=>void}){
   const[bootstrap,setBootstrap]=useState<Bootstrap|null>(null),[faceState,setFaceState]=useState<FaceState|null>(null);
   const[pendingCount,setPendingCount]=useState(0),[failedCount,setFailedCount]=useState(0),[online,setOnline]=useState(false);
   const[direction,setDirection]=useState<Direction>("IN"),[result,setResult]=useState<Result|null>(null),[error,setError]=useState(""),[query,setQuery]=useState(""),[selectedPerson,setSelectedPerson]=useState<RosterPerson|null>(null);
@@ -66,7 +66,7 @@ export function KioskScreen({registration,onReset}:{registration:Registration;on
   const job=faceState?.enrollmentJob;
 
   function tapLogo(){const next=logoTaps+1;if(next>=5){setExitOpen(true);setLogoTaps(0)}else{setLogoTaps(next);setTimeout(()=>setLogoTaps(0),2500)}}
-  async function exit(){if(!await DeviceManager.verifyExitPin(exitPin)){setError("Incorrect administrator PIN");return}await KioskManager.exit();setExitOpen(false)}
+  async function exit(){if(!await DeviceManager.verifyExitPin(exitPin)){setError("Incorrect administrator PIN");return}await KioskManager.exit();setExitOpen(false);onOpenSettings?.()}
   return <SafeAreaView style={s.root}>
     {testMode?<View style={s.test}><Text style={s.testTitle}>⚠ FACE TEST MODE ACTIVE</Text><Text style={s.testText}>{bootstrap?.testMode?.allowScreenImage?"Phone/screen images allowed. ":""}{bootstrap?.testMode?.allowPrintedImage?"Printed images allowed. ":""}Face events are untrusted and do not become official attendance. Expires {new Date(bootstrap!.testMode!.expiresAt).toLocaleTimeString()}.</Text></View>:null}
     <View style={s.top}><TouchableOpacity onPress={tapLogo}><Text style={s.logo}>ledgerly</Text></TouchableOpacity><View><Text style={s.location}>{bootstrap?.device.name||"Attendance kiosk"}</Text><Text style={s.connection}>{online?"● Online":"● Offline"} · {pendingCount} pending{failedCount?` · ${failedCount} rejected`:""}</Text></View></View>
@@ -79,7 +79,7 @@ export function KioskScreen({registration,onReset}:{registration:Registration;on
     <View style={s.methods}><View style={s.manualMode}><Text style={s.manualModeText}>Search and select attendance</Text></View><TouchableOpacity disabled={bootstrap?.device.direction!=="BOTH"} style={s.direction} onPress={()=>setDirection(x=>x==="IN"?"OUT":"IN")}><Text style={s.directionLabel}>DIRECTION</Text><Text style={s.directionValue}>{direction}</Text></TouchableOpacity></View>
     {error?<Text style={s.error}>{error}</Text>:null}
     {result?<View style={s.success}><Text style={s.check}>✓</Text><Text style={s.successTitle}>{result.person.name}</Text><Text style={s.successGroup}>{result.person.groupName||"School member"}</Text><Text style={s.signed}>{result.verificationMode==="TEST"?"TEST CAPTURE":"SIGNED"} {direction} · {new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} · {result.method}</Text></View>:null}
-    {exitOpen?<View style={s.exit}><Text style={s.exitTitle}>Administrator exit</Text><TextInput style={s.exitInput} secureTextEntry keyboardType="number-pad" value={exitPin} onChangeText={setExitPin} placeholder="Exit PIN"/><View style={s.exitActions}><TouchableOpacity onPress={()=>setExitOpen(false)}><Text>Cancel</Text></TouchableOpacity><TouchableOpacity onPress={()=>void exit()}><Text style={s.exitConfirm}>Exit kiosk</Text></TouchableOpacity><TouchableOpacity onPress={async()=>{await DeviceManager.clearRegistration();onReset()}}><Text style={s.reset}>Reset</Text></TouchableOpacity></View></View>:null}
+    {exitOpen?<View style={s.exit}><Text style={s.exitTitle}>Administrator settings</Text><TextInput style={s.exitInput} secureTextEntry keyboardType="number-pad" value={exitPin} onChangeText={setExitPin} placeholder="Exit PIN"/><View style={s.exitActions}><TouchableOpacity onPress={()=>setExitOpen(false)}><Text>Cancel</Text></TouchableOpacity><TouchableOpacity onPress={()=>void exit()}><Text style={s.exitConfirm}>App purpose</Text></TouchableOpacity><TouchableOpacity onPress={async()=>{await DeviceManager.clearRegistration();onReset()}}><Text style={s.reset}>Reset</Text></TouchableOpacity></View></View>:null}
   </SafeAreaView>
 }
 

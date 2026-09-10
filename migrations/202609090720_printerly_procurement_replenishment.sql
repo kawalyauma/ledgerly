@@ -138,7 +138,8 @@ CREATE INDEX IF NOT EXISTS idx_prn_receipt_lines_receipt ON prn_purchase_receipt
 CREATE TRIGGER IF NOT EXISTS trg_prn_receipt_line_validate
 BEFORE INSERT ON prn_purchase_receipt_lines
 BEGIN
-  SELECT CASE WHEN NOT EXISTS(
+  SELECT RAISE(ABORT,'PRINTERLY_RECEIPT_CONFLICT')
+  WHERE NOT EXISTS(
     SELECT 1
     FROM prn_purchase_request_lines l
     JOIN prn_purchase_receipts r ON r.id=NEW.receipt_id AND r.organization_id=NEW.organization_id AND r.request_id=l.request_id
@@ -147,7 +148,7 @@ BEGIN
       AND l.consumable_id=NEW.consumable_id
       AND q.status IN ('approved','ordered','partially_received')
       AND l.quantity_received + NEW.quantity <= l.quantity_requested
-  ) THEN RAISE(ABORT,'PRINTERLY_RECEIPT_CONFLICT') END;
+  );
 END;
 
 -- One receipt-line insert atomically updates the request line, stock ledger and request status.

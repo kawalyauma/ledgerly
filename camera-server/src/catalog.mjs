@@ -3,7 +3,7 @@ import path from "node:path";
 
 const VIDEO=/^(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})(?:-(\d+))?\.mp4$/;
 function safeId(value){if(!/^[A-Za-z0-9_-]{3,100}$/.test(value))throw new Error("Invalid camera id");return value}
-function segmentTime(name){const m=VIDEO.exec(name);if(!m)return null;const[,date,h,mn,s]=m,d=new Date(`${date}T${h}:${mn}:${s}`);return Number.isNaN(d.getTime())?null:d}
+function segmentTime(name){const m=VIDEO.exec(name);if(!m)return null;const[,date,h,mn,s]=m,d=new Date(`${date}T${h}:${mn}:${s}Z`);return Number.isNaN(d.getTime())?null:d}
 function walkRoot(root,cameraId,key){const dir=path.join(root,safeId(cameraId));if(!fs.existsSync(dir))return[];return fs.readdirSync(dir,{withFileTypes:true}).filter(x=>x.isFile()&&VIDEO.test(x.name)).map(x=>{const file=path.join(dir,x.name),st=fs.statSync(file),started=segmentTime(x.name);return{id:`${key}:${cameraId}:${x.name}`,cameraId,name:x.name,path:file,root,volumeKey:key,relativePath:`${key}:${path.relative(root,file)}`,startedAt:(started||st.birthtime).toISOString(),modifiedAt:st.mtime.toISOString(),sizeBytes:st.size,protected:fs.existsSync(`${file}.protected`)}})}
 function held(row,holds){const start=Date.parse(row.startedAt),end=Date.parse(row.modifiedAt||row.startedAt);return(holds||[]).some(h=>h.camera_id===row.cameraId&&end>=Date.parse(h.from_at)&&start<=Date.parse(h.to_at))}
 export class RecordingCatalog{

@@ -10,10 +10,52 @@ export const moduleCatalog = [
     "active": true,
     "manifest": {
       "standalone": true,
-      "requiresModules": ["school-management"],
-      "requiresDataFrom": ["school-management"],
-      "sharedCore": ["school_academic_years","school_terms","school_departments","school_classes","school_streams","school_subjects","school_staff_profiles","school_staff_teaching_assignments","school_files","att_sessions","att_records","school_students","users"],
-      "features": ["class-teacher-department-timetables","room-allocation","single-double-lessons","teacher-availability","conflict-detection","substitute-lessons","temporary-timetable-changes","timetable-approval-publishing","printable-timetables","workload-analysis","schemes-of-work","hod-dos-approval","scheme-version-history","lesson-plans","lesson-plan-templates","lesson-delivery-register","coverage-tracking","recovery-lessons","teacher-supervision","observations","followups","book-record-inspection","evidence-attachments"]
+      "requiresModules": [
+        "school-management"
+      ],
+      "requiresDataFrom": [
+        "school-management"
+      ],
+      "sharedCore": [
+        "school_academic_years",
+        "school_terms",
+        "school_departments",
+        "school_classes",
+        "school_streams",
+        "school_subjects",
+        "school_staff_profiles",
+        "school_staff_teaching_assignments",
+        "school_files",
+        "att_sessions",
+        "att_records",
+        "school_students",
+        "users"
+      ],
+      "features": [
+        "class-teacher-department-timetables",
+        "room-allocation",
+        "single-double-lessons",
+        "teacher-availability",
+        "conflict-detection",
+        "substitute-lessons",
+        "temporary-timetable-changes",
+        "timetable-approval-publishing",
+        "printable-timetables",
+        "workload-analysis",
+        "schemes-of-work",
+        "hod-dos-approval",
+        "scheme-version-history",
+        "lesson-plans",
+        "lesson-plan-templates",
+        "lesson-delivery-register",
+        "coverage-tracking",
+        "recovery-lessons",
+        "teacher-supervision",
+        "observations",
+        "followups",
+        "book-record-inspection",
+        "evidence-attachments"
+      ]
     }
   },
   {
@@ -26,13 +68,46 @@ export const moduleCatalog = [
     "active": true,
     "manifest": {
       "standalone": true,
-      "requiresModules": ["school-management"],
-      "requiresDataFrom": ["school-management"],
-      "integratesWith": ["academics","payroll-payments","communications","school-management"],
-      "captureMethods": ["FACE","QR","NFC","MANUAL","TEACHER_REGISTER","ADMIN_OVERRIDE","IMPORT","API"],
+      "requiresModules": [
+        "school-management"
+      ],
+      "requiresDataFrom": [
+        "school-management"
+      ],
+      "integratesWith": [
+        "academics",
+        "payroll-payments",
+        "communications",
+        "school-management"
+      ],
+      "captureMethods": [
+        "FACE",
+        "QR",
+        "NFC",
+        "MANUAL",
+        "TEACHER_REGISTER",
+        "ADMIN_OVERRIDE",
+        "IMPORT",
+        "API"
+      ],
       "offline": true,
       "primaryKioskPlatform": "android",
-      "features": ["daily-attendance","class-and-lesson-registers","staff-time","in-out-events","offline-sync","deduplication","biometric-profiles","test-spoof-controls","devices","qr-kiosk-enrollment","exceptions","corrections","reports","notification-rules"],
+      "features": [
+        "daily-attendance",
+        "class-and-lesson-registers",
+        "staff-time",
+        "in-out-events",
+        "offline-sync",
+        "deduplication",
+        "biometric-profiles",
+        "test-spoof-controls",
+        "devices",
+        "qr-kiosk-enrollment",
+        "exceptions",
+        "corrections",
+        "reports",
+        "notification-rules"
+      ],
       "mobileClient": "react-native-android",
       "cameraSource": "device",
       "externalCameraSupport": false,
@@ -42,24 +117,58 @@ export const moduleCatalog = [
       "faceMatching": "on-device-1-n",
       "activeLiveness": "blink-or-head-turn",
       "encryptedTemplateSync": true,
-      "faceTestOverrides": ["screen-image","printed-image"]
+      "faceTestOverrides": [
+        "screen-image",
+        "printed-image"
+      ]
     }
   },
   {
     "key": "books",
     "name": "Books",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "Standalone writing-book stock, learner issue tracking and reporting linked to School Management learner and academic data.",
     "category": "education",
     "core": false,
     "active": true,
     "manifest": {
       "standalone": true,
-      "requiresModules": ["school-management"],
-      "requiresDataFrom": ["school-management"],
-      "sharedCore": ["organizations","users","school_students","school_classes","school_streams","school_academic_years","school_terms"],
-      "bookTypes": ["small","a4"],
-      "features": ["stock-receipts-and-adjustments","individual-learner-issues","bulk-class-and-stream-issues","transaction-reversals","learner-book-ledger","class-and-stream-reports","term-and-year-reports","stock-balance-report","unissued-learners-report","csv-export","audit-friendly-history"]
+      "requiresModules": [
+        "school-management"
+      ],
+      "requiresDataFrom": [
+        "school-management"
+      ],
+      "sharedCore": [
+        "organizations",
+        "users",
+        "school_students",
+        "school_classes",
+        "school_streams",
+        "school_academic_years",
+        "school_terms"
+      ],
+      "bookTypes": [
+        "small",
+        "a4"
+      ],
+      "offline": true,
+      "offlineModel": "immutable-operation-intents",
+      "features": [
+        "stock-receipts-and-adjustments",
+        "individual-learner-issues",
+        "bulk-class-and-stream-issues",
+        "transaction-reversals",
+        "learner-book-ledger",
+        "class-and-stream-reports",
+        "term-and-year-reports",
+        "stock-balance-report",
+        "unissued-learners-report",
+        "csv-export",
+        "audit-friendly-history",
+        "offline-stock-operation-intents",
+        "year-scale-mobile-change-feed"
+      ]
     }
   },
   {
@@ -72,10 +181,41 @@ export const moduleCatalog = [
     "active": true,
     "manifest": {
       "standalone": true,
-      "channels": ["sms","whatsapp"],
-      "whatsappTemplate": {"name":"general_app_update","language":"en_US","category":"UTILITY"},
-      "sharedCore": ["organizations","users","memberships","contacts","contact_people","school_students","school_guardians","school_staff_profiles"],
-      "features": ["message-types","audience-preview","fee-reminders","published-results","student-parent-messaging","teacher-staff-messaging","attendance-notices","discipline-notices","task-work-updates","scheduled-campaigns","delivery-history","retry-failed","recipient-preferences","audit-snapshots"]
+      "channels": [
+        "sms",
+        "whatsapp"
+      ],
+      "whatsappTemplate": {
+        "name": "general_app_update",
+        "language": "en_US",
+        "category": "UTILITY"
+      },
+      "sharedCore": [
+        "organizations",
+        "users",
+        "memberships",
+        "contacts",
+        "contact_people",
+        "school_students",
+        "school_guardians",
+        "school_staff_profiles"
+      ],
+      "features": [
+        "message-types",
+        "audience-preview",
+        "fee-reminders",
+        "published-results",
+        "student-parent-messaging",
+        "teacher-staff-messaging",
+        "attendance-notices",
+        "discipline-notices",
+        "task-work-updates",
+        "scheduled-campaigns",
+        "delivery-history",
+        "retry-failed",
+        "recipient-preferences",
+        "audit-snapshots"
+      ]
     }
   },
   {
@@ -88,9 +228,32 @@ export const moduleCatalog = [
     "active": true,
     "manifest": {
       "standalone": true,
-      "owns": ["contacts","contact_people","contact_addresses"],
+      "owns": [
+        "contacts",
+        "contact_people",
+        "contact_addresses"
+      ],
       "discoversEnabledModules": true,
-      "contactSources": {"ledgerly-core":["customer","supplier","employee","other"],"communications":["sms","whatsapp"],"school-management":["student","guardian","staff"],"tasks-work":["organization_user"]}
+      "contactSources": {
+        "ledgerly-core": [
+          "customer",
+          "supplier",
+          "employee",
+          "other"
+        ],
+        "communications": [
+          "sms",
+          "whatsapp"
+        ],
+        "school-management": [
+          "student",
+          "guardian",
+          "staff"
+        ],
+        "tasks-work": [
+          "organization_user"
+        ]
+      }
     }
   },
   {
@@ -103,9 +266,35 @@ export const moduleCatalog = [
     "active": true,
     "manifest": {
       "standalone": true,
-      "requiresDataFrom": ["school-management"],
-      "sharedCore": ["organizations","users","school_students","school_classes","school_streams","school_subjects","school_academic_years","school_terms","att_records"],
-      "features": ["exam-crud","class-enrolment","subject-configuration","bulk-marks-entry","mark-audit","ple-grading","best-four-aggregate","division-ranking","comment-rules","report-cards","class-marksheets","academic-reports","publication"],
+      "requiresDataFrom": [
+        "school-management"
+      ],
+      "sharedCore": [
+        "organizations",
+        "users",
+        "school_students",
+        "school_classes",
+        "school_streams",
+        "school_subjects",
+        "school_academic_years",
+        "school_terms",
+        "att_records"
+      ],
+      "features": [
+        "exam-crud",
+        "class-enrolment",
+        "subject-configuration",
+        "bulk-marks-entry",
+        "mark-audit",
+        "ple-grading",
+        "best-four-aggregate",
+        "division-ranking",
+        "comment-rules",
+        "report-cards",
+        "class-marksheets",
+        "academic-reports",
+        "publication"
+      ],
       "reportStyle": "ported-from-attached-exams-project"
     }
   },
@@ -120,8 +309,75 @@ export const moduleCatalog = [
     "manifest": {
       "standalone": true,
       "discoversEnabledModules": true,
-      "peopleSources": {"contacts":["employee"],"school-management":["staff"],"tasks-work":["organization_user"]},
-      "features": ["workforce-directory","departments","employment-records","onboarding","leave-types","leave-requests","approvals","audit"]
+      "peopleSources": {
+        "contacts": [
+          "employee"
+        ],
+        "school-management": [
+          "staff"
+        ],
+        "tasks-work": [
+          "organization_user"
+        ]
+      },
+      "features": [
+        "workforce-directory",
+        "departments",
+        "employment-records",
+        "onboarding",
+        "leave-types",
+        "leave-requests",
+        "approvals",
+        "audit"
+      ]
+    }
+  },
+  {
+    "key": "ledgerly-core",
+    "name": "Ledgerly Finance Core",
+    "version": "1.0.0",
+    "description": "Core accounting, finance operations and authoritative offline finance projections for Ledgerly.",
+    "category": "finance",
+    "core": true,
+    "active": true,
+    "manifest": {
+      "standalone": true,
+      "requiresModules": [
+        "contacts"
+      ],
+      "integratesWith": [
+        "school-management",
+        "payroll-payments",
+        "human-resources"
+      ],
+      "offline": true,
+      "mobileSourceOfTruth": "server",
+      "offlineWritable": [
+        "document-intents",
+        "journal-intents"
+      ],
+      "offlineForbidden": [
+        "posting",
+        "reversals",
+        "period-closing",
+        "bank-reconciliation",
+        "approvals"
+      ],
+      "features": [
+        "chart-of-accounts",
+        "journals",
+        "documents",
+        "banking",
+        "budgets",
+        "fiscal-periods",
+        "inventory",
+        "tax",
+        "reports",
+        "projects",
+        "dimensions",
+        "offline-draft-intents",
+        "year-scale-mobile-change-feed"
+      ]
     }
   },
   {
@@ -137,7 +393,22 @@ export const moduleCatalog = [
       "backendOnly": true,
       "protocolVersion": 1,
       "offlineGrantDays": 400,
-      "features": ["offline-device-grants","idempotent-batches","stable-client-uuids","record-versioning","ordered-mutations","duplicate-prevention","tombstones","dependency-aware-sync","partial-sync-recovery","retry-handling","per-collection-pull-cursors","schema-version-acknowledgements","audit-events","interrupted-sync-recovery"]
+      "features": [
+        "offline-device-grants",
+        "idempotent-batches",
+        "stable-client-uuids",
+        "record-versioning",
+        "ordered-mutations",
+        "duplicate-prevention",
+        "tombstones",
+        "dependency-aware-sync",
+        "partial-sync-recovery",
+        "retry-handling",
+        "per-collection-pull-cursors",
+        "schema-version-acknowledgements",
+        "audit-events",
+        "interrupted-sync-recovery"
+      ]
     }
   },
   {
@@ -151,23 +422,119 @@ export const moduleCatalog = [
     "manifest": {
       "standalone": true,
       "discoversEnabledModules": true,
-      "requiredData": ["contacts","accounts","journals"],
-      "optionalSources": ["human-resources","school-management","communications"],
-      "features": ["employees","salary-components","statutory-rules","payroll-inputs","calculation","approval","posting","reversal","payslips","delivery","payment-batches","receipts","supplier-payments","allocations","reversals","webhooks"]
+      "requiredData": [
+        "contacts",
+        "accounts",
+        "journals"
+      ],
+      "optionalSources": [
+        "human-resources",
+        "school-management",
+        "communications"
+      ],
+      "features": [
+        "employees",
+        "salary-components",
+        "statutory-rules",
+        "payroll-inputs",
+        "calculation",
+        "approval",
+        "posting",
+        "reversal",
+        "payslips",
+        "delivery",
+        "payment-batches",
+        "receipts",
+        "supplier-payments",
+        "allocations",
+        "reversals",
+        "webhooks"
+      ]
     }
   },
   {
     "key": "printerly",
     "name": "Printerly",
-    "version": "1.0.0",
-    "description": "Secure remote print management for Ledgerly with always-online Printerly Nodes connected to local USB or network printers.",
+    "version": "1.13.0",
+    "description": "Secure remote printing and scanning with governance, privacy, supplies, procurement and SLA-backed service operations.",
     "category": "operations",
     "core": false,
     "active": true,
     "manifest": {
       "standalone": true,
-      "sharedCore": ["organizations","users","permissions","files"],
-      "features": ["remote-printing","printerly-node-pairing","central-print-queue","priority-jobs","secure-release","copies-page-size-duplex-color","node-heartbeats","printer-status","idempotent-job-claiming","job-event-audit-trail","usage-reporting","linux-cups-appliance"]
+      "sharedCore": [
+        "organizations",
+        "users",
+        "permissions",
+        "files",
+        "projects",
+        "dimensions",
+        "journals",
+        "notifications",
+        "reports"
+      ],
+      "features": [
+        "remote-printing",
+        "global-print-with-printerly",
+        "scannerly",
+        "department-project-charging",
+        "print-cost-accounting",
+        "ledger-journal-posting",
+        "printer-health",
+        "multi-channel-alerts",
+        "usage-reporting",
+        "monthly-print-quotas",
+        "automatic-print-rules",
+        "approval-workflows",
+        "scheduled-printing",
+        "multi-document-batches",
+        "audit-compliance-center",
+        "printer-pools",
+        "default-auto-pool",
+        "load-aware-smart-routing",
+        "capability-aware-routing",
+        "pool-priority-routing",
+        "automatic-printer-failover",
+        "routing-audit-events",
+        "secure-release",
+        "single-use-release-pin",
+        "high-entropy-qr-release-token",
+        "lan-release-station",
+        "release-attempt-throttling",
+        "station-printer-pinning",
+        "document-retention-policies",
+        "automatic-r2-purge",
+        "legal-holds",
+        "retention-audit-events",
+        "storage-inventory",
+        "school-file-preservation",
+        "priority-queue",
+        "cups-node",
+        "sane-scanner",
+        "restart-safe-duplicate-prevention",
+        "consumables-inventory",
+        "stock-movement-ledger",
+        "cups-marker-level-monitoring",
+        "low-stock-alerts",
+        "preventive-maintenance",
+        "maintenance-service-log",
+        "maintenance-due-alerts",
+        "supplier-directory",
+        "supplier-consumable-catalog",
+        "replenishment-recommendations",
+        "automatic-reorder-drafts",
+        "purchase-request-approvals",
+        "partial-receiving",
+        "atomic-receipt-restock",
+        "procurement-history",
+        "service-desk",
+        "sla-management",
+        "automatic-incident-creation",
+        "sla-breach-alerts",
+        "service-ticket-timeline",
+        "maintenance-window-planning",
+        "service-history-linkage"
+      ]
     }
   },
   {
@@ -179,10 +546,123 @@ export const moduleCatalog = [
     "core": false,
     "active": true,
     "manifest": {
-      "backendModules": ["setup","iam","student-management","promotion-engine","discipline-behaviour","staff-teacher-management","files","fees-billing"],
-      "plannedModules": ["library","boarding","transport","communications"],
+      "backendModules": [
+        "setup",
+        "iam",
+        "student-management",
+        "promotion-engine",
+        "discipline-behaviour",
+        "staff-teacher-management",
+        "files",
+        "fees-billing"
+      ],
+      "plannedModules": [
+        "library",
+        "boarding",
+        "transport",
+        "communications"
+      ],
       "accountingIntegration": true,
-      "integratesWith": ["academics","attendance","communications","exams"]
+      "integratesWith": [
+        "academics",
+        "attendance",
+        "communications",
+        "exams"
+      ]
+    }
+  },
+  {
+    "key": "security-camera",
+    "name": "Security Cameras",
+    "version": "0.17.0",
+    "description": "Local-first Ledgerly CCTV with Android camera appliances, immutable recording integrity, legal holds, forensic export manifests, chain-of-custody auditing, certified deployment readiness, automatic health remediation, failover and local/NAS archive protection.",
+    "category": "operations",
+    "core": false,
+    "active": true,
+    "manifest": {
+      "standalone": true,
+      "sharedCore": [
+        "organizations",
+        "users",
+        "permissions",
+        "mobile-sync",
+        "communications"
+      ],
+      "securityScopes": [
+        "security:read",
+        "security:live",
+        "security:export",
+        "security:review",
+        "security:manage"
+      ],
+      "features": [
+        "qr-camera-pairing",
+        "one-time-nvr-pairing",
+        "whip-camera-publishing",
+        "whep-live-view",
+        "continuous-nvr-recording",
+        "direct-lan-mp4-segment-fallback",
+        "persistent-phone-segment-queue",
+        "bounded-offline-spool",
+        "appliance-diagnostics",
+        "automatic-health-remediation",
+        "fleet-health-scoring",
+        "deployment-readiness-score",
+        "commissioning-certificates",
+        "sha256-recording-integrity",
+        "immutable-recording-fingerprint-baselines",
+        "chained-segment-integrity",
+        "integrity-sidecar-manifests",
+        "integrity-verification-history",
+        "critical-recording-tamper-alerts",
+        "incident-window-integrity-verification",
+        "security-integrity-workspace",
+        "legal-holds",
+        "offline-legal-hold-enforcement",
+        "chain-of-custody-log",
+        "forensic-export-source-manifests",
+        "forensic-export-sha256",
+        "optional-hmac-evidence-signing",
+        "security-forensics-workspace",
+        "camera-focused-ci",
+        "nvr-package-smoke-test",
+        "android-foreground-appliance-service",
+        "camera-and-nvr-heartbeats",
+        "camera-server-assignment",
+        "recording-policy-control",
+        "recording-metadata-sync",
+        "recording-timeline",
+        "short-lived-playback-grants",
+        "time-range-clip-export",
+        "protected-clips",
+        "multi-volume-storage",
+        "storage-retention",
+        "nvr-runtime-health",
+        "operational-alerts",
+        "motion-event-heuristic",
+        "optional-person-object-detector",
+        "evidence-snapshots",
+        "incident-protection-windows",
+        "visual-camera-zones",
+        "camera-groups",
+        "multi-camera-monitor-wall",
+        "fleet-diagnostics",
+        "camera-lifecycle-controls",
+        "systemd-production-service",
+        "camera-specific-permission-scopes",
+        "security-audit-trail",
+        "notification-escalation-policies",
+        "communications-sms-whatsapp-delivery-bridge",
+        "resend-email-alert-delivery",
+        "signed-webhook-alert-delivery",
+        "security-in-app-inbox",
+        "automatic-primary-secondary-nvr-failover",
+        "automatic-primary-failback",
+        "nvr-self-validation",
+        "local-nas-backup-replication",
+        "backup-integrity-sidecars",
+        "outbound-only-nvr-cloud-connectivity"
+      ]
     }
   },
   {
@@ -194,11 +674,36 @@ export const moduleCatalog = [
     "core": false,
     "active": true,
     "manifest": {
-      "backendModules": ["teams","shared-contacts","projects","tasks","subtasks","assignees","followers","checklists","comments","time-tracking","notifications","reminders","whatsapp-webhook"],
-      "communications": ["resend","egosms","ulib-whatsapp-hub"],
+      "backendModules": [
+        "teams",
+        "shared-contacts",
+        "projects",
+        "tasks",
+        "subtasks",
+        "assignees",
+        "followers",
+        "checklists",
+        "comments",
+        "time-tracking",
+        "notifications",
+        "reminders",
+        "whatsapp-webhook"
+      ],
+      "communications": [
+        "resend",
+        "egosms",
+        "ulib-whatsapp-hub"
+      ],
       "source": "kawalyauma/tasks-work-backend",
       "sourceCommit": "19bda3eee6018bd2f5631a1353adcd71ad366da9",
-      "sharedCore": ["organizations","users","memberships","contacts","contact_people","school_staff_profiles"]
+      "sharedCore": [
+        "organizations",
+        "users",
+        "memberships",
+        "contacts",
+        "contact_people",
+        "school_staff_profiles"
+      ]
     }
   }
 ] as const;

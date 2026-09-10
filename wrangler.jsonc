@@ -3,25 +3,105 @@
   "name": "your-finance-pro-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-30",
-  "compatibility_flags": ["nodejs_compat","global_fetch_strictly_public"],
-  "observability": {"enabled": true},
-  "vars": {"ENVIRONMENT":"production","JWT_ISSUER":"your-finance-pro","JWT_AUDIENCE":"your-finance-pro-api","WHATSAPP_SUPPORT_HUB_URL":"https://whatsapp-support-hub.ulib5000.workers.dev","EGOSMS_API_URL":"https://www.egosms.co/api/v1/plain/"},
-  "d1_databases": [{"binding":"FINANCE_DB","database_name":"your-finance-pro","database_id":"04c49328-0ae9-48a6-866a-f168c1840306","migrations_dir":"migrations"}],
-  "r2_buckets": [{"binding":"REPORTS_BUCKET","bucket_name":"your-finance-pro-reports"},{"binding":"WORK_FILES_BUCKET","bucket_name":"tasks-work-files"}],
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "JWT_ISSUER": "your-finance-pro",
+    "JWT_AUDIENCE": "your-finance-pro-api",
+    "WHATSAPP_SUPPORT_HUB_URL": "https://whatsapp-support-hub.ulib5000.workers.dev",
+    "EGOSMS_API_URL": "https://www.egosms.co/api/v1/plain/"
+  },
+  "d1_databases": [
+    {
+      "binding": "FINANCE_DB",
+      "database_name": "your-finance-pro",
+      "database_id": "04c49328-0ae9-48a6-866a-f168c1840306",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "REPORTS_BUCKET",
+      "bucket_name": "your-finance-pro-reports"
+    },
+    {
+      "binding": "WORK_FILES_BUCKET",
+      "bucket_name": "tasks-work-files"
+    }
+  ],
   "queues": {
     "producers": [
-      {"binding":"REPORT_QUEUE","queue":"finance-report-jobs"},
-      {"binding":"WEBHOOK_QUEUE","queue":"finance-webhook-jobs"},
-      {"binding":"WORK_NOTIFICATION_QUEUE","queue":"tasks-work-notifications"},
-      {"binding":"COMMUNICATION_QUEUE","queue":"ledgerly-communications"}
+      {
+        "binding": "REPORT_QUEUE",
+        "queue": "finance-report-jobs"
+      },
+      {
+        "binding": "WEBHOOK_QUEUE",
+        "queue": "finance-webhook-jobs"
+      },
+      {
+        "binding": "WORK_NOTIFICATION_QUEUE",
+        "queue": "tasks-work-notifications"
+      },
+      {
+        "binding": "COMMUNICATION_QUEUE",
+        "queue": "ledgerly-communications"
+      }
     ],
     "consumers": [
-      {"queue":"finance-report-jobs","max_batch_size":5,"max_batch_timeout":10,"max_retries":5,"dead_letter_queue":"finance-report-jobs-dlq"},
-      {"queue":"finance-webhook-jobs","max_batch_size":10,"max_batch_timeout":5,"max_retries":8,"dead_letter_queue":"finance-webhook-jobs-dlq"},
-      {"queue":"tasks-work-notifications","max_batch_size":10,"max_batch_timeout":5,"max_retries":5,"dead_letter_queue":"tasks-work-notifications-dlq"},
-      {"queue":"ledgerly-communications","max_batch_size":20,"max_batch_timeout":5,"max_retries":5,"dead_letter_queue":"ledgerly-communications-dlq"}
+      {
+        "queue": "finance-report-jobs",
+        "max_batch_size": 5,
+        "max_batch_timeout": 10,
+        "max_retries": 5,
+        "dead_letter_queue": "finance-report-jobs-dlq"
+      },
+      {
+        "queue": "finance-webhook-jobs",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 8,
+        "dead_letter_queue": "finance-webhook-jobs-dlq"
+      },
+      {
+        "queue": "tasks-work-notifications",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "dead_letter_queue": "tasks-work-notifications-dlq"
+      },
+      {
+        "queue": "ledgerly-communications",
+        "max_batch_size": 20,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "dead_letter_queue": "ledgerly-communications-dlq"
+      }
     ]
   },
-  "triggers": {"crons":["* * * * *","0 * * * *","*/5 * * * *","0 5 * * *"]},
-  "assets": {"directory":"./dist","not_found_handling":"single-page-application","run_worker_first":["/api/*","/auth/*","/system/*","/docs","/openapi.json"]}
+  "triggers": {
+    "crons": [
+      "* * * * *",
+      "0 * * * *",
+      "*/5 * * * *",
+      "0 5 * * *"
+    ]
+  },
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/api/*",
+      "/auth/*",
+      "/system/*",
+      "/docs",
+      "/openapi.json"
+    ]
+  }
 }
