@@ -1,12 +1,12 @@
 {
   "name": "@ledgerly/selfhost-server",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Self-hosted Ledgerly Node runtime foundation",
   "scripts": {
     "start": "node src/index.mjs",
-    "check": "node --check src/index.mjs && node --check src/config.mjs && node --check src/contracts.mjs && node --check src/runtime.mjs && node --check src/scheduler-runner.mjs && node --check src/adapters/foundation-services.mjs && node --check src/adapters/local-storage.mjs && node --check src/adapters/memory-cache.mjs && node --check src/adapters/memory-queue.mjs && node --check src/adapters/postgres-database.mjs && node --check src/adapters/postgres-audit.mjs && node --check src/adapters/postgres-scheduler.mjs && node --check src/adapters/redis-cache.mjs && node --check src/adapters/redis-queue.mjs && node --check src/adapters/minio-storage.mjs && node --check src/adapters/tcp-health.mjs",
+    "check": "node --check src/index.mjs && node --check src/config.mjs && node --check src/contracts.mjs && node --check src/runtime.mjs && node --check src/scheduler-runner.mjs && node --check src/adapters/foundation-services.mjs && node --check src/adapters/local-storage.mjs && node --check src/adapters/memory-cache.mjs && node --check src/adapters/memory-queue.mjs && node --check src/adapters/postgres-database.mjs && node --check src/adapters/postgres-audit.mjs && node --check src/adapters/postgres-scheduler.mjs && node --check src/adapters/redis-cache.mjs && node --check src/adapters/redis-events.mjs && node --check src/adapters/redis-queue.mjs && node --check src/adapters/minio-storage.mjs && node --check src/adapters/notification-bridge.mjs && node --check src/adapters/tcp-health.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
