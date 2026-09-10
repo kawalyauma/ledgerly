@@ -56,6 +56,13 @@ class FakeRedis {
     return 1;
   }
   async lLen(key) { return (this.lists.get(key) ?? []).length; }
+  async eval(_script, { keys, arguments: args }) {
+    const [markerKey, readyKey] = keys;
+    if (this.strings.has(markerKey)) return 0;
+    this.strings.set(markerKey, args[0]);
+    await this.lPush(readyKey, args[2]);
+    return 1;
+  }
   multi() {
     const operations = [];
     const multi = {
@@ -133,6 +140,24 @@ test("RedisQueue claims, retries, acknowledges and dead-letters jobs", async () 
   const claim = await queue.take();
   assert.equal(await queue.ack(claim.receipt), true);
   assert.equal((await queue.health()).processing, 0);
+});
+
+test("RedisQueue atomically suppresses duplicate idempotent enqueue", async () => {
+  const client = new FakeRedis();
+  const queue = new RedisQueue({ client, name: "scheduler", namespace: "test-jobs", idempotencyTtlSeconds: 3600 });
+  const firstJob = createJobEnvelope({
+    kind: "work.reminders",
+    organizationId: "org-1",
+    idempotencyKey: "schedule:s1:2026-09-11T02:00:00.000Z",
+  });
+  const duplicateJob = createJobEnvelope({
+    kind: "work.reminders",
+    organizationId: "org-1",
+    idempotencyKey: "schedule:s1:2026-09-11T02:00:00.000Z",
+  });
+  assert.deepEqual(await queue.enqueue(firstJob), { jobId: firstJob.jobId, queued: true, duplicate: false });
+  assert.deepEqual(await queue.enqueue(duplicateJob), { jobId: duplicateJob.jobId, queued: false, duplicate: true });
+  assert.equal(await queue.size(), 1);
 });
 
 test("MinioStorage implements provider-neutral object operations", async () => {
