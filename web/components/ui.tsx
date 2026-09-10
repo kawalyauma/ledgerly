@@ -42,7 +42,7 @@ export function SearchableSelect({ value, onChange, options, placeholder = "Sele
     return () => document.removeEventListener("mousedown", close);
   }, []);
   useEffect(() => { if (!open) setQuery(""); }, [open]);
-  return <div className={`searchable-select ${disabled ? "is-disabled" : ""}`} ref={root}>
+  return <div className={`searchable-select ${disabled ? "is-disabled" : ""}`} ref={root} data-value={value || undefined} data-label={selected?.label} data-aria-label={ariaLabel}>
     <button type="button" className="searchable-select__trigger" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} disabled={disabled || loading} onClick={() => setOpen(v => !v)}>
       <span className={!selected ? "searchable-select__placeholder" : ""}>{loading ? "Loading options…" : selected?.label || placeholder}</span><span aria-hidden="true">⌄</span>
     </button>
@@ -53,7 +53,7 @@ export function SearchableSelect({ value, onChange, options, placeholder = "Sele
         {!filtered.length ? <div className="searchable-select__empty">{emptyText}</div> : filtered.map(option => <button type="button" role="option" aria-selected={option.value === value} className={option.value === value ? "selected" : ""} disabled={option.disabled} key={option.value} onClick={() => { onChange(option.value); setOpen(false); }}>{option.label}</button>)}
       </div>
       {value && clearable && <button type="button" className="searchable-select__clear" onClick={() => { onChange(""); setOpen(false); }}>Clear selection</button>}
-    </div>}
+    </div>
   </div>;
 }
 
