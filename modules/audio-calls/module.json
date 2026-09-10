@@ -1,8 +1,8 @@
 {
   "key": "audio-calls",
   "name": "Audio Calls",
-  "version": "1.0.0",
-  "description": "Secure organization-wide WebRTC audio calling for Ledgerly workers, with presence, ringing, call history and internet-ready ICE/TURN support.",
+  "version": "1.1.0",
+  "description": "Secure organization-wide WebRTC audio calling for Ledgerly workers, with presence, ringing, call history, reconnection and internet-ready ICE/TURN support.",
   "category": "collaboration",
   "active": true,
   "scopes": [
@@ -29,6 +29,6 @@
   "manifest": {
     "media": "webrtc-audio",
     "recordingDefault": false,
-    "supports": ["one-to-one", "presence", "call-history", "stun", "turn"]
+    "supports": ["one-to-one", "presence", "call-history", "stun", "turn", "ephemeral-turn", "ice-restart", "do-not-disturb", "android-audio-routing", "foreground-active-call"]
   }
 }
