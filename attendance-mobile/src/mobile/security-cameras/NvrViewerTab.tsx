@@ -7,7 +7,7 @@ import type{CameraRow,EventRow,LiveSession,PlaybackGrant,Recording,Timeline}from
 import{WhepViewer}from"./WhepViewer";
 import{NvrPlaybackView}from"./NvrPlaybackView";
 
-const WINDOW_MS=6*60*60*1000;
+const WINDOW_MS=6*60*60*1000,LIVE_REFRESH_MARGIN_MS=30000,LIVE_REFRESH_CHECK_MS=10000;
 const SPEEDS=[.25,.5,1,2,4];
 type PlayerState="idle"|"loading"|"ready"|"playing"|"paused"|"buffering"|"gap"|"ended"|"error";
 type Client={session:MobileSession;onSession:SessionUpdater};
@@ -24,6 +24,7 @@ export function NvrViewerTab({session,onSession}:{session:MobileSession;onSessio
  useEffect(()=>{if(!liveMode&&visible.length)void loadHistory()},[liveMode,visibleKey,from,to]);
  useEffect(()=>{if(!playing||liveMode)return;let previous=Date.now();const timer=setInterval(()=>{const now=Date.now(),delta=(now-previous)*speed;previous=now;setPlayhead(p=>{const n=p+delta;if(n>=to){setPlaying(false);return to}return n})},250);return()=>clearInterval(timer)},[playing,liveMode,speed,to]);
  useEffect(()=>{let cancelled=false;async function sync(){const wanted=new Set(liveMode?visible.filter(canLive).map(x=>x.id):[]),current=sessionsRef.current;for(const[id,s]of Object.entries(current))if(!wanted.has(id)){void securityCameraApi.endLive(client,s.id).catch(()=>{});if(!cancelled)setSessions(old=>{const n={...old};delete n[id];return n})}for(const camera of visible){if(!wanted.has(camera.id)||current[camera.id])continue;try{const next=await securityCameraApi.startLive(client,camera.id);if(cancelled){void securityCameraApi.endLive(client,next.id).catch(()=>{});return}setSessions(old=>({...old,[camera.id]:next}))}catch(e){if(!cancelled)setError(old=>old||`${camera.name}: ${message(e)}`)}}}void sync();return()=>{cancelled=true}},[liveMode,visibleKey,session.accessToken]);
+ useEffect(()=>{if(!liveMode)return;let cancelled=false;const refreshing=new Set<string>();async function rotateExpiring(){const now=Date.now();for(const camera of visible){const current=sessionsRef.current[camera.id],expires=current?Date.parse(current.expiresAt):NaN;if(!current||!canLive(camera)||refreshing.has(camera.id)||!Number.isFinite(expires)||expires-now>LIVE_REFRESH_MARGIN_MS)continue;refreshing.add(camera.id);try{const next=await securityCameraApi.startLive(client,camera.id);if(cancelled){void securityCameraApi.endLive(client,next.id).catch(()=>{});return}setSessions(old=>({...old,[camera.id]:next}));void securityCameraApi.endLive(client,current.id).catch(()=>{})}catch(e){if(!cancelled)setError(old=>old||`${camera.name}: live viewer renewal failed: ${message(e)}`)}finally{refreshing.delete(camera.id)}}}void rotateExpiring();const timer=setInterval(()=>void rotateExpiring(),LIVE_REFRESH_CHECK_MS);return()=>{cancelled=true;clearInterval(timer)}},[liveMode,visibleKey,session.accessToken]);
  useEffect(()=>()=>{for(const s of Object.values(sessionsRef.current))void securityCameraApi.endLive(client,s.id).catch(()=>{})},[]);
  function seek(ms:number){setLiveMode(false);setPlaying(false);setPlayhead(Math.max(from,Math.min(to,ms)))}
  function beginHistory(){const now=Date.now();setFrom(now-WINDOW_MS);setTo(now);setPlayhead(now-1000);setLiveMode(false);setPlaying(false)}
