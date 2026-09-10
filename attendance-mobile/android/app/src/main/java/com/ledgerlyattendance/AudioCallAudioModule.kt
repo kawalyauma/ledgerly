@@ -1,6 +1,7 @@
 package com.ledgerlyattendance
 
 import android.content.Context
+import android.content.Intent
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
@@ -12,17 +13,21 @@ class AudioCallAudioModule(private val reactContext: ReactApplicationContext): R
   private val audioManager = reactContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
   private var previousMode = AudioManager.MODE_NORMAL
   private var previousSpeaker = false
+  private var previousMicrophoneMute = false
   private var active = false
 
   override fun getName() = "AudioCallAudio"
 
   @ReactMethod
-  fun start(speaker: Boolean) {
+  fun start(speaker: Boolean, peerName: String) {
     if (!active) {
       previousMode = audioManager.mode
       previousSpeaker = audioManager.isSpeakerphoneOn
+      previousMicrophoneMute = audioManager.isMicrophoneMute
       active = true
     }
+    val service = Intent(reactContext, AudioCallKeepAliveService::class.java).putExtra(AudioCallKeepAliveService.EXTRA_PEER_NAME, peerName)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) reactContext.startForegroundService(service) else reactContext.startService(service)
     audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
     audioManager.isMicrophoneMute = false
     route(speaker)
@@ -30,7 +35,7 @@ class AudioCallAudioModule(private val reactContext: ReactApplicationContext): R
 
   @ReactMethod
   fun setSpeaker(speaker: Boolean) {
-    if (!active) start(speaker) else route(speaker)
+    if (!active) start(speaker, "Ledgerly worker") else route(speaker)
   }
 
   @ReactMethod
@@ -39,8 +44,15 @@ class AudioCallAudioModule(private val reactContext: ReactApplicationContext): R
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) audioManager.clearCommunicationDevice()
     @Suppress("DEPRECATION")
     audioManager.isSpeakerphoneOn = previousSpeaker
+    audioManager.isMicrophoneMute = previousMicrophoneMute
     audioManager.mode = previousMode
+    reactContext.stopService(Intent(reactContext, AudioCallKeepAliveService::class.java))
     active = false
+  }
+
+  override fun invalidate() {
+    stop()
+    super.invalidate()
   }
 
   private fun route(speaker: Boolean) {
