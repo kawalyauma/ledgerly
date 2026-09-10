@@ -3,26 +3,33 @@ import { createPostgresDatabase } from "./adapters/postgres-database.mjs";
 import { createPostgresAudit } from "./adapters/postgres-audit.mjs";
 import { createPostgresScheduler } from "./adapters/postgres-scheduler.mjs";
 import { RedisCache, createRedisClient } from "./adapters/redis-cache.mjs";
+import { createRedisEventBus } from "./adapters/redis-events.mjs";
 import { RedisQueue } from "./adapters/redis-queue.mjs";
 import { createMinioStorage } from "./adapters/minio-storage.mjs";
-import { FoundationEventBus, FoundationNotifications } from "./adapters/foundation-services.mjs";
+import { createNotificationBridge } from "./adapters/notification-bridge.mjs";
 import { SchedulerRunner } from "./scheduler-runner.mjs";
 
 export async function createRuntime(config) {
   if (config.runtimeMode === "production") {
     throw new Error(
-      "Self-hosted production mode is intentionally blocked until distributed events, notifications, auth, and migrated business routes are enabled",
+      "Self-hosted production mode is intentionally blocked until auth compatibility and migrated business routes/data are verified",
     );
   }
 
   const database = await createPostgresDatabase(config.database);
   let redisClient;
+  let events;
   let schedulerRunner;
   try {
     redisClient = await createRedisClient(config.redis);
     const storage = await createMinioStorage(config.objectStorage);
     const scheduler = await createPostgresScheduler({ database });
     const audit = await createPostgresAudit({ database });
+    events = await createRedisEventBus({
+      client: redisClient,
+      namespace: config.redis.namespace,
+    });
+    const notifications = createNotificationBridge(config.notifications);
     const queue = new RedisQueue({
       client: redisClient,
       name: config.queue.name,
@@ -39,8 +46,8 @@ export async function createRuntime(config) {
       storage,
       queue,
       scheduler,
-      events: new FoundationEventBus(),
-      notifications: new FoundationNotifications(),
+      events,
+      notifications,
       audit,
     });
 
@@ -57,13 +64,15 @@ export async function createRuntime(config) {
     }
 
     async function readiness() {
-      const [databaseHealth, cacheHealth, queueHealth, storageHealth, schedulerHealth, auditHealth] = await Promise.all([
+      const [databaseHealth, cacheHealth, queueHealth, storageHealth, schedulerHealth, auditHealth, eventsHealth, notificationsHealth] = await Promise.all([
         services.database.health(),
         services.cache.health(),
         services.queue.health(),
         services.storage.health(),
         services.scheduler.health(),
         services.audit.health(),
+        services.events.health(),
+        services.notifications.health(),
       ]);
       const dependencies = {
         database: databaseHealth,
@@ -72,6 +81,8 @@ export async function createRuntime(config) {
         objectStorage: storageHealth,
         scheduler: schedulerHealth,
         audit: auditHealth,
+        events: eventsHealth,
+        notifications: notificationsHealth,
       };
       return {
         ok: Object.values(dependencies).every((item) => item.ok === true),
@@ -90,15 +101,18 @@ export async function createRuntime(config) {
         durableCoreReady: true,
         durableSchedulerReady: true,
         durableAuditReady: true,
+        distributedEventsReady: true,
+        notificationBridgeReady: true,
         schedulerRunner: schedulerRunner?.status() ?? { running: false, disabled: true },
         businessRoutesEnabled: false,
         authoritativeDataStore: "cloudflare-d1-until-migration",
-        productionBlockers: ["distributed-events", "notifications", "auth", "business-route-migration"],
+        productionBlockers: ["auth", "business-route-migration", "data-migration-validation"],
       };
     }
 
     async function close() {
       await schedulerRunner?.stop();
+      await events?.close();
       await Promise.allSettled([
         database.close(),
         redisClient?.isOpen ? redisClient.quit() : undefined,
@@ -108,6 +122,7 @@ export async function createRuntime(config) {
     return Object.freeze({ services, readiness, describeContracts, close });
   } catch (error) {
     await schedulerRunner?.stop().catch(() => undefined);
+    await events?.close().catch(() => undefined);
     await Promise.allSettled([
       database.close(),
       redisClient?.isOpen ? redisClient.quit() : undefined,
