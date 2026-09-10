@@ -31,8 +31,8 @@ export class PostgresScheduler {
         timezone text NOT NULL DEFAULT 'UTC',
         payload jsonb NOT NULL DEFAULT '{}'::jsonb,
         enabled boolean NOT NULL DEFAULT true,
-        concurrency_policy text NOT NULL DEFAULT 'forbid'
-          CHECK (concurrency_policy IN ('forbid', 'allow')),
+        misfire_policy text NOT NULL DEFAULT 'coalesce'
+          CHECK (misfire_policy IN ('coalesce')),
         next_run_at timestamptz NOT NULL,
         last_run_at timestamptz,
         locked_at timestamptz,
@@ -66,11 +66,11 @@ export class PostgresScheduler {
     timezone = "UTC",
     payload = {},
     enabled = true,
-    concurrencyPolicy = "forbid",
+    misfirePolicy = "coalesce",
     currentDate = new Date(),
   }) {
-    if (!["forbid", "allow"].includes(concurrencyPolicy)) {
-      throw new TypeError("concurrencyPolicy must be forbid or allow");
+    if (misfirePolicy !== "coalesce") {
+      throw new TypeError("Only the coalesce misfire policy is currently supported");
     }
     const nextRunAt = this.nextRun(cron, timezone, currentDate);
     if (Number.isNaN(nextRunAt.getTime())) throw new Error("Cron expression did not produce a valid next run");
@@ -78,7 +78,7 @@ export class PostgresScheduler {
     const result = await this.database.query(
       `INSERT INTO ledgerly_meta.schedules (
         id, name, organization_id, kind, cron_expression, timezone, payload,
-        enabled, concurrency_policy, next_run_at
+        enabled, misfire_policy, next_run_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::timestamptz)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
@@ -88,7 +88,7 @@ export class PostgresScheduler {
         timezone = EXCLUDED.timezone,
         payload = EXCLUDED.payload,
         enabled = EXCLUDED.enabled,
-        concurrency_policy = EXCLUDED.concurrency_policy,
+        misfire_policy = EXCLUDED.misfire_policy,
         next_run_at = EXCLUDED.next_run_at,
         locked_at = NULL,
         locked_by = NULL,
@@ -104,7 +104,7 @@ export class PostgresScheduler {
         requireText(timezone, "timezone"),
         JSON.stringify(payload ?? {}),
         Boolean(enabled),
-        concurrencyPolicy,
+        misfirePolicy,
         nextRunAt.toISOString(),
       ],
     );
