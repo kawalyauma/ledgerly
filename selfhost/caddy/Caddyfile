@@ -12,10 +12,16 @@
     -Server
   }
 
-  respond /healthz 200 {
-    body "ledgerly-selfhost-edge-ok"
-    close
+  handle /healthz {
+    respond "ledgerly-selfhost-edge-ok" 200
   }
 
-  respond "Ledgerly self-hosted edge is running. API/web cutover is not enabled yet." 503
+  # Foundation-only Node runtime. No business routes are cut over yet.
+  handle /selfhost/* {
+    reverse_proxy api:8788
+  }
+
+  handle {
+    respond "Ledgerly self-hosted edge is running. API/web cutover is not enabled yet." 503
+  }
 }

@@ -89,6 +89,21 @@ The self-hosted platform will expose the following internal services. Ports are 
 
 Only HTTPS should be internet-facing in production. PostgreSQL, PgBouncer, Redis, MinIO administration, NVR administration, and AI runtime stay private.
 
+The Node runtime must provide a common service container with these provider-neutral ports:
+
+```text
+database
+cache
+storage
+queue
+scheduler
+events
+notifications
+audit
+```
+
+Foundation adapters may exist for development and migration diagnostics, but the runtime must refuse production mode while any critical persistence, queue, scheduler, notification, or audit port is non-durable.
+
 ## 5. Database contract
 
 PostgreSQL migration work must preserve existing IDs unless a migration explicitly maps them. New schemas must use foreign keys, unique constraints, transactions, and indexes appropriate to access patterns.
@@ -206,3 +221,31 @@ Administrators may rename, reconfigure, disable, or create agents. Agents never 
 Other developers may commit concurrently. Before every editing batch, read the latest `main`, review recent commits affecting the same paths, avoid overwriting unrelated work, make one coherent change, validate it, commit it, and continue from the new latest state.
 
 Do not remove Cloudflare bindings or migrations merely because a self-hosted equivalent exists. Removal occurs only after the replacement is verified and production cutover is complete.
+
+## 13. Migration progress
+
+### Completed: infrastructure foundation
+
+The repository now contains `compose.selfhost.yml`, PostgreSQL/PgBouncer, Redis, MinIO, Caddy, bootstrap SQL, protected environment examples, and the migration contract. Existing Worker/D1/R2/queue/cron configuration remains unchanged.
+
+### Completed: Node runtime shell and service contracts
+
+`server/` now provides a separate Node 20 runtime with:
+
+- `/selfhost/health` for process liveness;
+- `/selfhost/ready` for PgBouncer/PostgreSQL, Redis, MinIO, and writable-storage readiness;
+- `/selfhost/contracts` for non-secret adapter/contract inspection;
+- tenant-scoped cache/storage key helpers;
+- the versioned common job envelope;
+- provider-neutral database, cache, storage, queue, scheduler, event, notification, and audit contracts;
+- a real local-filesystem storage adapter with traversal protection and atomic writes;
+- a foundation cache with TTLs, tag invalidation, and request coalescing;
+- foundation-only in-memory queue/event adapters;
+- graceful Node HTTP shutdown and conservative request/header timeouts;
+- an explicit production-mode guard while durable adapters are incomplete.
+
+Caddy proxies only `/selfhost/*` to this service. All normal application paths remain blocked on the self-hosted edge, so Cloudflare is still the authoritative application runtime.
+
+### Next
+
+Implement durable PostgreSQL and Redis adapters, durable background-job semantics, MinIO object-storage integration, scheduler/audit persistence, and then begin auth/organization/permission compatibility. Production mode must remain blocked until these services pass tests.

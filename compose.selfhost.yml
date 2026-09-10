@@ -82,6 +82,40 @@ services:
       - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
     networks: [ledgerly_backend]
 
+  api:
+    build:
+      context: ./server
+    restart: unless-stopped
+    environment:
+      LEDGERLY_ENVIRONMENT: ${LEDGERLY_ENVIRONMENT:-development}
+      LEDGERLY_RUNTIME_MODE: ${LEDGERLY_RUNTIME_MODE:-foundation}
+      LEDGERLY_API_HOST: 0.0.0.0
+      LEDGERLY_API_PORT: "8788"
+      LEDGERLY_DEPENDENCY_TIMEOUT_MS: ${LEDGERLY_DEPENDENCY_TIMEOUT_MS:-1500}
+      LEDGERLY_DATABASE_HOST: pgbouncer
+      LEDGERLY_DATABASE_PORT: "6432"
+      LEDGERLY_REDIS_HOST: redis
+      LEDGERLY_REDIS_PORT: "6379"
+      LEDGERLY_OBJECT_STORAGE_HOST: minio
+      LEDGERLY_OBJECT_STORAGE_PORT: "9000"
+      LEDGERLY_STORAGE_PATH: /var/lib/ledgerly/storage
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ledgerly_app_storage:/var/lib/ledgerly/storage
+    ports:
+      - "127.0.0.1:${LEDGERLY_API_PORT:-8788}:8788"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8788/selfhost/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks: [ledgerly_backend]
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -105,5 +139,6 @@ volumes:
   ledgerly_postgres_data:
   ledgerly_redis_data:
   ledgerly_object_data:
+  ledgerly_app_storage:
   ledgerly_caddy_data:
   ledgerly_caddy_config:
