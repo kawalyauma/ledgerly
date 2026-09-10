@@ -4,7 +4,7 @@ import { loadConfig } from "./config.mjs";
 import { createRuntime } from "./runtime.mjs";
 
 const config = loadConfig();
-const runtime = createRuntime(config);
+const runtime = await createRuntime(config);
 const startedAt = Date.now();
 
 function writeJson(response, status, body, requestId) {
@@ -93,9 +93,19 @@ server.listen(config.port, config.host, () => {
 async function shutdown(signal) {
   console.info(JSON.stringify({ level: "info", message: "Stopping Ledgerly self-hosted API", signal }));
   const timer = setTimeout(() => process.exit(1), 10_000).unref();
-  server.close(() => {
-    clearTimeout(timer);
-    process.exit(0);
+  server.close(async () => {
+    try {
+      await runtime.close();
+      clearTimeout(timer);
+      process.exit(0);
+    } catch (error) {
+      console.error(JSON.stringify({
+        level: "error",
+        message: "Self-hosted runtime shutdown failed",
+        error: error instanceof Error ? error.message : String(error),
+      }));
+      process.exit(1);
+    }
   });
 }
 
