@@ -10,12 +10,13 @@ The self-hosted stack now provisions:
 - PgBouncer connection pooling
 - Redis persistence, cache and durable job coordination
 - MinIO-compatible object storage
+- PostgreSQL-backed persistent schedules and audit history
 - Caddy edge service
 - a separate Node.js migration API under `server/`
 
-The Node service still exposes only migration health/readiness/contract endpoints. Ledgerly business routes, authentication, D1 data, R2 files, Cloudflare queues, and Cloudflare cron workloads have **not** been cut over.
+The Node service still exposes only migration health/readiness/contract endpoints. Ledgerly business routes, authentication, D1 data, R2 files, Cloudflare queue producers/consumers, and Cloudflare cron handlers have **not** been cut over.
 
-The core persistence adapters are now real rather than probes: PostgreSQL queries/transactions run through PgBouncer, cache operations use Redis, background jobs use Redis claim/ack/retry/dead-letter semantics, and object operations use MinIO through the storage contract. `LEDGERLY_RUNTIME_MODE=production` remains intentionally blocked until scheduler, notification, audit, authentication and migrated business routes are durable and verified.
+The core persistence adapters are real rather than probes: PostgreSQL queries/transactions run through PgBouncer, cache operations use Redis, background jobs use Redis claim/ack/retry/dead-letter semantics, object operations use MinIO, schedules are persisted and claimed from PostgreSQL with stale-lock recovery, and audit records preserve queryable human/AI/system/integration provenance. `LEDGERLY_RUNTIME_MODE=production` remains intentionally blocked until distributed events, notifications, authentication and migrated business routes are verified.
 
 ## First start
 
@@ -39,7 +40,7 @@ curl http://localhost:${LEDGERLY_HTTP_PORT:-8080}/selfhost/ready
 curl http://localhost:${LEDGERLY_HTTP_PORT:-8080}/selfhost/contracts
 ```
 
-`/selfhost/health` reports process liveness. `/selfhost/ready` performs real PostgreSQL, Redis queue/cache and MinIO readiness checks. `/selfhost/contracts` reports non-secret provider information and the remaining production blockers. Normal application paths still return HTTP 503 from the self-hosted edge because production cutover is intentionally disabled.
+`/selfhost/health` reports process liveness. `/selfhost/ready` performs real PostgreSQL, Redis queue/cache, MinIO, scheduler and audit readiness checks. `/selfhost/contracts` reports non-secret provider information, scheduler-runner state and remaining production blockers. Normal application paths still return HTTP 503 from the self-hosted edge because production cutover is intentionally disabled.
 
 Stop without deleting data:
 
@@ -62,20 +63,43 @@ Destroying named volumes deletes self-hosted data and must not be used during no
 - notifications
 - audit
 
-It also defines tenant-scoped cache/storage helpers and the common job envelope. Queue contract version 2 includes explicit `take`, `ack`, `retry`, `deadLetter`, queue-size and dead-letter-size operations so job failures are observable and retry-safe.
+It also defines tenant-scoped cache/storage helpers and the common job envelope. Contract version 3 includes explicit queue claim/ack/retry/dead-letter behavior, persistent schedule registration/list/claim/dispatch/release operations, and queryable audit history.
+
+The scheduler never runs business logic directly. It claims due schedules, emits an idempotent Ledgerly job envelope to the durable queue, then advances the schedule. Missed periods currently use the explicit `coalesce` policy: after downtime one due occurrence is dispatched and the next run advances from current time.
 
 Domain modules should migrate toward these interfaces instead of adding new vendor-specific infrastructure calls.
 
+## Audit provenance
+
+Durable audit events preserve:
+
+- organization
+- `actor_type`: `human`, `ai_agent`, `system`, or `integration`
+- actor ID
+- AI agent ID, name and role when applicable
+- action
+- entity type/ID
+- before/after values
+- reason
+- request ID
+- metadata
+- occurrence timestamp
+
+This is the persistence foundation for the requirement that every future AI-created or AI-modified item remains visibly attributable to the exact agent responsible.
+
 ## Tests
 
-The self-hosted server has dedicated CI in `.github/workflows/selfhost-server-ci.yml`. It installs the Node runtime dependencies, runs syntax checks and unit tests, and validates the Docker Compose configuration.
+The self-hosted server has dedicated CI in `.github/workflows/selfhost-server-ci.yml`. It runs on `main` and all `selfhost-*` / `selfhost/**` staging branches, installs Node runtime dependencies, runs syntax checks and unit tests, and validates the Docker Compose configuration.
 
-Adapter tests cover:
+Current local adapter/runtime tests cover:
 
 - PostgreSQL commit and rollback behavior;
 - Redis cache storage, stampede coalescing and tag invalidation;
 - Redis job claiming, acknowledgement, retry and dead-letter behavior;
-- MinIO-compatible put/get/head/list/delete/download-url behavior.
+- MinIO-compatible put/get/head/list/delete/download-url behavior;
+- persistent scheduler registration and stale-lock recovery;
+- scheduler-to-queue dispatch idempotency and failure release;
+- durable AI-agent audit provenance and filtered audit history.
 
 ## Network exposure
 
@@ -87,9 +111,12 @@ Caddy is the only service intended to become internet-facing. It currently proxi
 
 Before production cutover:
 
-- implement persistent scheduler, notification and audit providers;
+- replace the process-local event bus with a distributed event provider;
+- implement the notification provider bridge;
 - migrate and verify authentication, organization and permission behavior;
-- migrate business domains and validate data integrity;
+- migrate business domains and validate D1 -> PostgreSQL data integrity;
+- register and verify the current Cloudflare cron workloads against the persistent scheduler before disabling those triggers;
+- migrate current Cloudflare queue producers/consumers before disabling those queues;
 - pin container images to tested immutable versions/digests;
 - use a real domain and automatic TLS;
 - move secrets to a protected secret-management path rather than a world-readable env file;

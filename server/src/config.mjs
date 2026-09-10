@@ -73,6 +73,13 @@ export function loadConfig(env = process.env) {
       name: env.LEDGERLY_QUEUE_NAME ?? "core",
       maxAttempts: readPositiveInt(env.LEDGERLY_QUEUE_MAX_ATTEMPTS, 5, "LEDGERLY_QUEUE_MAX_ATTEMPTS"),
     }),
+    scheduler: Object.freeze({
+      enabled: readBoolean(env.LEDGERLY_SCHEDULER_ENABLED, true),
+      pollIntervalMs: readPositiveInt(env.LEDGERLY_SCHEDULER_POLL_INTERVAL_MS, 5000, "LEDGERLY_SCHEDULER_POLL_INTERVAL_MS"),
+      claimLimit: readPositiveInt(env.LEDGERLY_SCHEDULER_CLAIM_LIMIT, 20, "LEDGERLY_SCHEDULER_CLAIM_LIMIT"),
+      lockTimeoutMs: readPositiveInt(env.LEDGERLY_SCHEDULER_LOCK_TIMEOUT_MS, 300000, "LEDGERLY_SCHEDULER_LOCK_TIMEOUT_MS"),
+      workerId: env.LEDGERLY_SCHEDULER_WORKER_ID || null,
+    }),
     objectStorage: Object.freeze({
       host: env.LEDGERLY_OBJECT_STORAGE_HOST ?? "127.0.0.1",
       port: readPort(env.LEDGERLY_OBJECT_STORAGE_PORT, 9000, "LEDGERLY_OBJECT_STORAGE_PORT"),

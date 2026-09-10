@@ -2,7 +2,10 @@ name: Self-hosted Server CI
 
 on:
   push:
-    branches: [main, selfhost-durable-adapters-staging]
+    branches:
+      - main
+      - "selfhost-*"
+      - "selfhost/**"
     paths:
       - "server/**"
       - "selfhost/**"
