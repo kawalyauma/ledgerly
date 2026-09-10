@@ -139,7 +139,7 @@ Candidate cached data includes school configuration, academic years, terms, clas
 
 ## 7. Job contract
 
-Background jobs will use a common envelope so Cloudflare Queues and the self-hosted queue adapter can coexist during migration:
+Background jobs use a common envelope so Cloudflare Queues and the self-hosted queue adapter can coexist during migration:
 
 ```text
 jobId
@@ -151,7 +151,7 @@ idempotencyKey (when required)
 payload
 ```
 
-Consumers must be retry-safe. Permanent failures move to a dead-letter path and remain inspectable from administration tooling.
+Queue contract version 2 requires explicit claim/acknowledgement, retry, dead-letter and queue-depth behavior. Consumers must be retry-safe. Permanent failures move to a dead-letter path and remain inspectable from administration tooling.
 
 ## 8. Storage contract
 
@@ -226,26 +226,37 @@ Do not remove Cloudflare bindings or migrations merely because a self-hosted equ
 
 ### Completed: infrastructure foundation
 
-The repository now contains `compose.selfhost.yml`, PostgreSQL/PgBouncer, Redis, MinIO, Caddy, bootstrap SQL, protected environment examples, and the migration contract. Existing Worker/D1/R2/queue/cron configuration remains unchanged.
+The repository contains `compose.selfhost.yml`, PostgreSQL/PgBouncer, Redis, MinIO, Caddy, bootstrap SQL, protected environment examples, and the migration contract. Existing Worker/D1/R2/queue/cron configuration remains unchanged.
 
 ### Completed: Node runtime shell and service contracts
 
-`server/` now provides a separate Node 20 runtime with:
-
-- `/selfhost/health` for process liveness;
-- `/selfhost/ready` for PgBouncer/PostgreSQL, Redis, MinIO, and writable-storage readiness;
-- `/selfhost/contracts` for non-secret adapter/contract inspection;
-- tenant-scoped cache/storage key helpers;
-- the versioned common job envelope;
-- provider-neutral database, cache, storage, queue, scheduler, event, notification, and audit contracts;
-- a real local-filesystem storage adapter with traversal protection and atomic writes;
-- a foundation cache with TTLs, tag invalidation, and request coalescing;
-- foundation-only in-memory queue/event adapters;
-- graceful Node HTTP shutdown and conservative request/header timeouts;
-- an explicit production-mode guard while durable adapters are incomplete.
+`server/` provides a separate Node 20 runtime with `/selfhost/health`, `/selfhost/ready`, `/selfhost/contracts`, tenant-scoped cache/storage helpers, provider-neutral service contracts, a versioned job envelope, graceful shutdown, conservative request/header timeouts and an explicit production-mode guard.
 
 Caddy proxies only `/selfhost/*` to this service. All normal application paths remain blocked on the self-hosted edge, so Cloudflare is still the authoritative application runtime.
 
+### Completed: durable core data/cache/job/object adapters
+
+The Node migration runtime now uses:
+
+- PostgreSQL through PgBouncer with parameterized queries, health checks and explicit transaction commit/rollback behavior;
+- Redis for shared cache data with TTLs, tag invalidation and in-process request coalescing to reduce cache stampedes;
+- Redis-backed durable job lists with ready/processing/dead-letter state, explicit claim receipts, acknowledgement, retry attempt tracking and dead-letter routing;
+- MinIO/S3-compatible object storage behind the provider-neutral storage contract, including bucket initialization, object metadata, listing and presigned download URLs;
+- validated environment/Compose wiring for database, Redis, queue and object-storage credentials/settings;
+- dedicated self-hosted CI plus adapter unit tests.
+
+The original local-filesystem and in-memory adapters remain useful for tests/development but are no longer the runtime providers for the durable core.
+
+### Current production blockers
+
+Production mode intentionally remains blocked until the following are implemented and verified:
+
+1. persistent scheduler and missed-run/restart recovery;
+2. durable audit persistence and queryability;
+3. real notification provider bridge;
+4. auth/organization/permission compatibility;
+5. migrated business routes and D1 -> PostgreSQL data validation.
+
 ### Next
 
-Implement durable PostgreSQL and Redis adapters, durable background-job semantics, MinIO object-storage integration, scheduler/audit persistence, and then begin auth/organization/permission compatibility. Production mode must remain blocked until these services pass tests.
+Implement persistent scheduler + audit storage, then notification bridging and auth/organization/permission compatibility. Cloudflare remains the fallback throughout.

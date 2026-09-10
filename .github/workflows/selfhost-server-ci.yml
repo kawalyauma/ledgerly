@@ -1,0 +1,45 @@
+name: Self-hosted Server CI
+
+on:
+  push:
+    branches: [main, selfhost-durable-adapters-staging]
+    paths:
+      - "server/**"
+      - "selfhost/**"
+      - "compose.selfhost.yml"
+      - ".env.selfhost.example"
+      - ".github/workflows/selfhost-server-ci.yml"
+  pull_request:
+    paths:
+      - "server/**"
+      - "selfhost/**"
+      - "compose.selfhost.yml"
+      - ".env.selfhost.example"
+      - ".github/workflows/selfhost-server-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package.json
+      - run: npm install --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate self-hosted compose configuration
+        run: docker compose --env-file .env.selfhost.example -f compose.selfhost.yml config --quiet
