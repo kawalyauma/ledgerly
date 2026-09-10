@@ -62,7 +62,7 @@ class AudioCallEngine{
   const pc=new RTCPeerConnection({iceServers:config.iceServers,bundlePolicy:"max-bundle"});this.pc=pc;
   for(const track of this.local.getTracks())pc.addTrack(track,this.local);
   pc.onicecandidate=event=>{if(event.candidate)void this.send(callId,peerUserId,"ice",{candidate:event.candidate.toJSON()}).catch(()=>{})};
-  pc.ontrack=event=>{const stream=event.streams[0]||new MediaStream([event.track]);if(!this.remoteAudio){this.remoteAudio=new Audio();this.remoteAudio.autoplay=true;this.remoteAudio.playsInline=true;}this.remoteAudio.srcObject=stream;void this.remoteAudio.play().catch(()=>{})};
+  pc.ontrack=event=>{const stream=event.streams[0]||new MediaStream([event.track]);if(!this.remoteAudio){this.remoteAudio=new Audio();this.remoteAudio.autoplay=true;}this.remoteAudio.srcObject=stream;void this.remoteAudio.play().catch(()=>{})};
   pc.onconnectionstatechange=()=>{
    if(pc!==this.pc)return;
    if(pc.connectionState==="connected"){window.clearTimeout(this.disconnectTimer);this.disconnectTimer=undefined;this.set({phase:"connected",connectedAt:this.state.connectedAt||new Date().toISOString(),error:undefined})}
