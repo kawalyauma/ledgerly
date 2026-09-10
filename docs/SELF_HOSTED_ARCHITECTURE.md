@@ -65,8 +65,8 @@ Separate workloads:
 3. **PostgreSQL becomes the authoritative self-hosted relational store.** PgBouncer protects it from excessive client connections.
 4. **Redis is shared infrastructure, not a source of truth.** Durable records remain in PostgreSQL/object storage. Queue implementations must be durable and must not rely on evictable cache entries.
 5. **Object storage is accessed through a Ledgerly storage interface.** R2 and MinIO/local storage remain interchangeable during migration.
-6. **Every tenant-scoped operation carries `organization_id`.** Cache keys, jobs, storage paths, queries, audit records, and agent work must preserve tenant boundaries.
-7. **Consequential writes are transactional and idempotent where applicable.** Finance, fees, payroll, inventory, attendance, and AI actions must remain safe under retries/concurrency.
+6. **Every tenant-scoped operation carries `organization_id`.** Cache keys, jobs, storage paths, queries, audit records, schedules, and agent work must preserve tenant boundaries.
+7. **Consequential writes are transactional and idempotent where applicable.** Finance, fees, payroll, inventory, attendance, scheduled work, and AI actions must remain safe under retries/concurrency.
 8. **Heavy work leaves the request path.** PDFs, imports/exports, bulk communications, reports, backups, media processing, payroll batches, and AI work use background jobs.
 9. **AI never receives raw database credentials.** Agents operate only through permission-checked Ledgerly tools.
 10. **Human/AI/system provenance is permanent.** AI-created or AI-modified data must retain the responsible agent identity even after later human edits.
@@ -102,7 +102,7 @@ notifications
 audit
 ```
 
-Foundation adapters may exist for development and migration diagnostics, but the runtime must refuse production mode while any critical persistence, queue, scheduler, notification, or audit port is non-durable.
+Foundation adapters may exist for development and migration diagnostics, but production mode remains blocked while required distributed/event, notification, authentication, or business-data compatibility layers are incomplete.
 
 ## 5. Database contract
 
@@ -137,7 +137,7 @@ Do not cache authorization-sensitive data without tenant/user scope. Writes comm
 
 Candidate cached data includes school configuration, academic years, terms, classes, streams, subjects, grading scales, fee categories, account lists, permission snapshots, and short-lived dashboard summaries.
 
-## 7. Job contract
+## 7. Job and schedule contract
 
 Background jobs use a common envelope so Cloudflare Queues and the self-hosted queue adapter can coexist during migration:
 
@@ -151,7 +151,9 @@ idempotencyKey (when required)
 payload
 ```
 
-Queue contract version 2 requires explicit claim/acknowledgement, retry, dead-letter and queue-depth behavior. Consumers must be retry-safe. Permanent failures move to a dead-letter path and remain inspectable from administration tooling.
+Queue contract version 3 requires explicit claim/acknowledgement, retry, dead-letter and queue-depth behavior. Jobs carrying an `idempotencyKey` are atomically de-duplicated at enqueue time in Redis for a bounded retention window. Consumers must still be retry-safe because end-to-end business idempotency remains mandatory.
+
+Persistent schedules live in PostgreSQL and are claimed with row locking plus stale-lock recovery. The scheduler never executes domain work directly: it emits a normal durable job envelope containing schedule identity and the scheduled occurrence time. The current missed-run policy is explicitly `coalesce`: after downtime one due occurrence is emitted, then the next run advances from current time.
 
 ## 8. Storage contract
 
@@ -170,22 +172,27 @@ Logical prefixes should include documents, receipts, students, staff, academics,
 
 ## 9. Audit and AI provenance contract
 
-Audit events must support at least:
+Audit events persist in PostgreSQL and support at least:
 
 ```text
+organization_id
 actor_type
 actor_id
+agent_id
+agent_name
+agent_role
 action
 entity_type
 entity_id
 before
 after
 reason
-timestamp
 request_id
+metadata
+timestamp
 ```
 
-AI actions additionally preserve `agent_id`, `agent_name`, `agent_role`, task/reason, and approval state. The UI must visibly label AI-generated or AI-modified content with the responsible agent name.
+`actor_type` is one of `human`, `ai_agent`, `system`, or `integration`. AI actions preserve the exact `agent_id`, `agent_name`, `agent_role`, task/reason context, and before/after data so provenance remains queryable even after later human edits.
 
 `AI reviewed` and `officially approved` are distinct states. Important academic, financial, payroll, and student-record actions default to human approval unless an administrator explicitly grants a narrower autonomous policy.
 
@@ -236,27 +243,32 @@ Caddy proxies only `/selfhost/*` to this service. All normal application paths r
 
 ### Completed: durable core data/cache/job/object adapters
 
-The Node migration runtime now uses:
+The Node migration runtime uses PostgreSQL through PgBouncer, Redis cache, Redis durable jobs with ready/processing/dead-letter state, and MinIO/S3-compatible object storage. Queue enqueue now atomically suppresses duplicate jobs carrying the same idempotency key. Dedicated self-hosted tests cover transactions, cache invalidation, queue lifecycle/idempotency and object operations.
 
-- PostgreSQL through PgBouncer with parameterized queries, health checks and explicit transaction commit/rollback behavior;
-- Redis for shared cache data with TTLs, tag invalidation and in-process request coalescing to reduce cache stampedes;
-- Redis-backed durable job lists with ready/processing/dead-letter state, explicit claim receipts, acknowledgement, retry attempt tracking and dead-letter routing;
-- MinIO/S3-compatible object storage behind the provider-neutral storage contract, including bucket initialization, object metadata, listing and presigned download URLs;
-- validated environment/Compose wiring for database, Redis, queue and object-storage credentials/settings;
-- dedicated self-hosted CI plus adapter unit tests.
+### Completed: persistent scheduler and durable audit foundation
 
-The original local-filesystem and in-memory adapters remain useful for tests/development but are no longer the runtime providers for the durable core.
+The runtime now also provides:
+
+- PostgreSQL-backed schedule registration, cancellation, listing, due-work claiming, stale-lock recovery and dispatch state;
+- a scheduler runner that emits durable queue jobs instead of executing business work inside the timer;
+- deterministic schedule-occurrence idempotency keys plus Redis atomic duplicate suppression;
+- explicit `coalesce` behavior for missed occurrences after downtime;
+- PostgreSQL-backed audit events with tenant, actor, entity, before/after, reason, request, metadata, and AI-agent identity fields;
+- filtered audit history suitable for future user-facing activity screens and AI attribution;
+- scheduler/audit readiness checks and graceful scheduler shutdown;
+- self-hosted CI coverage for all `selfhost-*` and `selfhost/**` staging branches.
+
+The current Cloudflare cron schedules and queue handlers remain authoritative until each workload is registered/ported and equivalence-tested on the self-hosted services.
 
 ### Current production blockers
 
 Production mode intentionally remains blocked until the following are implemented and verified:
 
-1. persistent scheduler and missed-run/restart recovery;
-2. durable audit persistence and queryability;
-3. real notification provider bridge;
-4. auth/organization/permission compatibility;
-5. migrated business routes and D1 -> PostgreSQL data validation.
+1. distributed event delivery across multiple Node workers;
+2. real notification provider bridge;
+3. auth/organization/permission compatibility;
+4. migrated business routes and D1 -> PostgreSQL data validation.
 
 ### Next
 
-Implement persistent scheduler + audit storage, then notification bridging and auth/organization/permission compatibility. Cloudflare remains the fallback throughout.
+Implement distributed Redis events and the notification bridge, then begin auth/organization/permission runtime compatibility and the D1 -> PostgreSQL migration framework. Cloudflare remains the fallback throughout.
