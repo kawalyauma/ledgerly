@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 export const ACTOR_TYPES = Object.freeze(["human", "ai_agent", "system", "integration"]);
-export const SERVICE_CONTRACT_VERSION = 1;
+export const SERVICE_CONTRACT_VERSION = 2;
 
 function requireText(value, name) {
   if (typeof value !== "string" || value.trim() === "") {
@@ -55,7 +55,7 @@ const REQUIRED_METHODS = Object.freeze({
   database: ["health", "query", "transaction"],
   cache: ["get", "set", "delete", "remember", "invalidateTag", "health"],
   storage: ["put", "get", "head", "delete", "list", "createDownloadUrl", "health"],
-  queue: ["enqueue", "take", "size", "health"],
+  queue: ["enqueue", "take", "ack", "retry", "deadLetter", "size", "deadLetterSize", "health"],
   scheduler: ["register", "cancel", "health"],
   events: ["publish", "subscribe", "health"],
   notifications: ["send", "health"],
