@@ -9,6 +9,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.camera.any" android:required="true" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
@@ -35,6 +36,7 @@
         </intent-filter>
       </receiver>
       <service android:name=".CameraKeepAliveService" android:enabled="true" android:exported="false" android:directBootAware="true" android:foregroundServiceType="camera" android:stopWithTask="false" />
+      <service android:name=".AudioCallKeepAliveService" android:enabled="true" android:exported="false" android:foregroundServiceType="microphone" android:stopWithTask="false" />
       <activity
         android:name=".MainActivity"
         android:label="@string/app_name"
