@@ -167,3 +167,9 @@ export class PostgresAudit {
     }
   }
 }
+
+export async function createPostgresAudit({ database }) {
+  const audit = new PostgresAudit({ database });
+  await audit.ensureSchema();
+  return audit;
+}
