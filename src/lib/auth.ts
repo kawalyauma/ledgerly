@@ -6,7 +6,8 @@ import { sha256 } from "./crypto";
 
 const allScopes = ["accounts:read", "accounts:write", "journals:read", "journals:write", "reports:read", "reports:write",
   "contacts:read", "contacts:write", "products:read", "products:write", "documents:read", "documents:write", "payments:read", "payments:write",
-  "payroll:read", "payroll:write", "periods:read", "periods:write", "admin:read", "admin:write", "communications:read", "communications:write", "school:read", "school:write"];
+  "payroll:read", "payroll:write", "periods:read", "periods:write", "admin:read", "admin:write", "communications:read", "communications:write", "school:read", "school:write",
+  "audio-calls:read", "audio-calls:write"];
 // Owner/admin roles bypass explicit scopes; integration and staff tokens must opt into each domain.
 
 export const requireAuth: MiddlewareHandler<{ Bindings: Env; Variables: AppVariables }> = async (c, next) => {
