@@ -6,7 +6,6 @@ import android.os.Build
 import android.widget.FrameLayout
 import android.widget.VideoView
 import com.facebook.react.bridge.Arguments
-import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.common.MapBuilder
 import com.facebook.react.uimanager.SimpleViewManager
 import com.facebook.react.uimanager.ThemedReactContext
@@ -16,6 +15,7 @@ import kotlin.math.abs
 
 class NvrPlaybackView(context:ThemedReactContext):FrameLayout(context){
   private val video=VideoView(context)
+  private var player:MediaPlayer?=null
   private var source:String?=null
   private var prepared=false
   private var shouldPlay=false
@@ -24,13 +24,14 @@ class NvrPlaybackView(context:ThemedReactContext):FrameLayout(context){
 
   init{
     addView(video,LayoutParams(LayoutParams.MATCH_PARENT,LayoutParams.MATCH_PARENT))
-    video.setOnPreparedListener{player->
+    video.setOnPreparedListener{preparedPlayer->
+      player=preparedPlayer
       prepared=true
-      applyRate(player)
+      applyRate(preparedPlayer)
       if(desiredPositionMs>0)video.seekTo(desiredPositionMs)
-      if(shouldPlay)video.start()
-      emit("ready")
-      player.setOnInfoListener{_,what,_->
+      if(shouldPlay)video.start() else try{preparedPlayer.pause()}catch(_:Throwable){}
+      emit(if(shouldPlay)"playing" else "ready")
+      preparedPlayer.setOnInfoListener{_,what,_->
         when(what){
           MediaPlayer.MEDIA_INFO_BUFFERING_START->emit("buffering")
           MediaPlayer.MEDIA_INFO_BUFFERING_END->emit(if(video.isPlaying)"playing" else "paused")
@@ -39,28 +40,29 @@ class NvrPlaybackView(context:ThemedReactContext):FrameLayout(context){
       }
     }
     video.setOnCompletionListener{emit("ended")}
-    video.setOnErrorListener{_,what,extra->emit("error","Media error $what/$extra");true}
+    video.setOnErrorListener{_,what,extra->prepared=false;player=null;emit("error","Media error $what/$extra");true}
   }
 
   fun setSource(next:String?){
     if(next==source)return
     source=next
     prepared=false
+    player=null
     emit("loading")
     video.stopPlayback()
     if(next.isNullOrBlank()){emit("idle");return}
     video.setVideoURI(Uri.parse(next))
     video.requestFocus()
   }
-  fun setPlaying(next:Boolean){shouldPlay=next;if(!prepared)return;if(next){video.start();emit("playing")}else{video.pause();emit("paused")}}
+  fun setPlaying(next:Boolean){shouldPlay=next;if(!prepared)return;if(next){video.start();applyRate(player);emit("playing")}else{video.pause();emit("paused")}}
   fun setPosition(next:Int){desiredPositionMs=next.coerceAtLeast(0);if(prepared&&abs(video.currentPosition-desiredPositionMs)>700)video.seekTo(desiredPositionMs)}
-  fun setRate(next:Float){desiredRate=next.coerceIn(.25f,4f);if(prepared&&Build.VERSION.SDK_INT>=23)try{video.setPlaybackParams(video.playbackParams.setSpeed(desiredRate))}catch(_:Throwable){}}
-  private fun applyRate(player:MediaPlayer){if(Build.VERSION.SDK_INT>=23)try{player.playbackParams=player.playbackParams.setSpeed(desiredRate)}catch(_:Throwable){}}
+  fun setRate(next:Float){desiredRate=next.coerceIn(.25f,4f);if(prepared)applyRate(player)}
+  private fun applyRate(target:MediaPlayer?){if(target!=null&&Build.VERSION.SDK_INT>=23)try{target.playbackParams=target.playbackParams.setSpeed(desiredRate);if(!shouldPlay)target.pause()}catch(_:Throwable){}}
   private fun emit(state:String,message:String?=null){
     val event=Arguments.createMap().apply{putString("state",state);if(message!=null)putString("message",message)}
     (context as ThemedReactContext).getJSModule(RCTEventEmitter::class.java).receiveEvent(id,"topNvrPlaybackState",event)
   }
-  override fun onDetachedFromWindow(){video.stopPlayback();super.onDetachedFromWindow()}
+  override fun onDetachedFromWindow(){prepared=false;player=null;video.stopPlayback();super.onDetachedFromWindow()}
 }
 
 class NvrPlaybackViewManager:SimpleViewManager<NvrPlaybackView>(){
