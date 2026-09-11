@@ -33,9 +33,7 @@ export default {
       if(method!=="GET")await requireLiveScope(runtime,request,"ai:approve");
     }
     if(path==="/selfhost/ai/academics"||path.startsWith("/selfhost/ai/academics/"))await requireLiveScope(runtime,request,method==="GET"?"academics:read":"academics:write");
-    if(path==="/selfhost/ai/schedules"||path.startsWith("/selfhost/ai/schedules/")){
-      if(method!=="GET")await requireLiveScope(runtime,request,"ai:approve");
-    }
+    if(path==="/selfhost/ai/schedules"||path.startsWith("/selfhost/ai/schedules/"))await requireLiveScope(runtime,request,"ai:approve");
     if(path==="/selfhost/ai/activity"||path.startsWith("/selfhost/ai/activity/")||path==="/selfhost/ai/audit"||path.startsWith("/selfhost/ai/audit/")||path==="/selfhost/ai/settings"||path.startsWith("/selfhost/ai/settings/"))await requireLiveScope(runtime,request,"ai:approve");
 
     return handleAiRequest({request,url,runtime:scopedRuntime});
