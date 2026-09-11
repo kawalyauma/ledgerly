@@ -1,4 +1,5 @@
 import {
+  assertMigrationPrerequisites,
   checkpointTable,
   createMigrationRun,
   ensureMigrationMetadata,
@@ -59,6 +60,13 @@ export class D1MigrationRunner {
     await this.phase.ensureSchema(this.database);
   }
 
+  async assertPrerequisites() {
+    return assertMigrationPrerequisites(this.database, {
+      sourceIdentity: this.sourceIdentity,
+      prerequisites: this.phase.prerequisites ?? [],
+    });
+  }
+
   async plan(tables = this.phase.tables) {
     const items = [];
     for (const table of tables) {
@@ -81,6 +89,7 @@ export class D1MigrationRunner {
 
   async run({ resume = true, tables = this.phase.tables } = {}) {
     await this.prepare();
+    await this.assertPrerequisites();
     const phaseName = this.phase.name;
     const existingRun = resume ? await resumeLatestRun(this.database, { sourceIdentity: this.sourceIdentity, phase: phaseName }) : null;
     const runId = existingRun ?? await createMigrationRun(this.database, {
@@ -163,6 +172,7 @@ export class D1MigrationRunner {
 
   async validate({ runId, tables = this.phase.tables }) {
     await this.prepare();
+    await this.assertPrerequisites();
     if (typeof this.phase.finalizeSchema === "function") await this.phase.finalizeSchema(this.database);
     let failed = false;
     const counts = [];
