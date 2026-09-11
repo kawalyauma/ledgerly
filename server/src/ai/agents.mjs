@@ -38,6 +38,8 @@ function parseArray(value){
   return [];
 }
 
+function hasApprovalAuthority(context){const permissions=new Set(context?.permissions??[]);return permissions.has("*")||permissions.has("ai:approve");}
+
 function assertPermissionSubset(context,permissions) {
   const granted=new Set(normalizedStrings(context?.permissions??[],{name:"context permissions",max:512}));
   if(granted.has("*"))return;
@@ -110,5 +112,11 @@ export class AiAgentService {
     return mapAgent(result.rows[0]);
   }
 
-  async disable(context,agentId,reason=null) { return this.update(context,agentId,{status:"disabled",reason}); }
+  async disable(context,agentId,reason=null) {
+    if(!hasApprovalAuthority(context))throw permissionError("Disabling an AI employee requires ai:approve authority",{missingPermissions:["ai:approve"]});
+    const current=await this.get(context,agentId);if(!current)throw new Error("AI agent not found");
+    const result=await this.database.query(`UPDATE ledgerly_ai.agents SET status='disabled',updated_at=now() WHERE agent_id=$1 AND organization_id=$2 RETURNING *`,[agentId,context.organizationId]);
+    await this.audit?.write?.({organization_id:context.organizationId,actor_type:"human",actor_id:context.userId,action:"ai.agent.disabled",entity_type:"ai_agent",entity_id:agentId,reason,before:current,after:result.rows[0]});
+    return mapAgent(result.rows[0]);
+  }
 }
