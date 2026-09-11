@@ -20,6 +20,16 @@ The command requires, for every selected migration phase:
 
 By default all registered phases are required. `LEDGERLY_READINESS_PHASES` may restrict the command during a domain rehearsal, but must be blank for the final all-domain cutover check.
 
+Before treating the phase graph as complete, also run:
+
+```bash
+npm run migration:coverage
+```
+
+`migration:coverage` inventories every D1 table created by the repository migration history and verifies that each source table has one registered PostgreSQL migration-phase owner or an explicit reviewed exception in `src/migration/coverage-allowlist.json`. It fails for uncovered source tables and duplicate copy ownership. The exception policy is empty by default; see `docs/SELFHOST_MIGRATION_COVERAGE.md` before adding any exception.
+
+The coverage command is intentionally a separate cutover prerequisite for now. Do not claim migration coverage is complete until its JSON report from the exact release commit has been reviewed and archived.
+
 ## 2. Complete machine-readable cutover check
 
 Configure:
@@ -46,7 +56,7 @@ This fails closed unless:
 
 The output is JSON and should be archived with the cutover record.
 
-A successful readiness command does **not** by itself authorize cutover. Restore, load, financial reconciliation, object migration, Printerly, NVR and AI operational checks still apply.
+A successful readiness command does **not** by itself authorize cutover. Migration coverage, restore, load, financial reconciliation, object migration, Printerly, NVR and AI operational checks still apply.
 
 ## 3. Security / exposure policy
 
@@ -141,6 +151,7 @@ Never weaken the required `ledgerly_restore_test_` prefix. It is a guard against
 
 Archive at minimum:
 
+- `migration:coverage` JSON from the exact release commit;
 - `migration:rehearsal -- cutover-validate` JSON;
 - `readiness:migration` JSON;
 - `readiness:security` JSON;
