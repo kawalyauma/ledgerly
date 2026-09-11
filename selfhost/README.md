@@ -13,12 +13,13 @@ The self-hosted stack now provisions:
 - PostgreSQL-backed persistent schedules and audit history
 - provider-neutral SMS, WhatsApp and email delivery through EgoSMS, WhatsApp Support Hub and Resend
 - Worker-compatible JWT/password/MFA/permission behavior in the Node migration runtime
+- resumable D1 -> PostgreSQL auth/core migration tooling with validation bookkeeping
 - Caddy edge service
 - a separate Node.js migration API under `server/`
 
-The Node service still exposes only migration health/readiness/contract endpoints. Ledgerly business routes, public self-hosted authentication routes, D1 data, R2 files, Cloudflare queue producers/consumers, and Cloudflare cron handlers have **not** been cut over.
+The Node service still exposes only migration health/readiness/contract endpoints. Ledgerly business routes, public self-hosted authentication routes, R2 files, Cloudflare queue producers/consumers, and Cloudflare cron handlers have **not** been cut over. D1 remains authoritative even though the first copy framework now exists.
 
-The core persistence adapters are real rather than probes: PostgreSQL queries/transactions run through PgBouncer, cache operations use Redis, background jobs use Redis claim/ack/retry/dead-letter semantics, events use Redis pub/sub across API processes, object operations use MinIO, schedules are persisted and claimed from PostgreSQL with stale-lock recovery, audit records preserve queryable human/AI/system/integration provenance, notification providers are selected behind a common service contract, and auth compatibility preserves the current Worker token/password/MFA/role/scope model. `LEDGERLY_RUNTIME_MODE=production` remains intentionally blocked until authentication data, business routes and D1 data have been migrated and verified.
+The core persistence adapters are real rather than probes: PostgreSQL queries/transactions run through PgBouncer, cache operations use Redis, background jobs use Redis claim/ack/retry/dead-letter semantics, events use Redis pub/sub across API processes, object operations use MinIO, schedules are persisted and claimed from PostgreSQL with stale-lock recovery, audit records preserve queryable human/AI/system/integration provenance, notification providers are selected behind a common service contract, auth compatibility preserves the current Worker token/password/MFA/role/scope model, and D1 migration batches are resumable with per-table checkpoints. `LEDGERLY_RUNTIME_MODE=production` remains intentionally blocked until business routes and domain data have been migrated and verified.
 
 ## First start
 
@@ -42,7 +43,7 @@ curl http://localhost:${LEDGERLY_HTTP_PORT:-8080}/selfhost/ready
 curl http://localhost:${LEDGERLY_HTTP_PORT:-8080}/selfhost/contracts
 ```
 
-`/selfhost/health` reports process liveness. `/selfhost/ready` checks PostgreSQL, Redis cache/jobs/events, MinIO, scheduler, audit and required notification channels. It also reports auth migration status separately; missing auth tables do not make the foundation process unhealthy, but they keep auth cutover blocked. `/selfhost/contracts` reports non-secret provider information, scheduler-runner state, auth compatibility information and remaining production blockers. Normal application paths still return HTTP 503 from the self-hosted edge because production cutover is intentionally disabled.
+`/selfhost/health` reports process liveness. `/selfhost/ready` checks PostgreSQL, Redis cache/jobs/events, MinIO, scheduler, audit and required notification channels. It also reports auth migration status separately. `/selfhost/contracts` reports non-secret provider information, scheduler-runner state, auth compatibility information and remaining production blockers. Normal application paths still return HTTP 503 from the self-hosted edge because production cutover is intentionally disabled.
 
 Stop without deleting data:
 
@@ -73,9 +74,17 @@ The self-hosted auth layer intentionally matches the current Worker behavior rat
 - school username/phone aliases, account locks, TOTP MFA and recovery codes retain their existing behavior;
 - development `X-Organization-Id` / `X-User-Id` authentication remains development-only.
 
-The compatibility service deliberately fails closed when school security tables are missing. Public self-hosted auth routes stay disabled until the D1 -> PostgreSQL migration framework copies those tables and validation confirms their row counts/relationships.
+The compatibility service deliberately fails closed when school security tables are missing. Public self-hosted auth routes stay disabled until D1 auth/core migration validation passes.
 
 Keep `LEDGERLY_JWT_ISSUER`, `LEDGERLY_JWT_AUDIENCE` and `LEDGERLY_JWT_SECRET` aligned with the current Worker during dual-run so already-issued access tokens behave consistently across the migration boundary.
+
+## D1 migration framework
+
+The Compose service `migrate-d1` exists only under the `migration` profile. Cloudflare credentials are passed to this one-shot service and are not passed to `api`.
+
+The first migration phase copies organizations, users, memberships, accounts, API keys, sessions, school user profiles, login aliases, MFA records and login events. Every batch upsert and cursor checkpoint commits in one PostgreSQL transaction. Failed runs can resume from their last committed D1 rowid.
+
+Use the commands and cutover rules in `docs/D1_POSTGRES_MIGRATION.md`. The migration records run/table state and validations under `ledgerly_meta`, including source-stability warnings, row-count checks and relationship/orphan checks.
 
 ## Notifications
 
@@ -95,7 +104,7 @@ Durable audit events preserve organization, actor type/ID, exact AI agent ID/nam
 
 ## Tests
 
-Self-hosted tests cover PostgreSQL transactions, Redis cache invalidation, durable queue lifecycle/idempotency, MinIO object operations, scheduler recovery/dispatch, audit provenance, distributed event publish/subscribe, SMS/WhatsApp/email provider request behavior, auth password compatibility, role/scope rules, API-key/Bearer/development principals, and transactional refresh-token rotation.
+Self-hosted tests cover PostgreSQL transactions, Redis cache invalidation, durable queue lifecycle/idempotency, MinIO object operations, scheduler recovery/dispatch, audit provenance, distributed event publish/subscribe, SMS/WhatsApp/email provider request behavior, auth password compatibility, role/scope rules, API-key/Bearer/development principals, transactional refresh-token rotation, D1 HTTP query safety, SQLite boolean conversion, migration checkpoint resume after failure and fail-closed row-count validation.
 
 ## Network exposure
 
@@ -105,8 +114,8 @@ PostgreSQL, PgBouncer, Redis, MinIO, and the Node migration API are published on
 
 Before production cutover:
 
-- migrate and verify auth/users/organizations/memberships/sessions/API keys and school security tables;
-- migrate business domains and validate D1 -> PostgreSQL data integrity;
+- run and validate auth/core D1 -> PostgreSQL migration during a controlled write pause;
+- migrate remaining business domains and validate D1 -> PostgreSQL data integrity;
 - register and verify current Cloudflare cron workloads before disabling those triggers;
 - migrate current Cloudflare queue producers/consumers before disabling those queues;
 - require and verify all production notification channels;

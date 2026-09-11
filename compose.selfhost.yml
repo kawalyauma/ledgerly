@@ -157,6 +157,32 @@ services:
       start_period: 5s
     networks: [ledgerly_backend]
 
+  migrate-d1:
+    profiles: ["migration"]
+    build:
+      context: ./server
+    restart: "no"
+    command: ["node", "src/migration/cli.mjs", "plan"]
+    environment:
+      LEDGERLY_DATABASE_HOST: pgbouncer
+      LEDGERLY_DATABASE_PORT: "6432"
+      LEDGERLY_DATABASE_NAME: ${POSTGRES_DB}
+      LEDGERLY_DATABASE_USER: ${POSTGRES_USER}
+      LEDGERLY_DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      LEDGERLY_DATABASE_SSL: "false"
+      LEDGERLY_DEPENDENCY_TIMEOUT_MS: ${LEDGERLY_DEPENDENCY_TIMEOUT_MS:-5000}
+      LEDGERLY_MIGRATION_DATABASE_POOL_MAX: ${LEDGERLY_MIGRATION_DATABASE_POOL_MAX:-4}
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
+      CLOUDFLARE_D1_DATABASE_ID: ${CLOUDFLARE_D1_DATABASE_ID:-}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+      CLOUDFLARE_API_BASE_URL: ${CLOUDFLARE_API_BASE_URL:-https://api.cloudflare.com/client/v4}
+      LEDGERLY_D1_MIGRATION_BATCH_SIZE: ${LEDGERLY_D1_MIGRATION_BATCH_SIZE:-250}
+      LEDGERLY_D1_MIGRATION_HTTP_TIMEOUT_MS: ${LEDGERLY_D1_MIGRATION_HTTP_TIMEOUT_MS:-15000}
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+    networks: [ledgerly_backend]
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
