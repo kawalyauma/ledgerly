@@ -12,7 +12,10 @@ function accountBlocked(row) {
   if (!row.school_status) return false;
   if (row.school_status === "suspended" || row.school_status === "inactive") return true;
   if (row.school_status !== "locked") return false;
-  return !row.locked_until || new Date(row.locked_until) > new Date();
+  if (!row.locked_until) return true;
+  const lockedUntil = Date.parse(row.locked_until);
+  if (!Number.isFinite(lockedUntil)) return true;
+  return lockedUntil > Date.now();
 }
 
 export async function resolveCurrentActorAccess({ database, organizationId, actorId }) {
