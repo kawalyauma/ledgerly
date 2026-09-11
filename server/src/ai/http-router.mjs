@@ -18,7 +18,7 @@ async function approvalExecutionContext(runtime,principal,approval,agent){let ac
 export async function handleAiRequest({request,url,runtime}){
   if(!runtime.ai)return json(503,{error:{code:"AI_WORKFORCE_DISABLED",message:"AI Workforce is disabled on this Ledgerly server."}});
   const parts=pathParts(url.pathname),method=request.method??"GET";
-  if(method==="GET"&&parts[0]==="health"){const principal=await principalFor(runtime,request,"ai:read");return json(200,{organizationId:principal.organizationId,...await runtime.ai.health()});}
+  if(method==="GET"&&parts[0]==="health"){const principal=await principalFor(runtime,request,"ai:read");const ctx=context(principal);return json(200,{organizationId:principal.organizationId,...await runtime.ai.health(ctx)});}
 
   const principal=await principalFor(runtime,request,method==="GET"?"ai:read":"ai:write"),ctx=context(principal),db=runtime.services.database;
 
