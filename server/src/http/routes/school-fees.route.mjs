@@ -1,0 +1,17 @@
+import {authenticateFinance,mapFinanceError,ok,pagination,readJson,requiredHeader} from '../../finance/http.mjs';
+const PREFIX='/api/v1/school-fees',parts=url=>url.pathname.slice(PREFIX.length).split('/').filter(Boolean);
+export default{name:'school-fees',prefix:PREFIX,business:true,priority:95,enabled:c=>c.extensions?.['finance-api']?.feesCutover==='node',async handle({request,url,runtime,requestId}){try{const api=runtime.extensions?.['finance-api']?.schoolFees;if(!api)throw Object.assign(new Error('School Fees runtime unavailable'),{status:503,code:'FINANCE_SELFHOST_NOT_READY'});const p=parts(url),scope=request.method==='GET'?'school:read':'school:write',x=await authenticateFinance(runtime,request,scope),page=pagination(url);
+if(request.method==='GET'&&p[0]==='fee-categories'&&p.length===1)return ok({data:await api.feeCategories(x.organizationId)});
+if(request.method==='GET'&&p[0]==='structures'&&p.length===1)return ok({data:await api.feeStructures(x.organizationId,page.limit),pagination:page});
+if(request.method==='POST'&&p[0]==='structures'&&p.length===1)return ok({data:await api.createFeeStructure({principal:x,body:await readJson(request),requestId})},201);
+if(request.method==='GET'&&p[0]==='charges'&&p.length===1)return ok({data:await api.feeCharges(x.organizationId,page.limit),pagination:page});
+if(request.method==='POST'&&p[0]==='charges'&&p.length===1)return ok({data:await api.createFeeCharge({principal:x,body:await readJson(request),requestId})},201);
+if(request.method==='POST'&&p[0]==='charges'&&p.length===3&&p[2]==='adjustments')return ok({data:await api.adjustCharge({principal:x,chargeId:p[1],body:await readJson(request),requestId})},201);
+if(request.method==='GET'&&p[0]==='receipts'&&p.length===1)return ok({data:await api.feeReceipts(x.organizationId,page.limit),pagination:page});
+if(request.method==='POST'&&p[0]==='receipts'&&p.length===1)return ok({data:await api.createFeeReceipt({principal:x,body:await readJson(request),requestId,idempotencyKey:requiredHeader(request,'Idempotency-Key')})},201);
+if(request.method==='POST'&&p[0]==='receipts'&&p.length===3&&p[2]==='snapshot')return ok({data:await api.captureReceiptSnapshot({principal:x,receiptId:p[1],body:await readJson(request),requestId})});
+if(request.method==='POST'&&p[0]==='receipts'&&p.length===3&&p[2]==='prints')return ok({data:await api.recordReceiptPrint({principal:x,receiptId:p[1],body:await readJson(request),requestId})},201);
+if(request.method==='GET'&&p[0]==='students'&&p.length===3&&p[2]==='balance')return ok({data:await api.studentFeeBalance(x.organizationId,p[1])});
+if(request.method==='GET'&&p[0]==='mobile-intents'&&p.length===1)return ok({data:await api.feeMobileIntents(x.organizationId,page.limit),pagination:page});
+if(request.method==='POST'&&p[0]==='mobile-intents'&&p.length===1)return ok({data:await api.createFeeIntent({principal:x,body:await readJson(request),requestId})},201);
+throw Object.assign(new Error('School Fees route not found'),{status:404,code:'NOT_FOUND'});}catch(error){if(error instanceof TypeError)throw Object.assign(error,{status:422,code:'VALIDATION_ERROR'});throw mapFinanceError(error)}}};
