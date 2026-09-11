@@ -34,6 +34,20 @@ test("provider registry is model/provider agnostic",()=>{
   assert.deepEqual(registry.create("mock",{model:"x"}),{config:{model:"x"}});
 });
 
+test("Ollama health distinguishes unconfigured model",async()=>{
+  const oldFetch=globalThis.fetch;
+  globalThis.fetch=async()=>({ok:true,status:200,json:async()=>({models:[{name:"qwen2.5:7b",size:1}]})});
+  try {
+    const provider=new OllamaProvider({model:null,timeoutMs:100});
+    const health=await provider.health();
+    assert.equal(health.ok,false);
+    assert.equal(health.online,true);
+    assert.equal(health.state,"model_unconfigured");
+    assert.equal(health.code,"AI_MODEL_NOT_CONFIGURED");
+    assert.deepEqual(health.models,["qwen2.5:7b"]);
+  } finally { globalThis.fetch=oldFetch; }
+});
+
 test("Ollama health distinguishes missing model",async()=>{
   const oldFetch=globalThis.fetch;
   globalThis.fetch=async()=>({ok:true,status:200,json:async()=>({models:[{name:"other:latest",size:1}]})});
@@ -43,5 +57,6 @@ test("Ollama health distinguishes missing model",async()=>{
     assert.equal(health.online,true);
     assert.equal(health.modelInstalled,false);
     assert.equal(health.state,"model_missing");
+    assert.equal(health.code,"AI_MODEL_NOT_INSTALLED");
   } finally { globalThis.fetch=oldFetch; }
 });
