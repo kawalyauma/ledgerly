@@ -13,7 +13,7 @@ function cleanFilename(value){const name=String(value||"document").split(/[\\/]/
 
 async function principalFor(runtime,request,scope){const principal=await runtime.auth.authenticateRequest({headers:request.headers});runtime.auth.requireScope(principal,scope);return principal;}
 async function ensureInitialAgents(runtime,organizationId){const count=await runtime.services.database.query(`SELECT count(*)::int AS count FROM ledgerly_ai.agents WHERE organization_id=$1`,[organizationId]);if(Number(count.rows[0]?.count??0)===0)await runtime.ai.store.seedTemplates(organizationId,(key)=>agentIdFor(organizationId,key));}
-async function approvalExecutionContext(runtime,principal,approval,agent){let actorScopes=principal.scopes??[];if(approval.task_id){const task=(await runtime.services.database.query(`SELECT requested_by FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[approval.task_id,principal.organizationId])).rows[0];if(task?.requested_by){const access=await runtime.authorization.resolveCurrentActorAccess({organizationId:principal.organizationId,actorId:task.requested_by});actorScopes=access.effectiveScopes??access.scopes??[];}}const permissions=runtime.authorization?.intersectPermissions?runtime.authorization.intersectPermissions(actorScopes,agent.permissions??[]):agent.permissions??[];return {...context(principal),permissions};}
+async function approvalExecutionContext(runtime,principal,approval,agent){let actorScopes=principal.effectiveScopes??principal.scopes??[];if(approval.task_id){const task=(await runtime.services.database.query(`SELECT requested_by FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[approval.task_id,principal.organizationId])).rows[0];if(task?.requested_by){const access=await runtime.authorization.resolveCurrentActorAccess({organizationId:principal.organizationId,actorId:task.requested_by});actorScopes=access.effectiveScopes??access.scopes??[];}}const permissions=runtime.authorization?.intersectPermissions?runtime.authorization.intersectPermissions(actorScopes,agent.permissions??[]):agent.permissions??[];return {...context(principal),permissions};}
 
 export async function handleAiRequest({request,url,runtime}){
   if(!runtime.ai)return json(503,{error:{code:"AI_WORKFORCE_DISABLED",message:"AI Workforce is disabled on this Ledgerly server."}});
@@ -30,6 +30,8 @@ export async function handleAiRequest({request,url,runtime}){
     if((method==="PATCH"||method==="PUT")&&parts.length===2)return json(200,await runtime.ai.agents.update(ctx,parts[1],await body(request)));
     if(method==="POST"&&parts[2]==="disable")return json(200,await runtime.ai.agents.disable(ctx,parts[1],(await body(request)).reason??null));
   }
+
+  if(parts[0]==="tools"&&method==="GET")return json(200,{items:runtime.ai.gateway.describeAll()});
 
   if(parts[0]==="tasks"){
     if(method==="GET"&&parts.length===1){const status=url.searchParams.get("status"),values=[ctx.organizationId];let filter="organization_id=$1";if(status){values.push(status);filter+=` AND status=$${values.length}`;}const result=await db.query(`SELECT * FROM ledgerly_ai.tasks WHERE ${filter} ORDER BY priority DESC,created_at DESC LIMIT 200`,values);return json(200,{items:result.rows});}
