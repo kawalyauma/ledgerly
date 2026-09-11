@@ -35,7 +35,7 @@ export async function createAiWorkforce({services,config={},businessTools={},aut
   const storeCapabilities=await store.ensureSchema();
   const approvals=new AiApprovalService({database:services.database,audit:services.audit});
   const tasks=new AiTaskService({database:services.database,queue:services.queue,audit:services.audit,limits});
-  const renderer=tenantStorage?createLocalPdfRenderer({tenantStorage}):null;
+  const renderer=tenantStorage?createLocalPdfRenderer({tenantStorage,database:services.database}):null;
   const documents=new AiDocumentEngine({database:services.database,audit:services.audit,renderer});
   const agents=new AiAgentService({database:services.database,audit:services.audit});
   const memory=new AiMemoryService({database:services.database,audit:services.audit});
@@ -45,8 +45,10 @@ export async function createAiWorkforce({services,config={},businessTools={},aut
   const academic=new AiAcademicService({database:services.database,tasks,documents,audit:services.audit});
 
   const internalTools={
+    createDocumentDraft:async({input,context,agent,taskId})=>documents.createAiDraft({context,agent,taskId,type:input.type,title:input.title,content:input.content,reason:context.reason}),
     createLessonPlanDraft:async({input,context,agent,taskId})=>documents.createAiDraft({context,agent,taskId,type:"lesson_plan",title:input.title??"Lesson Plan Draft",content:input.content??input,reason:context.reason}),
     updateDocumentDraft:async({input,context,agent,taskId})=>documents.reviseAi({context,agent,taskId,documentId:input.documentId,content:input.content,reason:context.reason}),
+    generateReport:async({input,context,agent,taskId})=>documents.createAiDraft({context,agent,taskId,type:"report",title:input.title,content:input.content,reason:context.reason}),
     createTask:async({input,context,agent,taskId})=>{
       if(!taskId)throw aiError("AI_HANDOFF_PARENT_REQUIRED","AI-to-AI delegation requires a parent task",422);
       if(input.assignedAgent===agent.agentId)throw aiError("AI_HANDOFF_SELF_DENIED","An AI employee cannot delegate a task to itself",422);
@@ -66,6 +68,13 @@ export async function createAiWorkforce({services,config={},businessTools={},aut
   if(config.workerEnabled!==false)worker.start(Number(config.pollIntervalMs??500));
 
   async function uploadKnowledge({context,name,bytes,contentType="application/octet-stream",sourceType="uploaded_document",metadata={}}){if(!tenantStorage?.forOrganization)throw new Error("Tenant storage is unavailable");const storage=tenantStorage.forOrganization(context.organizationId);const key=`ai/knowledge/${randomUUID()}-${safeName(name)}`;await storage.put(key,Buffer.from(bytes),{contentType,custom:{uploaded_by:String(context.userId),source_type:String(sourceType)}});return ingestion.ingestStored({context,name,sourceType,storageRef:key,contentType,metadata});}
+  async function uploadDocumentAttachment({context,documentId,name,bytes,contentType="application/octet-stream",metadata={}}){
+    if(!tenantStorage?.forOrganization)throw new Error("Tenant storage is unavailable");if(!bytes?.length)throw aiError("AI_DOCUMENT_ATTACHMENT_EMPTY","Document attachment is empty",422);
+    const storage=tenantStorage.forOrganization(context.organizationId),key=`ai/documents/${documentId}/attachments/${randomUUID()}-${safeName(name)}`;
+    await storage.put(key,Buffer.from(bytes),{contentType,custom:{document_id:String(documentId),uploaded_by:String(context.userId)}});
+    try{return await documents.addAttachment({context,documentId,name,storageRef:key,contentType,size:bytes.length,metadata});}catch(error){await storage.delete(key).catch(()=>undefined);throw error;}
+  }
+  async function removeDocumentAttachment({context,documentId,attachmentId}){const result=await documents.removeAttachment({context,documentId,attachmentId});const ref=result.attachment?.storage_ref;if(ref&&tenantStorage?.forOrganization)await tenantStorage.forOrganization(context.organizationId).delete(ref).catch(()=>undefined);return result;}
   async function getRenderedDocumentUrl({context,documentId,expiresSeconds=900}){if(!tenantStorage?.forOrganization)throw new Error("Tenant storage is unavailable");const result=await services.database.query(`SELECT rendered_pdf_ref FROM ledgerly_ai.documents WHERE document_id=$1 AND organization_id=$2`,[documentId,context.organizationId]);const ref=result.rows[0]?.rendered_pdf_ref;if(!ref)throw new Error("Document has no rendered PDF");return {ref,url:await tenantStorage.forOrganization(context.organizationId).createDownloadUrl(ref,{expiresSeconds})};}
 
   async function health(context=null){
@@ -83,5 +92,5 @@ export async function createAiWorkforce({services,config={},businessTools={},aut
   }
 
   async function close(){await worker.stop();}
-  return Object.freeze({providerRegistry,store,storeCapabilities,agents,tasks,approvals,documents,academic,memory,knowledge,ingestion,schedules,gateway,worker,uploadKnowledge,getRenderedDocumentUrl,health,close,config:{providerConfig,embeddingModel,limits}});
+  return Object.freeze({providerRegistry,store,storeCapabilities,agents,tasks,approvals,documents,academic,memory,knowledge,ingestion,schedules,gateway,worker,uploadKnowledge,uploadDocumentAttachment,removeDocumentAttachment,getRenderedDocumentUrl,health,close,config:{providerConfig,embeddingModel,limits}});
 }
