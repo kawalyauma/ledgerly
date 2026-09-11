@@ -8,7 +8,7 @@ import { ensureSchoolImportSchema } from "../school-import-schema.mjs";
 export default {
   name: "school-people",
   description: "Admissions, students, guardians, enrollment/lifecycle, promotion, discipline and import history",
-  prerequisites: ["auth-core", "school-reference", "school-configuration", "contacts"],
+  prerequisites: ["auth-core", "school-reference", "school-configuration", "contacts", "mobile-sync-core"],
   tables: [...SCHOOL_PEOPLE_TABLES, ...SCHOOL_IMPORT_TABLES],
   ensureSchema: async (database) => {
     await configuration.ensureSchema(database);

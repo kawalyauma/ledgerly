@@ -16,9 +16,10 @@ test("school identity phases require shared contacts before copying cross-module
   assert.ok(checkNames(SCHOOL_STAFF_RELATIONSHIP_CHECKS).includes("school_staff.profile_contact_tenant"));
 });
 
-test("offline school phases require shared mobile sync before validating device references", () => {
-  assert.ok(getMigrationPhase("attendance").prerequisites.includes("mobile-sync-core"));
-  assert.ok(getMigrationPhase("books").prerequisites.includes("mobile-sync-core"));
+test("offline school phases require shared mobile sync before domain cutover", () => {
+  for (const phaseName of ["school-people", "attendance", "academics", "books"]) {
+    assert.ok(getMigrationPhase(phaseName).prerequisites.includes("mobile-sync-core"), phaseName);
+  }
   assert.ok(checkNames(ATTENDANCE_RELATIONSHIP_CHECKS).includes("attendance.event_mobile_device"));
   assert.ok(checkNames(ATTENDANCE_RELATIONSHIP_CHECKS).includes("attendance.event_mobile_device_tenant"));
   assert.ok(checkNames(BOOKS_RELATIONSHIP_CHECKS).includes("books.mobile_device"));
