@@ -44,7 +44,7 @@ export class AiWorker {
         await this.queue.ack(item.receipt).catch(()=>undefined);
         return {skipped:true,reason:"task_state_changed",taskId};
       }
-      const nonRetryable=["AI_TASK_NOT_FOUND","AI_AGENT_NOT_FOUND","AI_AGENT_DISABLED","AI_TOOL_NOT_ALLOWED","AI_PERMISSION_DENIED","AI_ACTION_PROHIBITED","AI_MODEL_NOT_CONFIGURED","AI_MODEL_NOT_INSTALLED","BACKGROUND_ACTOR_REVOKED","BACKGROUND_ACTOR_BLOCKED"].includes(error?.code);
+      const nonRetryable=["AI_TASK_NOT_FOUND","AI_AGENT_NOT_FOUND","AI_AGENT_DISABLED","AI_AGENT_PAUSED","AI_TOOL_NOT_ALLOWED","AI_PERMISSION_DENIED","AI_ACTION_PROHIBITED","AI_MODEL_NOT_CONFIGURED","AI_MODEL_NOT_INSTALLED","BACKGROUND_ACTOR_REVOKED","BACKGROUND_ACTOR_BLOCKED"].includes(error?.code);
       if (!item.job.payload?.aiScheduled) {
         await this.taskService.setStatus({organizationId:item.job.organizationId,taskId,status:nonRetryable?"failed":"queued",error:error instanceof Error?error.message:String(error),expectedStatuses:["queued","working"]}).catch(()=>undefined);
       }
