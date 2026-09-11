@@ -1,0 +1,11 @@
+const PREFIX='/selfhost/human-resources';
+function fail(status,code,message){throw Object.assign(new Error(message),{status,code});}
+async function json(req){const chunks=[];let size=0;for await(const c of req){size+=c.length;if(size>262144)fail(413,'PAYLOAD_TOO_LARGE','request too large');chunks.push(c);}if(!chunks.length)return{};try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{fail(400,'INVALID_JSON','invalid JSON');}}
+async function auth(runtime,request,scope=null){const p=await runtime.auth.authenticateRequest({headers:request.headers});if(scope)runtime.auth.requireScope(p,scope);return p;}
+export default {name:'human-resources',prefix:PREFIX,enabled(c){return c.extensions?.['human-resources']?.enabled===true;},async handle({request,url,runtime}){
+ const ext=runtime.extensions['human-resources'];if(!ext)fail(503,'HR_NOT_READY','human resources not enabled');
+ if(request.method==='POST'&&url.pathname===`${PREFIX}/leave-requests`){const p=await auth(runtime,request,'admin:write');const b=await json(request);const row=await ext.service.requestLeave({organizationId:p.organizationId,actor:{actorType:'human',actorId:p.userId},...b});return{status:201,body:{leaveRequest:row}};}
+ const review=url.pathname.match(/^\/selfhost\/human-resources\/leave-requests\/([^/]+)\/review$/);if(request.method==='POST'&&review){const p=await auth(runtime,request,'admin:write');const b=await json(request);const row=await ext.service.reviewLeave({organizationId:p.organizationId,actor:{actorType:'human',actorId:p.userId},id:decodeURIComponent(review[1]),decision:b.decision,notes:b.notes});return{status:200,body:{leaveRequest:row}};}
+ if(request.method==='POST'&&url.pathname===`${PREFIX}/mobile/leave-intents`){const p=await auth(runtime,request);const b=await json(request);if(!b.deviceId||!b.intent?.id)fail(422,'HR_MOBILE_INTENT_INVALID','deviceId and intent.id are required');const intent=await ext.service.submitMobileLeaveIntent({organizationId:p.organizationId,userId:p.userId,deviceId:b.deviceId,intent:b.intent});const applied=await ext.service.processMobileLeaveIntent({organizationId:p.organizationId,intentId:intent.id});return{status:200,body:{intent:applied}};}
+ fail(404,'HR_ROUTE_NOT_FOUND','human resources route not found');
+}};

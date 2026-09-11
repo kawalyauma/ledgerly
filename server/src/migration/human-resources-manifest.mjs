@@ -1,0 +1,11 @@
+import { migrationTable } from "./shared-manifest-utils.mjs";
+
+export const HUMAN_RESOURCES_TABLES = Object.freeze([
+  migrationTable({name:"hr_departments",columns:["id","organization_id","code","name","manager_employee_id","active","created_at","updated_at"],conflict:["id"],booleans:["active"],dependencies:["organizations"]}),
+  migrationTable({name:"hr_employees",columns:["id","organization_id","user_id","contact_id","school_staff_id","department_id","employee_number","job_title","employment_type","employment_status","hire_date","termination_date","manager_employee_id","work_email","work_phone","metadata_json","created_at","updated_at"],conflict:["id"],dependencies:["organizations","users","contacts","hr_departments"]}),
+  migrationTable({name:"hr_leave_types",columns:["id","organization_id","code","name","paid","annual_days_micros","active","created_at","updated_at"],conflict:["id"],booleans:["paid","active"],dependencies:["organizations"]}),
+  migrationTable({name:"hr_leave_requests",columns:["id","organization_id","employee_id","leave_type_id","starts_on","ends_on","days_micros","reason","status","requested_by","reviewed_by","reviewed_at","review_notes","created_at","updated_at"],conflict:["id"],dependencies:["organizations","hr_employees","hr_leave_types","users"]}),
+  migrationTable({name:"hr_onboarding_tasks",columns:["id","organization_id","employee_id","title","due_date","status","assigned_user_id","completed_at","created_at","updated_at"],conflict:["id"],dependencies:["organizations","hr_employees","users"]}),
+  migrationTable({name:"hr_mobile_leave_intents",columns:["id","organization_id","device_id","employee_id","leave_type_id","starts_on","ends_on","days_micros","reason","requested_by","client_created_at","status","server_leave_request_id","error_message","applied_at","created_at","updated_at","attempts","last_attempt_at","next_attempt_at"],conflict:["id"],dependencies:["organizations","mobile_sync_devices","hr_employees","hr_leave_types","users"]}),
+  migrationTable({name:"hr_mobile_onboarding_intents",columns:["id","organization_id","device_id","task_id","completed_by","client_completed_at","status","error_message","applied_at","created_at","updated_at","attempts","last_attempt_at","next_attempt_at"],conflict:["id"],dependencies:["organizations","mobile_sync_devices","hr_onboarding_tasks","users"]}),
+]);
