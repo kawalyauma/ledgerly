@@ -27,6 +27,19 @@ test("finance summary reads posted journals only and remains tenant scoped",asyn
  assert.match(query.sql,/JOIN journal_lines/);
 });
 
+test("unmatched fee payments use receipt unallocated balance and tenant scope",async()=>{
+ const calls=[];
+ const database={query:async(sql,values)=>{calls.push({sql,values});if(String(sql).startsWith("SELECT to_regclass"))return {rows:[{relation:"school_fee_receipts"}]};return {rows:[{id:"r1",unallocated_minor:5000}]};}};
+ const tools=createLedgerlyBusinessTools({database});
+ const out=await tools.findUnmatchedPayments({input:{limit:10},context:{organizationId:"org-fees"}});
+ assert.equal(out.items[0].unallocated_minor,5000);
+ const query=calls.at(-1);
+ assert.equal(query.values[0],"org-fees");
+ assert.match(query.sql,/school_fee_receipts/);
+ assert.match(query.sql,/unallocated_minor>0/);
+ assert.doesNotMatch(query.sql,/payment_allocations/);
+});
+
 test("domain adapters fail closed while a self-hosted table is not migrated",async()=>{
  const database={query:async(sql)=>String(sql).startsWith("SELECT to_regclass")?{rows:[{relation:null}]}:{rows:[]}};
  const tools=createLedgerlyBusinessTools({database});
