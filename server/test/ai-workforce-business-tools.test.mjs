@@ -40,6 +40,28 @@ test("unmatched fee payments use receipt unallocated balance and tenant scope",a
  assert.doesNotMatch(query.sql,/payment_allocations/);
 });
 
+test("fee reminder drafts use authoritative tenant balance and never send",async()=>{
+ const calls=[];
+ const database={query:async(sql,values)=>{const q=String(sql);calls.push({sql:q,values});if(q.startsWith("SELECT to_regclass"))return {rows:[{relation:values[0]}]};if(q.includes("FROM school_students"))return {rows:[{id:"stu-1",admission_number:"LMJ-001",first_name:"Amina",middle_name:null,last_name:"N."}]};if(q.includes("FROM school_student_fee_charges"))return {rows:[{charged_minor:90000}]};if(q.includes("FROM school_fee_receipts"))return {rows:[{allocated_minor:30000}]};if(q.includes("FROM organizations"))return {rows:[{base_currency:"UGX"}]};return {rows:[]};}};
+ const tools=createLedgerlyBusinessTools({database});
+ const draft=await tools.prepareFeeReminder({input:{studentId:"stu-1",tone:"friendly",dueDate:"Friday"},context:{organizationId:"org-a"}});
+ assert.equal(draft.status,"draft");
+ assert.equal(draft.balanceMinor,60000);
+ assert.equal(draft.currency,"UGX");
+ assert.equal(draft.sendRequired,false);
+ assert.match(draft.message,/Amina/);
+ assert.ok(calls.filter((call)=>Array.isArray(call.values)&&call.values.includes("org-a")).length>=4);
+});
+
+test("report tool returns an unpublished tenant-scoped structured draft",async()=>{
+ const tools=createLedgerlyBusinessTools({database:{query:async()=>({rows:[]})}});
+ const report=await tools.generateReport({input:{title:"Finance review",content:{summary:"Balanced"}},context:{organizationId:"org-a"},agent:{agentId:"a1"},taskId:"t1"});
+ assert.equal(report.status,"draft");
+ assert.equal(report.organizationId,"org-a");
+ assert.equal(report.published,false);
+ assert.equal(report.generatedBy.agentId,"a1");
+});
+
 test("domain adapters fail closed while a self-hosted table is not migrated",async()=>{
  const database={query:async(sql)=>String(sql).startsWith("SELECT to_regclass")?{rows:[{relation:null}]}:{rows:[]}};
  const tools=createLedgerlyBusinessTools({database});

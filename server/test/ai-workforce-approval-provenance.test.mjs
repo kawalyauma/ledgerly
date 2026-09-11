@@ -8,11 +8,19 @@ test("approved gateway execution reuses exact saved payload",async()=>{
   const calls=[];
   const gateway=new AiToolGateway({audit:{write:async()=>{}}});
   gateway.register({name:"send_notification",permissions:["notifications:send"],risk:"medium",consequential:true,approvalRequired:true},async({input,approved})=>{calls.push({input,approved});return {sent:true};});
-  const agent={agentId:"a1",name:"Mirembe",role:"Secretary",allowedTools:["send_notification"],permissions:["notifications:send"]};
+  const agent={agentId:"a1",name:"Mirembe",role:"Secretary",status:"active",autonomyLevel:2,allowedTools:["send_notification"],permissions:["notifications:send"]};
   const approval={approval_id:"p1",organization_id:"org-a",agent_id:"a1",task_id:"t1",requested_action:"send_notification",payload:{message:"Approved text"},status:"approved",reason:"Send notice"};
   const result=await gateway.executeApproved({approval,agent,context:{organizationId:"org-a",userId:"u1",permissions:["notifications:send"]}});
   assert.equal(result.status,"executed");
   assert.deepEqual(calls,[{input:{message:"Approved text"},approved:true}]);
+});
+
+test("approved action cannot execute after employee is paused",async()=>{
+  const gateway=new AiToolGateway({audit:{write:async()=>{}}});
+  gateway.register({name:"send_notification",permissions:["notifications:send"],risk:"medium",consequential:true,approvalRequired:true},async()=>({sent:true}));
+  const agent={agentId:"a1",name:"Mirembe",role:"Secretary",status:"paused",autonomyLevel:2,allowedTools:["send_notification"],permissions:["notifications:send"]};
+  const approval={approval_id:"p1",organization_id:"org-a",agent_id:"a1",task_id:"t1",requested_action:"send_notification",payload:{message:"Approved text"},status:"approved",reason:"Send notice"};
+  await assert.rejects(()=>gateway.executeApproved({approval,agent,context:{organizationId:"org-a",userId:"u1",permissions:["notifications:send"]}}),(error)=>error.code==="AI_AGENT_PAUSED");
 });
 
 test("official document approval requires ai:approve and follows state transitions",async()=>{

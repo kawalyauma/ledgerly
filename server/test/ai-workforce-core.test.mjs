@@ -4,6 +4,7 @@ import { evaluateToolPolicy, AiPolicyError, assertTenant } from "../src/ai/polic
 import { aiAttribution, humanEditProvenance } from "../src/ai/provenance.mjs";
 import { AiProviderRegistry } from "../src/ai/runtime-provider.mjs";
 import { OllamaProvider } from "../src/ai/providers/ollama.mjs";
+import { AiToolGateway, registerCoreTools } from "../src/ai/tool-gateway.mjs";
 
 const agent={agentId:"agent-1",name:"Mirembe",role:"Secretary",status:"active",autonomyLevel:2,allowedTools:["safe_read","send_notification"]};
 const context={organizationId:"org-a",permissions:["school:read","notifications:send"]};
@@ -13,12 +14,36 @@ test("tenant isolation rejects mismatched organization",()=>{
 });
 
 test("agent cannot call a tool outside allowlist",()=>{
-  assert.throws(()=>evaluateToolPolicy({agent,tool:{name:"reverse_journal",permissions:[],risk:"high",consequential:true,approvalRequired:true},context,input:{}}),(error)=>error.code==="AI_TOOL_NOT_ALLOWED");
+  assert.throws(()=>evaluateToolPolicy({agent,tool:{name:"reverse_journal",permissions:[],risk:"prohibited",consequential:true},context,input:{}}),(error)=>error.code==="AI_TOOL_NOT_ALLOWED");
+});
+
+test("paused employee is blocked at the policy boundary",()=>{
+  const paused={...agent,status:"paused",allowedTools:["safe_read"]};
+  assert.throws(()=>evaluateToolPolicy({agent:paused,tool:{name:"safe_read",permissions:[],risk:"low"},context,input:{}}),(error)=>error.code==="AI_AGENT_PAUSED");
 });
 
 test("consequential actions default to approval",()=>{
   const decision=evaluateToolPolicy({agent,tool:{name:"send_notification",permissions:["notifications:send"],risk:"medium",consequential:true,approvalRequired:true},context,input:{}});
   assert.equal(decision.decision,"approval_required");
+});
+
+test("core prohibited tools cannot be approved into execution",async()=>{
+  const gateway=registerCoreTools(new AiToolGateway({audit:{write:async()=>{}}}),{});
+  const restricted={agentId:"a1",name:"Restricted",role:"Test",status:"active",autonomyLevel:3,allowedTools:["post_payment"],permissions:["ai:restricted"]};
+  await assert.rejects(()=>gateway.invoke({agent:restricted,context:{organizationId:"org-a",permissions:["ai:restricted"]},toolName:"post_payment",input:{amount:10}}),(error)=>error.code==="AI_ACTION_PROHIBITED");
+  const definition=gateway.describeAll().find((tool)=>tool.name==="post_payment");
+  assert.equal(definition.risk,"prohibited");
+  assert.equal(definition.approvalRequired,false);
+});
+
+test("core tool definitions expose explicit model argument schemas",()=>{
+  const gateway=registerCoreTools(new AiToolGateway({audit:{write:async()=>{}}}),{});
+  const student=gateway.describeAll().find((tool)=>tool.name==="get_student");
+  const notification=gateway.describeAll().find((tool)=>tool.name==="send_notification");
+  assert.equal(student.parameters.type,"object");
+  assert.deepEqual(student.parameters.required,["studentId"]);
+  assert.deepEqual(notification.parameters.required,["channel","to","message"]);
+  assert.equal(notification.parameters.additionalProperties,false);
 });
 
 test("AI provenance survives later human edit",()=>{
