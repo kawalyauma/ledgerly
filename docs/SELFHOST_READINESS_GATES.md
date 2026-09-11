@@ -41,13 +41,45 @@ This fails closed unless:
 1. migration evidence passes;
 2. `GET /selfhost/ready` returns a healthy ready response;
 3. the newest PostgreSQL and object-storage backups are within the permitted age;
-4. the expected checksum manifest files exist.
+4. the PostgreSQL dump checksum is verified and every object backup file matches `SHA256SUMS`;
+5. the repository security/exposure policy passes for the base Compose file, AI overlay, finance/NVR overlay and Caddy edge configuration.
 
 The output is JSON and should be archived with the cutover record.
 
-A successful readiness command does **not** by itself authorize cutover. Restore, load, security, financial reconciliation, object migration, Printerly, NVR and AI operational checks still apply.
+A successful readiness command does **not** by itself authorize cutover. Restore, load, financial reconciliation, object migration, Printerly, NVR and AI operational checks still apply.
 
-## 3. Bounded HTTP load smoke
+## 3. Security / exposure policy
+
+Run the static exposure check independently from `server/` with:
+
+```bash
+npm run readiness:security
+```
+
+The policy is fail-closed:
+
+- PostgreSQL, PgBouncer, Redis, MinIO API/console and the Node API may only publish loopback host ports;
+- `ledgerly_backend` must remain an internal Docker network;
+- an overlay may not make the backend external or explicitly disable its internal flag;
+- Caddy HTTP/HTTPS are approved public edge ports;
+- MediaMTX WebRTC UDP `8189` is the only approved public NVR media binding in the current overlay;
+- MediaMTX RTSP, HLS and WebRTC HTTP endpoints remain loopback-only;
+- Ollama currently publishes no host port;
+- any unknown service that publishes a host port is rejected unless it is deliberately added to the reviewed allowlist;
+- Caddy administration must remain disabled and the expected nosniff/frame/referrer/server-header hardening must remain configured;
+- Caddy must not reverse-proxy PostgreSQL, PgBouncer, Redis or MinIO directly.
+
+This static gate catches configuration regressions before deployment. On the target Linux host, also inspect the real listener surface after Compose starts:
+
+```bash
+sudo ss -lntup
+```
+
+Confirm the configured PostgreSQL, PgBouncer, Redis, MinIO and Node API host ports are listening only on `127.0.0.1`/`::1`; only the intentionally exposed Caddy and approved media ports should be reachable from the LAN/WAN according to your firewall design.
+
+If the repository is not the parent directory of `server/`, set `LEDGERLY_REPOSITORY_ROOT` before running the readiness commands.
+
+## 4. Bounded HTTP load smoke
 
 The load tool performs GET requests only. The default target is `/selfhost/ready`, making the default run non-mutating.
 
@@ -76,7 +108,7 @@ npm run readiness:load
 
 Do not point `LEDGERLY_LOAD_PATH` at a mutating endpoint. For authenticated read-path load testing, use a dedicated test tenant and a separate purpose-built load harness rather than embedding production credentials in this command.
 
-## 4. Safe PostgreSQL restore drill
+## 5. Safe PostgreSQL restore drill
 
 A backup is not valid merely because `pg_dump` returned exit code 0. Run a disposable restore drill:
 
@@ -105,18 +137,19 @@ selfhost/backups/test-restore-postgres.sh /backups/postgres/ledgerly-20260911T10
 
 Never weaken the required `ledgerly_restore_test_` prefix. It is a guard against accidentally dropping/restoring the production database.
 
-## 5. Final cutover evidence bundle
+## 6. Final cutover evidence bundle
 
 Archive at minimum:
 
 - `migration:rehearsal -- cutover-validate` JSON;
 - `readiness:migration` JSON;
+- `readiness:security` JSON;
 - `readiness:cutover` JSON;
 - `readiness:load` JSON;
 - disposable restore-drill JSON;
 - object migration count/checksum report;
 - finance reconciliation results;
-- security/exposure checklist;
+- target-host `ss -lntup`/firewall exposure evidence;
 - Printerly/NVR/AI health evidence;
 - rollback decision and Cloudflare fallback status.
 
