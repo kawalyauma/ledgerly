@@ -85,14 +85,7 @@ export class AiWorkforceStore {
         UNIQUE (organization_id, agent_id, memory_type, key)
       )`);
 
-    await this.database.query(`
-      CREATE TABLE IF NOT EXISTS ledgerly_ai.activity (
-        activity_id uuid PRIMARY KEY, organization_id text NOT NULL, agent_id text, task_id uuid,
-        activity_type text NOT NULL, summary text NOT NULL, data jsonb NOT NULL DEFAULT '{}'::jsonb,
-        occurred_at timestamptz NOT NULL DEFAULT now()
-      )`);
-    await this.database.query(`CREATE INDEX IF NOT EXISTS ai_activity_org_time_idx ON ledgerly_ai.activity (organization_id, occurred_at DESC)`);
-
+    // AI activity is projected from Ledgerly's durable audit service. Do not create or write a parallel activity/audit log.
     await this.database.query(`
       CREATE TABLE IF NOT EXISTS ledgerly_ai.academic_reviews (
         review_id uuid PRIMARY KEY, organization_id text NOT NULL, document_id uuid NOT NULL, task_id uuid,
@@ -150,27 +143,27 @@ export class AiWorkforceStore {
 
 function defaultTools(key) {
   const map = {
-    secretary:["get_school_profile","update_document_draft","create_task","send_notification","generate_report","request_approval"],
+    secretary:["get_school_profile","create_document_draft","update_document_draft","create_task","send_notification","generate_report","request_approval"],
     academic_assistant:["get_school_profile","get_staff","get_academic_context","get_lesson_plan","create_lesson_plan_draft","update_document_draft","create_task","generate_report","request_approval"],
-    academic_reviewer:["get_school_profile","get_academic_context","get_lesson_plan","record_academic_review","update_document_draft","create_task","generate_report","request_approval"],
+    academic_reviewer:["get_school_profile","get_academic_context","get_lesson_plan","record_academic_review","create_task","generate_report","request_approval"],
     finance_assistant:["get_student","get_student_balance","get_finance_summary","find_finance_anomalies","find_unmatched_payments","run_consistency_checks","prepare_fee_reminder","generate_report","request_approval"],
-    hr_assistant:["get_staff","get_school_profile","update_document_draft","create_task","generate_report","request_approval"],
-    reception_assistant:["search_students","get_student","get_staff","get_school_profile","create_task","send_notification"],
-    inventory_assistant:["get_inventory_summary","run_consistency_checks","generate_report","create_task","request_approval"],
-    support_assistant:["get_system_status","run_consistency_checks","generate_report","create_task","request_approval"]
+    hr_assistant:["get_staff","get_school_profile","create_document_draft","update_document_draft","create_task","generate_report","request_approval"],
+    reception_assistant:["search_students","get_student","get_staff","get_school_profile","create_document_draft","update_document_draft","create_task","send_notification"],
+    inventory_assistant:["get_inventory_summary","run_consistency_checks","create_document_draft","generate_report","create_task","request_approval"],
+    support_assistant:["get_system_status","run_consistency_checks","create_document_draft","generate_report","create_task","request_approval"]
   };
   return map[key] ?? [];
 }
 function defaultPermissions(key) {
   const map = {
-    secretary:["school:read","documents:write","tasks:write","reports:read","approvals:write"],
+    secretary:["school:read","documents:write","tasks:write","reports:read","approvals:write","notifications:send"],
     academic_assistant:["school:read","staff:read","academics:read","academics:write","documents:write","tasks:write","reports:read","approvals:write"],
-    academic_reviewer:["school:read","academics:read","documents:write","tasks:write","reports:read","approvals:write"],
+    academic_reviewer:["school:read","academics:read","tasks:write","reports:read","approvals:write"],
     finance_assistant:["students:read","fees:read","finance:read","reports:read","approvals:write"],
     hr_assistant:["staff:read","school:read","documents:write","tasks:write","reports:read","approvals:write"],
-    reception_assistant:["students:read","staff:read","school:read","tasks:write"],
-    inventory_assistant:["inventory:read","reports:read","tasks:write","approvals:write"],
-    support_assistant:["support:read","reports:read","tasks:write","approvals:write"]
+    reception_assistant:["students:read","staff:read","school:read","documents:write","tasks:write","notifications:send"],
+    inventory_assistant:["inventory:read","documents:write","reports:read","tasks:write","approvals:write"],
+    support_assistant:["support:read","documents:write","reports:read","tasks:write","approvals:write"]
   };
   return map[key] ?? [];
 }
