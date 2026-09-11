@@ -19,10 +19,7 @@ function normalizeD1Response(payload) {
     const message = first?.error || first?.errors?.map((item) => item?.message).filter(Boolean).join("; ") || "D1 query failed";
     throw new Error(message);
   }
-  return {
-    rows: Array.isArray(first.results) ? first.results : [],
-    meta: first.meta ?? {},
-  };
+  return { rows: Array.isArray(first.results) ? first.results : [], meta: first.meta ?? {} };
 }
 
 export class D1HttpSource {
@@ -39,27 +36,18 @@ export class D1HttpSource {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const response = await this.fetchImpl(
-        `${this.apiBaseUrl}/accounts/${encodeURIComponent(this.accountId)}/d1/database/${encodeURIComponent(this.databaseId)}/query`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${this.apiToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ sql, params }),
-          signal: controller.signal,
-        },
-      );
+      const response = await this.fetchImpl(`${this.apiBaseUrl}/accounts/${encodeURIComponent(this.accountId)}/d1/database/${encodeURIComponent(this.databaseId)}/query`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${this.apiToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ sql, params }), signal: controller.signal,
+      });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
         const detail = payload?.errors?.map((item) => item?.message).filter(Boolean).join("; ") || `HTTP ${response.status}`;
         throw new Error(`Cloudflare D1 query failed: ${detail}`);
       }
       return normalizeD1Response(payload);
-    } finally {
-      clearTimeout(timer);
-    }
+    } finally { clearTimeout(timer); }
   }
 
   async tableExists(table) {
@@ -72,12 +60,22 @@ export class D1HttpSource {
     return Number(result.rows[0]?.count ?? 0);
   }
 
+  async snapshot(table, { columns = [] } = {}) {
+    const hasUpdatedAt = columns.includes("updated_at");
+    const updatedProjection = hasUpdatedAt ? ", MAX(\"updated_at\") AS max_updated_at" : "";
+    const result = await this.query(`SELECT COUNT(*) AS count, COALESCE(MAX(rowid),0) AS max_rowid, COALESCE(SUM(rowid),0) AS rowid_sum${updatedProjection} FROM ${safeIdentifier(table, "table")}`);
+    const row = result.rows[0] ?? {};
+    return {
+      count: Number(row.count ?? 0),
+      maxRowid: Number(row.max_rowid ?? 0),
+      rowidSum: Number(row.rowid_sum ?? 0),
+      ...(hasUpdatedAt ? { maxUpdatedAt: row.max_updated_at ?? null } : {}),
+    };
+  }
+
   async batch(table, { columns, afterRowid = 0, limit = 500 }) {
     const names = columns.map((column) => safeIdentifier(column, "column")).join(", ");
-    const result = await this.query(
-      `SELECT rowid AS __ledgerly_rowid, ${names} FROM ${safeIdentifier(table, "table")} WHERE rowid > ? ORDER BY rowid ASC LIMIT ?`,
-      [afterRowid, limit],
-    );
+    const result = await this.query(`SELECT rowid AS __ledgerly_rowid, ${names} FROM ${safeIdentifier(table, "table")} WHERE rowid > ? ORDER BY rowid ASC LIMIT ?`, [afterRowid, limit]);
     return result.rows;
   }
 }

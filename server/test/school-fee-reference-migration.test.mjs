@@ -1,0 +1,6 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { SCHOOL_FEE_REFERENCE_TABLES } from "../src/migration/school-fee-reference-manifest.mjs";
+import { getMigrationPhase } from "../src/migration/phases.mjs";
+test("school configuration includes non-transactional fee references",()=>{const names=getMigrationPhase("school-configuration").tables.map(x=>x.name);for(const name of ["school_fee_accounting_settings","school_fee_structures","school_fee_structure_lines","school_fee_discount_schemes"])assert.ok(names.includes(name),name);for(const transactional of ["school_student_fee_charges","school_fee_receipts","school_fee_payment_plans","school_fee_billing_batches"])assert.equal(names.includes(transactional),false,transactional);});
+test("fee reference transforms convert D1 flags and preserve ids",()=>{const settings=SCHOOL_FEE_REFERENCE_TABLES.find(x=>x.name==="school_fee_accounting_settings").transform({organization_id:"org",auto_post_invoices:1,auto_post_receipts:0});assert.equal(settings.auto_post_invoices,true);assert.equal(settings.auto_post_receipts,false);const line=SCHOOL_FEE_REFERENCE_TABLES.find(x=>x.name==="school_fee_structure_lines").transform({id:"line-7",organization_id:"org",mandatory:1,refundable:0});assert.equal(line.id,"line-7");assert.equal(line.mandatory,true);assert.equal(line.refundable,false);});

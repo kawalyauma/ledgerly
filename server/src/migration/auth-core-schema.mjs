@@ -12,7 +12,6 @@ export async function ensureAuthCoreSchema(database) {
       updated_at timestamptz NOT NULL DEFAULT now(),
       branding_json text NOT NULL DEFAULT '{}'
     );
-
     CREATE TABLE IF NOT EXISTS users (
       id text PRIMARY KEY,
       email text NOT NULL UNIQUE,
@@ -23,7 +22,6 @@ export async function ensureAuthCoreSchema(database) {
       updated_at timestamptz NOT NULL DEFAULT now(),
       email_verified_at timestamptz
     );
-
     CREATE TABLE IF NOT EXISTS memberships (
       organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
       user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -33,7 +31,6 @@ export async function ensureAuthCoreSchema(database) {
       updated_at timestamptz NOT NULL DEFAULT now(),
       PRIMARY KEY (organization_id,user_id)
     );
-
     CREATE TABLE IF NOT EXISTS accounts (
       id text PRIMARY KEY,
       organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -50,7 +47,6 @@ export async function ensureAuthCoreSchema(database) {
       UNIQUE (organization_id,code)
     );
     CREATE INDEX IF NOT EXISTS accounts_org_type_idx ON accounts (organization_id,type);
-
     CREATE TABLE IF NOT EXISTS api_keys (
       id text PRIMARY KEY,
       organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -66,7 +62,6 @@ export async function ensureAuthCoreSchema(database) {
       updated_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS api_keys_org_idx ON api_keys (organization_id);
-
     CREATE TABLE IF NOT EXISTS sessions (
       id text PRIMARY KEY,
       user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -80,7 +75,6 @@ export async function ensureAuthCoreSchema(database) {
       updated_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id,expires_at);
-
     CREATE TABLE IF NOT EXISTS school_user_profiles (
       organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
       user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -100,12 +94,15 @@ export async function ensureAuthCoreSchema(database) {
       created_by text REFERENCES users(id) ON DELETE SET NULL,
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now(),
+      profile_photo_file_id text,
+      signature_file_id text,
       PRIMARY KEY (organization_id,user_id),
       UNIQUE (organization_id,username),
       UNIQUE (organization_id,phone),
       UNIQUE (organization_id,staff_number)
     );
-
+    ALTER TABLE school_user_profiles ADD COLUMN IF NOT EXISTS profile_photo_file_id text;
+    ALTER TABLE school_user_profiles ADD COLUMN IF NOT EXISTS signature_file_id text;
     CREATE TABLE IF NOT EXISTS school_login_aliases (
       id text PRIMARY KEY,
       organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -117,7 +114,6 @@ export async function ensureAuthCoreSchema(database) {
       UNIQUE (organization_id,alias_type,alias_normalized)
     );
     CREATE INDEX IF NOT EXISTS school_login_alias_user_idx ON school_login_aliases (user_id,organization_id);
-
     CREATE TABLE IF NOT EXISTS school_user_mfa (
       organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
       user_id text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -130,7 +126,6 @@ export async function ensureAuthCoreSchema(database) {
       updated_at timestamptz NOT NULL DEFAULT now(),
       PRIMARY KEY (organization_id,user_id,method)
     );
-
     CREATE TABLE IF NOT EXISTS school_login_events (
       id text PRIMARY KEY,
       organization_id text REFERENCES organizations(id) ON DELETE CASCADE,

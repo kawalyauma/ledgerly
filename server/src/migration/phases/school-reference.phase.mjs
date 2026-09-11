@@ -11,6 +11,8 @@ export default {
   ensureSchema: async (database) => {
     await ensureAuthCoreSchema(database);
     await ensureSchoolReferenceSchema(database);
+    // D1 0010 extends the profile after the original school-reference DDL.
+    await database.query(`ALTER TABLE school_profiles ADD COLUMN IF NOT EXISTS logo_file_id text`);
   },
   finalizeSchema: finalizeSchoolReferenceSchema,
   relationshipChecks: SCHOOL_REFERENCE_RELATIONSHIP_CHECKS,
