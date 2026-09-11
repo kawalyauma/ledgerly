@@ -1,0 +1,10 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { ACADEMICS_TABLES } from "../src/migration/academics-manifest.mjs";
+import { getMigrationPhase } from "../src/migration/phases.mjs";
+import { finalizeAcademicsSchema } from "../src/migration/academics-schema.mjs";
+const names=()=>ACADEMICS_TABLES.map(x=>x.name);
+test("academics dependency graph follows school, staff and attendance",()=>{const phase=getMigrationPhase("academics");assert.deepEqual(phase.prerequisites,["auth-core","school-reference","school-configuration","school-people","school-staff","attendance"]);assert.ok(names().indexOf("acad_schemes")<names().indexOf("acad_scheme_items"));assert.ok(names().indexOf("acad_timetables")<names().indexOf("acad_timetable_entries"));assert.ok(names().indexOf("acad_lesson_plans")<names().indexOf("acad_lesson_deliveries"));});
+test("academics transforms preserve IDs and boolean flags",()=>{const room=ACADEMICS_TABLES.find(x=>x.name==="acad_rooms").transform({id:"room-1",organization_id:"org",active:0});assert.equal(room.id,"room-1");assert.equal(room.active,false);const entry=ACADEMICS_TABLES.find(x=>x.name==="acad_timetable_entries").transform({id:"entry-1",organization_id:"org",active:1});assert.equal(entry.active,true);});
+test("later attendance alteration is part of final academics shape",()=>{const delivery=ACADEMICS_TABLES.find(x=>x.name==="acad_lesson_deliveries");assert.ok(delivery.columns.includes("canonical_attendance_session_id"));});
+test("self referencing observation FK is finalized after copy",async()=>{const sql=[];await finalizeAcademicsSchema({async query(text){sql.push(text);return{rows:[]};}});assert.match(sql[0],/acad_observations_followup_fk/);});
