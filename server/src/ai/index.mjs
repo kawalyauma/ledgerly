@@ -30,7 +30,13 @@ export async function createAiWorkforce({services,config={},authorization,tenant
  const internalTools={
    createLessonPlanDraft:async({input,context,agent,taskId})=>documents.createAiDraft({context,agent,taskId,type:"lesson_plan",title:input.title??"Lesson Plan Draft",content:input.content??input,reason:context.reason}),
    updateDocumentDraft:async({input,context,agent,taskId})=>documents.reviseAi({context,agent,taskId,documentId:input.documentId,content:input.content,reason:context.reason}),
-   createTask:async({input,context})=>tasks.create({context,assignedAgent:input.assignedAgent,instruction:input.instruction,priority:input.priority,inputReferences:input.inputReferences,idempotencyKey:input.idempotencyKey}),
+   createTask:async({input,context,agent,taskId})=>{
+     if(!taskId)throw new Error("AI delegation requires a parent task");
+     const parent=(await services.database.query(`SELECT * FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[taskId,context.organizationId])).rows[0];
+     if(!parent)throw new Error("AI delegation parent task not found");
+     if(parent.requested_by!==context.userId)throw new Error("AI delegation requester attribution mismatch");
+     return tasks.handoff({context,task:parent,fromAgent:agent,toAgent:input.assignedAgent,instruction:input.instruction});
+   },
    requestApproval:async({input,context,agent,taskId})=>approvals.request({organizationId:context.organizationId,agent,taskId,action:input.action??"document_approval",reason:input.reason??context.reason,payload:input.payload??{},riskLevel:input.riskLevel??"medium",requestedApprover:input.requestedApprover??null}),
    recordAcademicReview:async({input,context,agent,taskId})=>academic.recordReview({context,agent,taskId,documentId:input.documentId,recommendation:input.recommendation,findings:input.findings??[],sourceReferences:input.sourceReferences??[]}),
  };
