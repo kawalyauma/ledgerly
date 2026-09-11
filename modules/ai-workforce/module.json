@@ -1,0 +1,34 @@
+{
+  "key": "ai-workforce",
+  "name": "AI Workforce",
+  "version": "1.0.0",
+  "description": "Local, permissioned AI employees for Ledgerly tasks, approvals, documents, organizational knowledge, memory, schedules, activity and audit.",
+  "category": "platform",
+  "core": false,
+  "active": true,
+  "manifest": {
+    "standalone": true,
+    "requiresModules": [],
+    "requiresDataFrom": [],
+    "sharedCore": [
+      "organizations",
+      "users",
+      "ledgerly_meta.audit_events"
+    ],
+    "features": [
+      "ai-employees",
+      "role-tool-permissions",
+      "durable-tasks",
+      "human-approvals",
+      "structured-documents",
+      "document-provenance",
+      "local-pdf-rendering",
+      "organizational-knowledge",
+      "durable-memory",
+      "recurring-schedules",
+      "activity",
+      "durable-audit",
+      "runtime-health-settings"
+    ]
+  }
+}
