@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { createPostgresDatabase } from "../adapters/postgres-database.mjs";
 import { D1HttpSource } from "./d1-source.mjs";
+import { listMigrationPhases } from "./phases.mjs";
 import { D1MigrationRunner } from "./runner.mjs";
-import { AUTH_CORE_TABLES } from "./auth-core-manifest.mjs";
 
 function required(name) {
   const value = process.env[name];
@@ -13,6 +13,14 @@ function required(name) {
 function int(name, fallback) {
   const value = Number.parseInt(process.env[name] ?? String(fallback), 10);
   if (!Number.isInteger(value) || value < 1) throw new Error(`${name} must be a positive integer`);
+  return value;
+}
+
+function option(args, name) {
+  const index = args.indexOf(name);
+  if (index < 0) return null;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) throw new Error(`${name} requires a value`);
   return value;
 }
 
@@ -33,7 +41,14 @@ function databaseConfig() {
 }
 
 async function main() {
-  const command = process.argv[2] ?? "plan";
+  const args = process.argv.slice(2);
+  const command = args[0] ?? "plan";
+  if (command === "phases") {
+    console.log(JSON.stringify(listMigrationPhases(), null, 2));
+    return;
+  }
+
+  const phaseName = option(args, "--phase") || process.env.LEDGERLY_MIGRATION_PHASE || "auth-core";
   const accountId = required("CLOUDFLARE_ACCOUNT_ID");
   const databaseId = required("CLOUDFLARE_D1_DATABASE_ID");
   const source = new D1HttpSource({
@@ -48,22 +63,23 @@ async function main() {
     database,
     source,
     sourceIdentity: `d1:${accountId}:${databaseId}`,
+    phase: phaseName,
     batchSize: int("LEDGERLY_D1_MIGRATION_BATCH_SIZE", 250),
   });
 
   try {
     if (command === "plan") {
-      console.log(JSON.stringify(await runner.plan(AUTH_CORE_TABLES), null, 2));
+      console.log(JSON.stringify(await runner.plan(), null, 2));
       return;
     }
     if (command === "run") {
-      const fresh = process.argv.includes("--fresh");
+      const fresh = args.includes("--fresh");
       console.log(JSON.stringify(await runner.run({ resume: !fresh }), null, 2));
       return;
     }
     if (command === "validate") {
-      const runId = process.argv[3] || process.env.LEDGERLY_MIGRATION_RUN_ID;
-      if (!runId) throw new Error("validate requires a run ID: migration:validate -- <run-id>");
+      const runId = args[1] && !args[1].startsWith("--") ? args[1] : process.env.LEDGERLY_MIGRATION_RUN_ID;
+      if (!runId) throw new Error("validate requires a run ID: validate <run-id> --phase <phase>");
       console.log(JSON.stringify(await runner.validate({ runId }), null, 2));
       return;
     }
