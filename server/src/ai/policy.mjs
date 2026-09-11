@@ -15,11 +15,13 @@ export function evaluateToolPolicy({ agent, tool, context, input }) {
   const granted = new Set(context.permissions ?? []);
   for (const permission of requiredPermissions) if (!granted.has(permission) && !granted.has("*")) throw new AiPolicyError("AI_PERMISSION_DENIED", `Missing permission: ${permission}`);
   if (PROHIBITED_DIRECT_TOOLS.has(tool.name) && !tool.approvalRequired) throw new AiPolicyError("AI_PROHIBITED_DIRECT_ACTION", `${tool.name} cannot be executed without an approval policy`);
-  const autonomy = Number(agent.autonomyLevel ?? AUTONOMY_LEVELS.ASSISTANT);
   if (tool.risk === "prohibited") throw new AiPolicyError("AI_ACTION_PROHIBITED", `${tool.name} is prohibited for AI execution`);
+  const autonomy = Number(agent.autonomyLevel ?? AUTONOMY_LEVELS.ASSISTANT);
+  if (tool.consequential && autonomy === AUTONOMY_LEVELS.ADVISER) {
+    return { decision:"draft_only", risk:tool.risk ?? "medium", reason:"Adviser autonomy may only recommend and cannot request execution approval" };
+  }
   if (tool.approvalRequired || tool.risk === "high" || (tool.consequential && autonomy < AUTONOMY_LEVELS.AUTONOMOUS)) {
     return { decision:"approval_required", risk:tool.risk ?? "medium", reason:"Consequential AI action requires human approval", input };
   }
-  if (tool.consequential && autonomy === AUTONOMY_LEVELS.ADVISER) return { decision:"draft_only", risk:tool.risk ?? "medium", reason:"Adviser autonomy may only recommend" };
   return { decision:"allow", risk:tool.risk ?? "low" };
 }
