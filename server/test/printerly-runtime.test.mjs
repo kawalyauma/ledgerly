@@ -29,6 +29,31 @@ test('createJob returns an existing self-host request without mutating state',as
   assert.equal(result.alreadyCreated,true);assert.equal(queries.length,1);
 });
 
+test('secure release issuer uses injected six-digit cryptographic pin source and stores only digests',async()=>{
+  const writes=[];
+  const tx={query:async(sql,args=[])=>{
+    writes.push([sql,args]);
+    if(sql.includes('SELECT id,status,secure_release'))return {rows:[{id:'j1',status:'held',secure_release:true}],rowCount:1};
+    return {rows:[],rowCount:1};
+  }};
+  const database={transaction:async fn=>fn(tx)};
+  const service=new PrinterlyRuntimeService({database,digest:value=>`digest:${value}`,randomPin:()=> '004321',randomToken:()=> 'token-secret'});
+  const result=await service.issueReleaseCredential({organizationId:'o1',userId:'u1',jobId:'j1'});
+  assert.equal(result.pin,'004321');
+  assert.equal(result.token,'token-secret');
+  const insert=writes.find(([sql])=>sql.includes('INSERT INTO prn_release_credentials'));
+  assert.ok(insert);
+  assert.equal(insert[1][4],'digest:004321');
+  assert.equal(insert[1][5],'digest:token-secret');
+  assert.equal(JSON.stringify(writes).includes('"004321"'),false,'clear PIN must not be persisted as a query argument');
+});
+
+test('secure release issuer rejects malformed pin providers',async()=>{
+  const database={transaction:async()=>{throw new Error('transaction should not run for malformed pin');}};
+  const service=new PrinterlyRuntimeService({database,randomPin:()=> '12345'});
+  await assert.rejects(()=>service.issueReleaseCredential({organizationId:'o1',userId:'u1',jobId:'j1'}),/six-digit/);
+});
+
 test('dispatch worker preserves an outbox row for retry when Redis is unavailable',async()=>{
   let claimed=false;const writes=[];
   const database={
