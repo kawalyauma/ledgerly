@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 const MAX_BODY_BYTES=1_000_000;
+const OFFICIAL_DOCUMENT_STATUSES=new Set(["approved","published"]);
 const json=(status,body)=>({status,body});
 const agentIdFor=(org,key)=>`ai_${createHash("sha256").update(`${org}:${key}`).digest("hex").slice(0,24)}`;
 
@@ -30,7 +31,7 @@ async function delegatedApprovalContext(runtime,ctx,approval,agent){
  let requesterScopes=ctx.permissions;
  if(approval.task_id){
   const task=(await runtime.services.database.query(`SELECT requested_by FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[approval.task_id,ctx.organizationId])).rows[0];
-  if(!task?.requested_by)throw new Error("approval task has no attributable requester");
+  if(!task?.requested_by){const error=new Error("approval task has no attributable requester");error.code="BACKGROUND_ACTOR_REVOKED";throw error;}
   const requester=await runtime.authorization.resolveCurrentActorAccess({organizationId:ctx.organizationId,actorId:task.requested_by});
   requesterScopes=requester.effectiveScopes;
  }
@@ -75,13 +76,18 @@ export async function handleAiRequest({request,url,runtime}){
   }
   if(method==="POST"&&parts[2]==="execute"){
    runtime.auth.requireScope(principal,"ai:approve");
-   const approval=await runtime.ai.approvals.get({context:ctx,approvalId:parts[1]});if(!approval)return json(404,{error:{code:"AI_APPROVAL_NOT_FOUND",message:"Approval not found"}});
-   const agent=await runtime.ai.agents.get(ctx,approval.agent_id);if(!agent)return json(409,{error:{code:"AI_APPROVAL_AGENT_MISSING",message:"Approval agent no longer exists"}});
-   const executionContext=await delegatedApprovalContext(runtime,ctx,approval,agent);
-   const execution=await runtime.ai.gateway.executeApproved({approval,agent,context:executionContext});
-   const saved=await runtime.ai.approvals.markExecuted({context:ctx,approvalId:parts[1],result:execution.output});
-   if(approval.task_id)await runtime.ai.tasks.setStatus({organizationId:ctx.organizationId,taskId:approval.task_id,status:"completed",agent,outputReferences:[{type:"approved_action",approvalId:approval.approval_id,result:execution.output}]});
-   return json(200,{approval:saved,execution});
+   const claimed=await runtime.ai.approvals.claimExecution({context:ctx,approvalId:parts[1]});
+   try{
+    const agent=await runtime.ai.agents.get(ctx,claimed.agent_id);if(!agent){const error=new Error("Approval agent no longer exists");error.status=409;error.code="AI_APPROVAL_AGENT_MISSING";throw error;}
+    const executionContext=await delegatedApprovalContext(runtime,ctx,claimed,agent);
+    const execution=await runtime.ai.gateway.executeApproved({approval:claimed,agent,context:executionContext});
+    const saved=await runtime.ai.approvals.markExecuted({context:ctx,approvalId:parts[1],result:execution.output});
+    if(claimed.task_id)await runtime.ai.tasks.setStatus({organizationId:ctx.organizationId,taskId:claimed.task_id,status:"completed",agent,outputReferences:[{type:"approved_action",approvalId:claimed.approval_id,result:execution.output}]});
+    return json(200,{approval:saved,execution});
+   }catch(error){
+    await runtime.ai.approvals.markExecutionFailed({context:ctx,approvalId:parts[1],error}).catch(()=>undefined);
+    throw error;
+   }
   }
  }
 
@@ -89,7 +95,11 @@ export async function handleAiRequest({request,url,runtime}){
   if(method==="GET"&&parts.length===1){const result=await db.query(`SELECT * FROM ledgerly_ai.documents WHERE organization_id=$1 ORDER BY updated_at DESC LIMIT 200`,[ctx.organizationId]);return json(200,{items:result.rows});}
   if(method==="GET"&&parts.length===2){const result=await db.query(`SELECT * FROM ledgerly_ai.documents WHERE document_id=$1 AND organization_id=$2`,[parts[1],ctx.organizationId]);return result.rows[0]?json(200,result.rows[0]):json(404,{error:{code:"AI_DOCUMENT_NOT_FOUND",message:"Document not found"}});}
   if(method==="PATCH"&&parts.length===2){const input=await body(request);return json(200,await runtime.ai.documents.reviseHuman({context:ctx,documentId:parts[1],content:input.content,reason:input.reason??null}));}
-  if(method==="POST"&&parts[2]==="status"){const input=await body(request);return json(200,await runtime.ai.documents.setStatus({context:ctx,documentId:parts[1],status:input.status,reason:input.reason??null}));}
+  if(method==="POST"&&parts[2]==="status"){
+   const input=await body(request),status=String(input.status??"");
+   if(OFFICIAL_DOCUMENT_STATUSES.has(status))runtime.auth.requireScope(principal,"ai:approve");
+   return json(200,await runtime.ai.documents.setStatus({context:ctx,documentId:parts[1],status,reason:input.reason??null,officialApproval:OFFICIAL_DOCUMENT_STATUSES.has(status)}));
+  }
   if(method==="POST"&&parts[2]==="render")return json(200,await runtime.ai.documents.renderPdf({context:ctx,documentId:parts[1]}));
   if(method==="GET"&&parts[2]==="history"){const result=await db.query(`SELECT * FROM ledgerly_ai.document_versions WHERE document_id=$1 AND organization_id=$2 ORDER BY version DESC`,[parts[1],ctx.organizationId]);return json(200,{items:result.rows});}
  }
@@ -122,6 +132,6 @@ export async function handleAiRequest({request,url,runtime}){
  }
  if(parts[0]==="activity"&&method==="GET"){const result=await db.query(`SELECT * FROM ledgerly_ai.activity WHERE organization_id=$1 ORDER BY occurred_at DESC LIMIT 300`,[ctx.organizationId]);return json(200,{items:result.rows});}
  if(parts[0]==="audit"&&method==="GET"){const result=await db.query(`SELECT * FROM ledgerly_meta.audit_events WHERE organization_id=$1 AND (action LIKE 'ai.%' OR actor_type='ai_agent') ORDER BY occurred_at DESC LIMIT 300`,[ctx.organizationId]);return json(200,{items:result.rows});}
- if(parts[0]==="settings"&&method==="GET")return json(200,{provider:{provider:runtime.ai.config.providerConfig?.provider??runtime.ai.health?.provider,endpoint:runtime.ai.config.providerConfig?.endpoint,model:runtime.ai.config.providerConfig?.model},limits:runtime.ai.config.limits,knowledge:runtime.ai.storeCapabilities});
+ if(parts[0]==="settings"&&method==="GET")return json(200,{provider:{provider:runtime.ai.config.provider,endpoint:runtime.ai.config.providerConfig?.endpoint,model:runtime.ai.config.providerConfig?.model},limits:runtime.ai.config.limits,knowledge:runtime.ai.storeCapabilities});
  return json(404,{error:{code:"AI_ROUTE_NOT_FOUND",message:"AI Workforce route not found"}});
 }
