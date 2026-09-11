@@ -12,7 +12,10 @@
     "migration:plan": "node src/migration/cli.mjs plan",
     "migration:run": "node src/migration/cli.mjs run",
     "migration:validate": "node src/migration/cli.mjs validate",
-    "migration:rehearsal": "node src/migration/rehearsal-cli.mjs"
+    "migration:rehearsal": "node src/migration/rehearsal-cli.mjs",
+    "readiness:cutover": "node src/readiness/readiness-cli.mjs cutover",
+    "readiness:migration": "node src/readiness/readiness-cli.mjs migration",
+    "readiness:load": "node scripts/load-smoke.mjs"
   },
   "dependencies": {
     "cron-parser": "5.10.0",
