@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { AiToolGateway } from "../src/ai/tool-gateway.mjs";
 import { AiTaskService } from "../src/ai/services.mjs";
+import { AiAcademicService } from "../src/ai/academic-service.mjs";
 
 const agent={agentId:"finance-1",name:"Amina",role:"Finance Assistant",status:"active",autonomyLevel:1,permissions:["finance:read"],allowedTools:["get_finance_summary","post_payment"]};
 
@@ -27,4 +28,19 @@ test("task creation uses durable Ledgerly job envelope and idempotency",async()=
   assert.equal(jobs[0].organizationId,"org-a");
   assert.equal(jobs[0].payload.taskId,created.task_id);
   assert.match(jobs[0].idempotencyKey,/^ai:/);
+});
+
+test("academic HTTP contract delegates requestDraft and requestReview to durable tasks",async()=>{
+  const created=[];
+  const tasks={create:async(input)=>{created.push(input);return {task_id:`t-${created.length}`};}};
+  const database={query:async()=>({rows:[{document_id:"doc-1",status:"draft",type:"lesson_plan"}]})};
+  const academic=new AiAcademicService({database,tasks,documents:{},audit:{write:async()=>{}}});
+  const context={organizationId:"org-a",userId:"user-1"};
+  const draft=await academic.requestDraft({context,agentId:"academic-1",instruction:"Draft P3 weather lesson",academicContext:{lessonPlanId:"lp-1"}});
+  const review=await academic.requestReview({context,reviewerAgentId:"reviewer-1",documentId:"doc-1"});
+  assert.equal(draft.task_id,"t-1");
+  assert.equal(review.task_id,"t-2");
+  assert.equal(created[0].assignedAgent,"academic-1");
+  assert.equal(created[1].assignedAgent,"reviewer-1");
+  assert.equal(created[1].inputReferences[0].id,"doc-1");
 });
