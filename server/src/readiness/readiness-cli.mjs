@@ -1,6 +1,8 @@
 #!/usr/bin/env node
+import { resolve } from "node:path";
 import { createPostgresDatabase } from "../adapters/postgres-database.mjs";
 import { assessBackupFreshness, assessMigrationCutoverReadiness, probeSelfhostReadiness } from "./cutover-readiness.mjs";
+import { assessRepositoryExposure } from "./security-exposure.mjs";
 
 function required(name) {
   const value = process.env[name];
@@ -42,6 +44,12 @@ function selectedPhases() {
   return String(process.env.LEDGERLY_READINESS_PHASES ?? "").split(",").map((value) => value.trim()).filter(Boolean);
 }
 
+function repositoryRoot() {
+  return process.env.LEDGERLY_REPOSITORY_ROOT
+    ? resolve(process.env.LEDGERLY_REPOSITORY_ROOT)
+    : resolve(process.cwd(), "..");
+}
+
 async function main() {
   const command = process.argv[2] ?? "cutover";
   const accountId = required("CLOUDFLARE_ACCOUNT_ID");
@@ -58,14 +66,15 @@ async function main() {
     }
     if (command !== "cutover") throw new Error(`Unknown readiness command: ${command}`);
 
-    const [runtime, backups] = await Promise.all([
+    const [runtime, backups, security] = await Promise.all([
       probeSelfhostReadiness(required("LEDGERLY_SELFHOST_BASE_URL"), { timeoutMs: int("LEDGERLY_READINESS_HTTP_TIMEOUT_MS", 5000) }),
       assessBackupFreshness({
         root: required("LEDGERLY_BACKUP_ROOT"),
         maxAgeHours: int("LEDGERLY_BACKUP_MAX_AGE_HOURS", 26),
       }),
+      assessRepositoryExposure({ root: repositoryRoot() }),
     ]);
-    const checks = { migration, runtime, backups };
+    const checks = { migration, runtime, backups, security };
     const ok = Object.values(checks).every((check) => check.ok === true);
     console.log(JSON.stringify({ ok, checkedAt: new Date().toISOString(), checks }, null, 2));
     if (!ok) process.exitCode = 2;
