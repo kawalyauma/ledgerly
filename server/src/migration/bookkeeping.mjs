@@ -46,6 +46,28 @@ export async function ensureMigrationMetadata(database) {
   await database.query("CREATE INDEX IF NOT EXISTS migration_validations_run_idx ON ledgerly_meta.migration_validations (run_id, status, table_name)");
 }
 
+export async function assertMigrationPrerequisites(database, { sourceIdentity, prerequisites = [] }) {
+  const required = [...new Set(prerequisites.filter(Boolean))];
+  if (required.length === 0) return { ok: true, completed: [], missing: [] };
+
+  const result = await database.query(
+    `SELECT phase
+     FROM ledgerly_meta.migration_runs
+     WHERE source_kind='cloudflare-d1'
+       AND source_identity=$1
+       AND status='completed'
+       AND phase = ANY($2::text[])
+     GROUP BY phase`,
+    [sourceIdentity, required],
+  );
+  const completed = new Set(result.rows.map((row) => row.phase));
+  const missing = required.filter((phase) => !completed.has(phase));
+  if (missing.length > 0) {
+    throw new Error(`Migration phase prerequisites not completed for ${sourceIdentity}: ${missing.join(", ")}`);
+  }
+  return { ok: true, completed: required, missing: [] };
+}
+
 export async function createMigrationRun(database, { sourceIdentity, phase = "auth-core", metadata = {} }) {
   const id = randomUUID();
   await database.query(
