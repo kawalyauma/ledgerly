@@ -11,7 +11,7 @@ for _,raw in ipairs(rows) do if redis.call('ZREM',KEYS[1],raw)==1 then redis.cal
 return moved`;
 const CLAIM_SCRIPT = `-- ledgerly:claim
 local raw=redis.call('RPOP',KEYS[1]);if not raw then return false end
-local record='v1:'..ARGV[2]..'\n'..raw
+local record='v1:'..ARGV[2]..':'..raw
 redis.call('LPUSH',KEYS[2],record);redis.call('ZADD',KEYS[3],ARGV[1],record);return record`;
 const RENEW_SCRIPT = `-- ledgerly:renew
 if not redis.call('LPOS',KEYS[1],ARGV[1]) then return 0 end
@@ -31,7 +31,7 @@ redis.call('ZREM',KEYS[2],ARGV[1]);redis.call('LPUSH',KEYS[3],ARGV[2]);return 1`
 function requireJob(job){if(!job||typeof job!=="object"||typeof job.jobId!=="string"||!job.jobId.trim())throw new TypeError("queue expects a Ledgerly job envelope");return job;}
 function encodeReceipt(record){return Buffer.from(record,"utf8").toString("base64url");}
 function decodeReceipt(receipt){if(typeof receipt!=="string"||!receipt)throw new TypeError("receipt is required");return Buffer.from(receipt,"base64url").toString("utf8");}
-function unpackRecord(record){if(record.startsWith("v1:")){const split=record.indexOf("\n");if(split>3)return{record,raw:record.slice(split+1),legacy:false};}return{record,raw:record,legacy:true};}
+function unpackRecord(record){if(record.startsWith("v1:")){const colon=record.indexOf(":",3),newline=record.indexOf("\n",3),split=newline>3&&(colon<0||newline<colon)?newline:colon;if(split>3)return{record,raw:record.slice(split+1),legacy:false};}return{record,raw:record,legacy:true};}
 function dateScore(value,name){if(value==null)return null;const score=(value instanceof Date?value:new Date(value)).getTime();if(!Number.isFinite(score))throw new TypeError(`${name} must be a valid date`);return score;}
 function bounded(value,fallback,max=1000){return Math.max(1,Math.min(Number(value)||fallback,max));}
 
