@@ -158,12 +158,12 @@ function defaultTools(key) {
   const map = {
     secretary:["get_school_profile","update_document_draft","create_task","send_notification","generate_report","request_approval"],
     academic_assistant:["get_school_profile","get_staff","get_academic_context","get_lesson_plan","create_lesson_plan_draft","update_document_draft","create_task","generate_report","request_approval"],
-    academic_reviewer:["get_school_profile","get_academic_context","get_lesson_plan","update_document_draft","create_task","generate_report","request_approval"],
-    finance_assistant:["get_student","get_student_balance","get_finance_summary","prepare_fee_reminder","generate_report","request_approval"],
+    academic_reviewer:["get_school_profile","get_academic_context","get_lesson_plan","record_academic_review","update_document_draft","create_task","generate_report","request_approval"],
+    finance_assistant:["get_student","get_student_balance","get_finance_summary","find_finance_anomalies","find_unmatched_payments","run_consistency_checks","prepare_fee_reminder","generate_report","request_approval"],
     hr_assistant:["get_staff","get_school_profile","update_document_draft","create_task","generate_report","request_approval"],
     reception_assistant:["search_students","get_student","get_staff","get_school_profile","create_task","send_notification"],
-    inventory_assistant:["generate_report","create_task","request_approval"],
-    support_assistant:["generate_report","create_task","request_approval"]
+    inventory_assistant:["get_inventory_summary","run_consistency_checks","generate_report","create_task","request_approval"],
+    support_assistant:["get_system_status","run_consistency_checks","generate_report","create_task","request_approval"]
   };
   return map[key] ?? [];
 }
