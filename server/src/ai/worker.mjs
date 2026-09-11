@@ -34,15 +34,19 @@ export class AiWorker {
         await this.queue.ack(item.receipt);
         return {scheduled:true,taskId:scheduled.task_id};
       }
-      await this.execute(item.job);
+      const outcome=await this.execute(item.job);
       await this.queue.ack(item.receipt);
-      this.#lastSuccessAt=new Date().toISOString();
-      return {completed:true,jobId:item.job.jobId};
+      if(outcome?.text!=null)this.#lastSuccessAt=new Date().toISOString();
+      return outcome?.skipped||outcome?.blocked?outcome:{completed:true,jobId:item.job.jobId,...outcome};
     } catch (error) {
       const taskId=item.job.payload?.taskId??item.job.jobId;
-      const nonRetryable=["AI_AGENT_DISABLED","AI_TOOL_NOT_ALLOWED","AI_PERMISSION_DENIED","AI_ACTION_PROHIBITED","AI_MODEL_NOT_CONFIGURED","AI_MODEL_NOT_INSTALLED","BACKGROUND_ACTOR_REVOKED","BACKGROUND_ACTOR_BLOCKED"].includes(error?.code);
+      if(error?.code==="AI_TASK_STATE_CONFLICT"){
+        await this.queue.ack(item.receipt).catch(()=>undefined);
+        return {skipped:true,reason:"task_state_changed",taskId};
+      }
+      const nonRetryable=["AI_TASK_NOT_FOUND","AI_AGENT_NOT_FOUND","AI_AGENT_DISABLED","AI_TOOL_NOT_ALLOWED","AI_PERMISSION_DENIED","AI_ACTION_PROHIBITED","AI_MODEL_NOT_CONFIGURED","AI_MODEL_NOT_INSTALLED","BACKGROUND_ACTOR_REVOKED","BACKGROUND_ACTOR_BLOCKED"].includes(error?.code);
       if (!item.job.payload?.aiScheduled) {
-        await this.taskService.setStatus({organizationId:item.job.organizationId,taskId,status:nonRetryable?"failed":"queued",error:error instanceof Error?error.message:String(error)}).catch(()=>undefined);
+        await this.taskService.setStatus({organizationId:item.job.organizationId,taskId,status:nonRetryable?"failed":"queued",error:error instanceof Error?error.message:String(error),expectedStatuses:["queued","working"]}).catch(()=>undefined);
       }
       if (nonRetryable) await this.queue.deadLetter(item.receipt,{reason:error?.code??"policy_failure"});
       else await this.queue.retry(item.receipt,{reason:error instanceof Error?error.message:String(error)});
@@ -57,6 +61,9 @@ export class AiWorker {
     const payload=job.payload;
     if (!payload.requestedBy) { const error=new Error("Scheduled AI task has no authorizing actor"); error.code="BACKGROUND_ACTOR_REVOKED"; throw error; }
     await this.#resolveAuthority(job.organizationId,payload.requestedBy);
+    const agent=await this.agents.get({organizationId:job.organizationId},payload.assignedAgent);
+    if(!agent){const error=new Error("Scheduled AI employee no longer exists");error.code="AI_AGENT_NOT_FOUND";throw error;}
+    if(agent.status!=="active"){const error=new Error(`Scheduled AI employee is ${agent.status}`);error.code=agent.status==="disabled"?"AI_AGENT_DISABLED":"AI_AGENT_PAUSED";throw error;}
     const context={organizationId:job.organizationId,userId:payload.requestedBy,userName:payload.requestedBy};
     return this.taskService.create({
       context,
@@ -73,24 +80,31 @@ export class AiWorker {
     return this.authorization.resolveCurrentActorAccess({organizationId,actorId});
   }
 
+  async #taskStatus(organizationId,taskId){const result=await this.database.query(`SELECT status FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[taskId,organizationId]);return result.rows[0]?.status??null;}
+  async #stillWorking(organizationId,taskId){return (await this.#taskStatus(organizationId,taskId))==="working";}
+
   async execute(job) {
     const org=job.organizationId;
     const taskId=job.payload?.taskId??job.jobId;
-    const task=(await this.database.query(`SELECT * FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[taskId,org])).rows[0];
-    if (!task) throw new Error("AI task not found");
+    let task=(await this.database.query(`SELECT * FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[taskId,org])).rows[0];
+    if (!task) { const error=new Error("AI task not found"); error.code="AI_TASK_NOT_FOUND"; throw error; }
+    if(task.status!=="queued")return {skipped:true,reason:`task_${task.status}`,taskId};
     const agent=await this.agents.get({organizationId:org},task.assigned_agent);
-    if (!agent) throw new Error("Assigned AI agent not found");
-    if (agent.status==="disabled") { const error=new Error("AI agent is disabled"); error.code="AI_AGENT_DISABLED"; throw error; }
+    if (!agent) { const error=new Error("Assigned AI employee not found"); error.code="AI_AGENT_NOT_FOUND"; throw error; }
+    if (agent.status==="paused") { await this.taskService.setStatus({organizationId:org,taskId,status:"blocked",agent,error:"AI employee is paused",expectedStatuses:["queued"]}); return {blocked:true,reason:"agent_paused",taskId}; }
+    if (agent.status!=="active") { const error=new Error(`AI employee is ${agent.status}`); error.code="AI_AGENT_DISABLED"; throw error; }
+    task=await this.taskService.claimQueued({organizationId:org,taskId,agent});
+    if(!task)return {skipped:true,reason:"task_already_claimed",taskId};
     const authority=await this.#resolveAuthority(org,task.requested_by);
     const authorityScopes=authority.effectiveScopes??authority.scopes??[];
     const permissions=this.authorization?.intersectPermissions
       ? this.authorization.intersectPermissions(authorityScopes,agent.permissions??[])
       : agent.permissions??[];
-    await this.taskService.setStatus({organizationId:org,taskId,status:"working",agent});
 
     const provider=this.providerRegistry.create(agent.provider??this.providerConfig.provider??"ollama",{...this.providerConfig,model:agent.model??this.providerConfig.model});
     const health=await provider.health();
     if (!health.ok) { const error=new Error(health.error??`AI runtime unavailable: ${health.state}`); error.code=health.code??(health.modelInstalled===false?"AI_MODEL_NOT_INSTALLED":"AI_RUNTIME_OFFLINE"); throw error; }
+    if(!await this.#stillWorking(org,taskId))return {skipped:true,reason:"task_cancelled_during_start",taskId};
 
     const attribution=aiAttribution({agent,taskId,reason:task.instruction});
     const context={organizationId:org,userId:task.requested_by,permissions,reason:task.instruction,authority,provenance:attribution};
@@ -108,13 +122,15 @@ export class AiWorker {
     const tools=this.gateway.describeForAgent({...agent,permissions}).map((tool)=>({type:"function",function:{name:tool.name,description:tool.description??tool.name,parameters:tool.parameters??{type:"object",additionalProperties:true}}}));
     let toolCalls=0;
     for (;;) {
+      if(!await this.#stillWorking(org,taskId))return {skipped:true,reason:"task_cancelled",taskId};
       const result=await withDeadline(()=>provider.generate({messages,tools,maxTokens:Math.ceil(this.limits.maxOutputChars/4)}),this.limits.taskTimeoutMs);
+      if(!await this.#stillWorking(org,taskId))return {skipped:true,reason:"task_cancelled",taskId};
       const message=result.message??{};
       const calls=Array.isArray(message.tool_calls)?message.tool_calls:[];
       if (!calls.length) {
         const text=truncate(message.content??"",this.limits.maxOutputChars);
         const refs=sources.map((s)=>({type:"knowledge",sourceId:s.source_id,chunkId:s.chunk_id}));
-        await this.taskService.setStatus({organizationId:org,taskId,status:"completed",agent,outputReferences:[...refs,{type:"text",content:text,provider:result.provider,model:result.model}]});
+        await this.taskService.setStatus({organizationId:org,taskId,status:"completed",agent,outputReferences:[...refs,{type:"text",content:text,provider:result.provider,model:result.model}],expectedStatuses:["working"]});
         await this.audit?.write?.({organization_id:org,actor_type:"ai_agent",actor_id:agent.agentId,agent_id:agent.agentId,agent_name:agent.name,agent_role:agent.role,action:"ai.task.inference_completed",entity_type:"ai_task",entity_id:taskId,reason:task.instruction,metadata:{provider:result.provider,model:result.model,tool_calls:toolCalls,source_refs:refs,authorized_by:task.requested_by}});
         return {text,refs};
       }
@@ -122,6 +138,7 @@ export class AiWorker {
       if (toolCalls>this.limits.maxToolCalls) { const error=new Error("AI tool-call limit exceeded"); error.code="AI_TOOL_LOOP_LIMIT"; throw error; }
       messages.push({role:"assistant",content:message.content??"",tool_calls:calls});
       for (const call of calls) {
+        if(!await this.#stillWorking(org,taskId))return {skipped:true,reason:"task_cancelled",taskId};
         const name=call.function?.name; let input={};
         try { input=typeof call.function?.arguments==="string"?JSON.parse(call.function.arguments||"{}"):call.function?.arguments??{}; } catch { const error=new Error(`Invalid tool arguments from model for ${name}`); error.code="AI_TOOL_ARGUMENTS_INVALID"; throw error; }
         const effectiveAgent={...agent,permissions};
@@ -136,7 +153,7 @@ export class AiWorker {
         }
         messages.push({role:"tool",tool_name:name,content:truncate(safeJson(output),12000)});
         if (output.status==="waiting_for_approval") {
-          await this.taskService.setStatus({organizationId:org,taskId,status:"waiting_for_approval",agent,outputReferences:[{type:"approval",id:output.approval?.approval_id??null}]});
+          await this.taskService.setStatus({organizationId:org,taskId,status:"waiting_for_approval",agent,outputReferences:[{type:"approval",id:output.approval?.approval_id??null}],expectedStatuses:["working"]});
           return output;
         }
       }
