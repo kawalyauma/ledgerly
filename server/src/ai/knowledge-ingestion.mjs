@@ -2,6 +2,38 @@ import { spawn } from "node:child_process";
 
 const TEXT_TYPES=new Set(["text/plain","text/markdown","text/csv","application/json","application/xml","text/xml"]);
 const TEXT_EXTENSIONS=new Set(["txt","md","markdown","csv","json","xml","html","htm"]);
+const STORAGE_DOMAIN_PERMISSIONS=Object.freeze({
+  academics:"academics:read",
+  students:"students:read",
+  student:"students:read",
+  staff:"staff:read",
+  finance:"finance:read",
+  accounting:"finance:read",
+  receipts:"finance:read",
+  fees:"fees:read",
+  payroll:"payroll:read",
+  inventory:"inventory:read",
+  school:"school:read",
+  documents:"documents:read",
+  reports:"reports:read",
+  communications:"communications:read",
+  tasks:"tasks:read",
+  support:"support:read",
+  books:"school:read",
+  attendance:"school:read",
+  printerly:"documents:read",
+  nvr:"admin:read",
+  security:"admin:read",
+});
+
+function storageDomainPermission(storageRef){
+  const raw=String(storageRef??"").replaceAll("\\","/");
+  const parts=raw.split("/").filter(Boolean);
+  if(parts.some((part)=>part==="."||part==="..")){const error=new Error("knowledge storage reference may not contain traversal segments");error.code="AI_KNOWLEDGE_STORAGE_REF_INVALID";throw error;}
+  const first=String(parts[0]??"").toLowerCase(),second=String(parts[1]??"").toLowerCase();
+  if(first==="ai"&&second==="knowledge")return null;
+  return STORAGE_DOMAIN_PERMISSIONS[first]??"admin:read";
+}
 
 export class AiKnowledgeIngestionService{
   constructor({knowledge,storageForOrganization,audit,pdfExtractor=extractPdfLocally,maxBytes=25*1024*1024,chunkChars=3200,overlapChars=400}){
@@ -9,10 +41,12 @@ export class AiKnowledgeIngestionService{
     this.knowledge=knowledge;this.storageForOrganization=storageForOrganization;this.audit=audit;this.pdfExtractor=pdfExtractor;this.maxBytes=maxBytes;this.chunkChars=chunkChars;this.overlapChars=overlapChars;
   }
 
-  async ingestStored({context,name,sourceType="uploaded_document",storageRef,contentType=null,metadata={}}){
+  async ingestStored({context,name,sourceType="uploaded_document",storageRef,contentType=null,metadata={},requiredPermissions=[]}){
     if(!context?.organizationId)throw new Error("organization context required");
     if(!context?.userId)throw new Error("knowledge ingestion requires an attributable requester");
     if(!storageRef)throw new Error("storageRef is required");
+    const domainPermission=storageDomainPermission(storageRef);
+    const classification=[...(Array.isArray(requiredPermissions)?requiredPermissions:[]),...(domainPermission?[domainPermission]:[])];
     const storage=this.storageForOrganization(context.organizationId);
     const head=await storage.head(storageRef);if(!head)throw new Error("knowledge source object not found");
     if(Number(head.size)>this.maxBytes){const error=new Error(`Knowledge source exceeds ${this.maxBytes} byte limit`);error.code="AI_KNOWLEDGE_FILE_TOO_LARGE";throw error;}
@@ -21,9 +55,9 @@ export class AiKnowledgeIngestionService{
     const text=await extractText({bytes,contentType:detected,storageRef,pdfExtractor:this.pdfExtractor});
     const normalized=normalizeText(text);if(!normalized){const error=new Error("No extractable text found in knowledge source");error.code="AI_KNOWLEDGE_EMPTY";throw error;}
     const chunks=chunkText(normalized,{chunkChars:this.chunkChars,overlapChars:this.overlapChars}).map((content,index)=>({content,tokenCount:estimateTokens(content),metadata:{source_name:name,storage_ref:storageRef,content_type:detected,chunk:index}}));
-    const source=await this.knowledge.createSource({context,name,sourceType,storageRef,metadata:{...metadata,contentType:detected,size:Number(head.size),extraction:"local",tenantScoped:true}});
+    const source=await this.knowledge.createSource({context,name,sourceType,storageRef,requiredPermissions:classification,metadata:{...metadata,contentType:detected,size:Number(head.size),extraction:"local",tenantScoped:true,storageDomainPermission:domainPermission}});
     const indexed=await this.knowledge.indexChunks({context,sourceId:source.source_id,chunks});
-    await this.audit?.write?.({organization_id:context.organizationId,actor_type:"human",actor_id:context.userId,action:"ai.knowledge.ingested",entity_type:"ai_knowledge_source",entity_id:source.source_id,metadata:{storage_ref:storageRef,chunks:chunks.length,bytes:Number(head.size),content_type:detected,tenant_scoped:true}});
+    await this.audit?.write?.({organization_id:context.organizationId,actor_type:"human",actor_id:context.userId,action:"ai.knowledge.ingested",entity_type:"ai_knowledge_source",entity_id:source.source_id,metadata:{storage_ref:storageRef,chunks:chunks.length,bytes:Number(head.size),content_type:detected,tenant_scoped:true,required_permissions:source.required_permissions??classification,storage_domain_permission:domainPermission}});
     return {source:{...source,status:"indexed"},chunks:chunks.length,indexed};
   }
 }
