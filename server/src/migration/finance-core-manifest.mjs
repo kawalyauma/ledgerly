@@ -87,7 +87,7 @@ export const FINANCE_CORE_TABLES = Object.freeze([
   }),
   table({
     name: "payment_allocations",
-    columns: ["id","organization_id","payment_id","document_id","amount_minor","created_at","updated_at"],
+    columns: ["id","organization_id","payment_id","document_id","amount_minor","reversed_at","created_at","updated_at"],
     conflict: ["id"],
     dependencies: ["organizations","payments","documents"],
   }),
