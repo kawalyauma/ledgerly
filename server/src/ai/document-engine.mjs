@@ -17,36 +17,28 @@ const org=(context)=>{if(!context?.organizationId)throw new Error("organization 
 const stamp=()=>new Date().toISOString();
 const canApprove=(context)=>{const permissions=Array.isArray(context?.permissions)?context.permissions:[];return permissions.includes("*")||permissions.includes("ai:approve");};
 
+function parsePermissions(value){if(Array.isArray(value))return value;if(typeof value==="string")try{const parsed=JSON.parse(value);return Array.isArray(parsed)?parsed:[];}catch{return[];}return[];}
+function classification(requiredPermissions=[]){return [...new Set(["documents:read",...parsePermissions(requiredPermissions)].filter((item)=>typeof item==="string"&&item.trim()).map((item)=>item.trim()))].sort();}
+function assertDocumentAccess(context,requiredPermissions){const required=classification(requiredPermissions),granted=new Set(context?.permissions??[]);if(granted.has("*"))return required;const missing=required.filter((permission)=>!granted.has(permission));if(missing.length){const error=new Error("Structured AI document is outside current delegated authority");error.status=403;error.code="AI_DOCUMENT_ACCESS_DENIED";error.details={missingPermissions:missing};throw error;}return required;}
+
 function transitionError(from,status){
   const error=new Error(`document status transition ${from} -> ${status} is not allowed`);
   error.status=409;
   error.code="AI_DOCUMENT_INVALID_STATUS_TRANSITION";
   return error;
 }
-
-function editableError(status){
-  const error=new Error(`document in ${status} state must be reopened before editing`);
-  error.status=409;
-  error.code="AI_DOCUMENT_NOT_EDITABLE";
-  return error;
-}
-
-function approvalAuthorityError(from,status){
-  const error=new Error(`document status transition ${from} -> ${status} requires official approval authority`);
-  error.status=403;
-  error.code="AI_DOCUMENT_APPROVAL_REQUIRED";
-  return error;
-}
+function editableError(status){const error=new Error(`document in ${status} state must be reopened before editing`);error.status=409;error.code="AI_DOCUMENT_NOT_EDITABLE";return error;}
+function approvalAuthorityError(from,status){const error=new Error(`document status transition ${from} -> ${status} requires official approval authority`);error.status=403;error.code="AI_DOCUMENT_APPROVAL_REQUIRED";return error;}
 
 export class AiDocumentEngine{
   constructor({database,audit,renderer=null}){this.database=database;this.audit=audit;this.renderer=renderer;}
 
-  async createAiDraft({context,agent,taskId=null,type,title,content,reason}){
-    const organizationId=org(context),documentId=randomUUID(),attribution=aiAttribution({agent,taskId,reason});
+  async createAiDraft({context,agent,taskId=null,type,title,content,reason,requiredPermissions=[]}){
+    const organizationId=org(context),permissions=assertDocumentAccess(context,requiredPermissions),documentId=randomUUID(),attribution=aiAttribution({agent,taskId,reason});
     const provenance={document:attribution,fields:createFieldProvenance(content,attribution)};
-    const result=await this.database.query(`INSERT INTO ledgerly_ai.documents (document_id,organization_id,type,title,content,creator,ai_provenance) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb) RETURNING *`,[documentId,organizationId,type,title,JSON.stringify(content),JSON.stringify(attribution),JSON.stringify(provenance)]);
+    const result=await this.database.query(`INSERT INTO ledgerly_ai.documents (document_id,organization_id,type,title,content,creator,ai_provenance,required_permissions) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb) RETURNING *`,[documentId,organizationId,type,title,JSON.stringify(content),JSON.stringify(attribution),JSON.stringify(provenance),JSON.stringify(permissions)]);
     await this.database.query(`INSERT INTO ledgerly_ai.document_versions (document_id,version,organization_id,content,provenance,edited_by) VALUES ($1,1,$2,$3::jsonb,$4::jsonb,$5::jsonb)`,[documentId,organizationId,JSON.stringify(content),JSON.stringify(provenance),JSON.stringify(attribution)]);
-    await this.audit?.write?.({organization_id:organizationId,actor_type:"ai_agent",actor_id:agent.agentId,agent_id:agent.agentId,agent_name:agent.name,agent_role:agent.role,action:"ai.document.created",entity_type:"document",entity_id:documentId,reason,after:content,metadata:{task_id:taskId,type,title,field_provenance:true,status:"draft"}});
+    await this.audit?.write?.({organization_id:organizationId,actor_type:"ai_agent",actor_id:agent.agentId,agent_id:agent.agentId,agent_name:agent.name,agent_role:agent.role,action:"ai.document.created",entity_type:"document",entity_id:documentId,reason,after:content,metadata:{task_id:taskId,type,title,field_provenance:true,status:"draft",required_permissions:permissions}});
     return result.rows[0];
   }
 
@@ -55,6 +47,7 @@ export class AiDocumentEngine{
     return this.database.transaction(async(tx)=>{
       const current=(await tx.query(`SELECT * FROM ledgerly_ai.documents WHERE document_id=$1 AND organization_id=$2 FOR UPDATE`,[documentId,organizationId])).rows[0];
       if(!current)throw new Error("document not found");
+      assertDocumentAccess(context,current.required_permissions);
       if(!EDITABLE_STATUSES.has(current.status))throw editableError(current.status);
       const attribution=aiAttribution({agent,taskId,reason}),version=Number(current.version)+1;
       const provenance={document:current.ai_provenance?.document??current.ai_provenance??attribution,fields:updateFieldProvenance({before:current.content,after:content,existing:current.ai_provenance?.fields??{},actor:attribution})};
@@ -70,6 +63,7 @@ export class AiDocumentEngine{
     return this.database.transaction(async(tx)=>{
       const current=(await tx.query(`SELECT * FROM ledgerly_ai.documents WHERE document_id=$1 AND organization_id=$2 FOR UPDATE`,[documentId,organizationId])).rows[0];
       if(!current)throw new Error("document not found");
+      assertDocumentAccess(context,current.required_permissions);
       if(!EDITABLE_STATUSES.has(current.status))throw editableError(current.status);
       const version=Number(current.version)+1,actor={actor_type:"human",actor_id:context.userId,actor_name:context.userName??context.userId,timestamp:stamp(),reason};
       const provenance={document:humanEditProvenance(current.ai_provenance??{},{userId:context.userId,userName:context.userName??context.userId,reason}),fields:updateFieldProvenance({before:current.content,after:content,existing:current.ai_provenance?.fields??{},actor})};
@@ -86,6 +80,7 @@ export class AiDocumentEngine{
     return this.database.transaction(async(tx)=>{
       const current=(await tx.query(`SELECT * FROM ledgerly_ai.documents WHERE document_id=$1 AND organization_id=$2 FOR UPDATE`,[documentId,organizationId])).rows[0];
       if(!current)throw new Error("document not found");
+      assertDocumentAccess(context,current.required_permissions);
       if(current.status===status)return current;
       if(!STATUS_TRANSITIONS[current.status]?.has(status))throw transitionError(current.status,status);
       const approvalAuthority=canApprove(context);
@@ -103,6 +98,7 @@ export class AiDocumentEngine{
     if(!this.renderer){const error=new Error("Document PDF renderer is not configured");error.status=503;throw error;}
     const document=(await this.database.query(`SELECT * FROM ledgerly_ai.documents WHERE document_id=$1 AND organization_id=$2`,[documentId,organizationId])).rows[0];
     if(!document)throw new Error("document not found");
+    assertDocumentAccess(context,document.required_permissions);
     if(!OFFICIAL_STATUSES.has(document.status)){const error=new Error("Only approved or published structured documents may be rendered to PDF");error.status=409;throw error;}
     const rendered=await this.renderer({document,context});const ref=rendered?.ref??rendered?.storageRef??rendered;
     if(!ref)throw new Error("PDF renderer returned no storage reference");
