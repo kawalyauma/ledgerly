@@ -8,10 +8,11 @@ require_cmd docker; require_cmd sha256sum; load_runtime_env
 [[ "${LEDGERLY_RESTORE_OBJECTS_CONFIRM:-}" == "RESTORE_OBJECTS:$MINIO_DEFAULT_BUCKET" ]] || die "set LEDGERLY_RESTORE_OBJECTS_CONFIRM=RESTORE_OBJECTS:$MINIO_DEFAULT_BUCKET to continue"
 MINIO_CID="$(compose ps -q minio)"; [[ -n "$MINIO_CID" ]] || die "MinIO container is not running"
 REMOVE_FLAG=""; [[ "${LEDGERLY_RESTORE_OBJECTS_REMOVE_EXTRANEOUS:-false}" == "true" ]] && REMOVE_FLAG="--remove"
+MC_IMAGE="${MINIO_MC_IMAGE:-minio/mc:latest}"
 log "restoring object backup into bucket $MINIO_DEFAULT_BUCKET (remove_extraneous=${LEDGERLY_RESTORE_OBJECTS_REMOVE_EXTRANEOUS:-false})"
 docker run --rm --network "container:$MINIO_CID" --user "$(id -u):$(id -g)" \
   -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD -e MINIO_DEFAULT_BUCKET -e REMOVE_FLAG \
-  -v "$SRC:/backup:ro" --entrypoint /bin/sh minio/mc:latest -ec '
+  -v "$SRC:/backup:ro" --entrypoint /bin/sh "$MC_IMAGE" -ec '
     export MC_CONFIG_DIR=/tmp/.mc
     mc alias set target http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
     mc ready target >/dev/null

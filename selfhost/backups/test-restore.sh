@@ -18,9 +18,9 @@ compose exec -T postgres psql -U "$POSTGRES_USER" -d "$SCRATCH" -v ON_ERROR_STOP
 OBJECT_TEST="checksums_only"
 if [[ "${LEDGERLY_TEST_RESTORE_MINIO:-false}" == "true" ]]; then
   SRC="$BACKUP_ROOT/objects/$SET_ID"; MINIO_CID="$(compose ps -q minio)"; TEST_BUCKET="ledgerly-restore-test-${SET_ID,,}"
-  TEST_BUCKET="${TEST_BUCKET//[^a-z0-9-]/-}"; TEST_BUCKET="${TEST_BUCKET:0:63}"
+  TEST_BUCKET="${TEST_BUCKET//[^a-z0-9-]/-}"; TEST_BUCKET="${TEST_BUCKET:0:63}"; MC_IMAGE="${MINIO_MC_IMAGE:-minio/mc:latest}"
   docker run --rm --network "container:$MINIO_CID" --user "$(id -u):$(id -g)" -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD -e TEST_BUCKET \
-    -v "$SRC:/backup:ro" --entrypoint /bin/sh minio/mc:latest -ec '
+    -v "$SRC:/backup:ro" --entrypoint /bin/sh "$MC_IMAGE" -ec '
       export MC_CONFIG_DIR=/tmp/.mc; mc alias set target http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
       mc mb --ignore-existing "target/$TEST_BUCKET" >/dev/null
       trap "mc rb --force target/$TEST_BUCKET >/dev/null 2>&1 || true" EXIT

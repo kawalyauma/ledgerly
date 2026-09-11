@@ -15,6 +15,7 @@
       X-Frame-Options DENY
       Referrer-Policy no-referrer
       Permissions-Policy "camera=(), microphone=(), geolocation=()"
+      Strict-Transport-Security "max-age=31536000"
       -Server
     }
 
@@ -31,6 +32,8 @@
 
     handle /selfhost/* {
       reverse_proxy api:8788 {
+        # Overwrite client-address headers at the only trusted public edge.
+        header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Host {host}
         header_up X-Forwarded-Proto {scheme}
         header_up X-Real-IP {remote_host}

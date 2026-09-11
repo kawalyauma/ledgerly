@@ -7,10 +7,11 @@ SET_ID="${BACKUP_SET_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 DEST="$BACKUP_ROOT/objects/$SET_ID"; PARTIAL="$DEST.partial.$$"
 rm -rf "$PARTIAL"; mkdir -p "$PARTIAL"; chmod 0700 "$PARTIAL"; trap 'rm -rf "$PARTIAL"' EXIT
 MINIO_CID="$(compose ps -q minio)"; [[ -n "$MINIO_CID" ]] || die "MinIO container is not running"
+MC_IMAGE="${MINIO_MC_IMAGE:-minio/mc:latest}"
 log "mirroring MinIO bucket $MINIO_DEFAULT_BUCKET into $DEST"
 docker run --rm --network "container:$MINIO_CID" --user "$(id -u):$(id -g)" \
   -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD -e MINIO_DEFAULT_BUCKET \
-  -v "$PARTIAL:/backup" --entrypoint /bin/sh minio/mc:latest -ec '
+  -v "$PARTIAL:/backup" --entrypoint /bin/sh "$MC_IMAGE" -ec '
     export MC_CONFIG_DIR=/tmp/.mc
     mc alias set source http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
     mc ready source >/dev/null

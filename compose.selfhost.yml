@@ -94,9 +94,15 @@ services:
   minio-bootstrap:
     image: ${MINIO_MC_IMAGE:-minio/mc:latest}
     restart: "no"
+    init: true
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=32m"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |
+        export MC_CONFIG_DIR=/tmp/.mc
         attempt=0
         until mc alias set bootstrap http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" >/dev/null 2>&1; do
           attempt=$$((attempt + 1))
@@ -120,7 +126,6 @@ services:
       MINIO_APP_SECRET_KEY: ${MINIO_APP_SECRET_KEY:-}
     depends_on:
       minio: {condition: service_started}
-    security_opt: ["no-new-privileges:true"]
     networks: [ledgerly_backend]
 
   api:
