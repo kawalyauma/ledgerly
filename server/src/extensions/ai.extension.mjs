@@ -1,4 +1,5 @@
 import { createAiWorkforce } from "../ai/index.mjs";
+import { createAiDocumentRenderer } from "../ai/document-renderer.mjs";
 
 function bool(value, fallback=false) {
   if (value == null || value === "") return fallback;
@@ -46,11 +47,13 @@ export default {
   enabled(config){return config.enabled===true;},
   async create({services,authorization,tenantStorage,createQueue,extensionConfig}){
     const aiQueue=createQueue({name:extensionConfig.queueName,maxAttempts:Math.max(1,extensionConfig.limits.maxRetries+1)});
+    const documentRenderer=createAiDocumentRenderer({database:services.database,tenantStorage});
     const ai=await createAiWorkforce({
       services:{...services,queue:aiQueue},
       config:extensionConfig,
       authorization,
       tenantStorage,
+      documentRenderer,
     });
     return {
       value:ai,
@@ -66,6 +69,7 @@ export default {
         rawDatabaseCredentialsExposed:false,
         tenantScopedStorage:true,
         liveRequesterAuthorization:true,
+        structuredPdfRendering:true,
       }),
       close:()=>ai.close(),
     };
