@@ -1,99 +1,137 @@
 import { createHash } from "node:crypto";
 
-const MAX_JSON_BYTES=1_000_000;
-const MAX_UPLOAD_BYTES=25*1024*1024;
+const MAX_BODY_BYTES=1_000_000;
+const OFFICIAL_DOCUMENT_STATUSES=new Set(["approved","published"]);
+const json=(status,body)=>({status,body});
+const agentIdFor=(org,key)=>`ai_${createHash("sha256").update(`${org}:${key}`).digest("hex").slice(0,24)}`;
 
-function json(status,body){return {status,body};}
-function fail(status,code,message){const error=new Error(message);error.status=status;error.code=code;throw error;}
-function agentIdFor(org,key){return `ai_${createHash("sha256").update(`${org}:${key}`).digest("hex").slice(0,24)}`;}
-async function readRaw(request,maxBytes){let size=0;const chunks=[];for await(const chunk of request){size+=chunk.length;if(size>maxBytes){const e=new Error("Request body too large");e.status=413;throw e;}chunks.push(Buffer.from(chunk));}return Buffer.concat(chunks);}
-async function body(request){const raw=await readRaw(request,MAX_JSON_BYTES);if(!raw.length)return {};try{return JSON.parse(raw.toString("utf8"));}catch{const e=new Error("Invalid JSON body");e.status=400;throw e;}}
-function context(principal){return {organizationId:principal.organizationId,userId:principal.userId,userName:principal.userName??principal.userId,permissions:principal.effectiveScopes??principal.scopes??[]};}
-function pathParts(pathname){return pathname.replace(/^\/selfhost\/ai\/?/,"").split("/").filter(Boolean).map(decodeURIComponent);}
-function cleanFilename(value){const name=String(value||"document").split(/[\\/]/).pop()||"document";return name.replace(/[^a-zA-Z0-9._ -]+/g,"-").slice(0,180);}
-function header(request,name){const headers=request.headers;if(headers?.get)return headers.get(name);return headers?.[String(name).toLowerCase()]??headers?.[name]??null;}
-function idempotencyKey(request,input){const value=String(input?.idempotencyKey??header(request,"idempotency-key")??"").trim();if(!value)return null;if(value.length>200)fail(422,"AI_IDEMPOTENCY_KEY_INVALID","Idempotency key is too long");return value;}
+async function body(request){
+ let size=0;const chunks=[];
+ for await(const chunk of request){size+=chunk.length;if(size>MAX_BODY_BYTES){const e=new Error("Request body too large");e.status=413;throw e;}chunks.push(chunk);}
+ if(!chunks.length)return{};
+ try{return JSON.parse(Buffer.concat(chunks).toString("utf8"));}catch{const e=new Error("Invalid JSON body");e.status=400;throw e;}
+}
+const context=(principal)=>({organizationId:principal.organizationId,userId:principal.userId,userName:principal.userName??principal.userId,permissions:principal.scopes??[]});
+const pathParts=(pathname)=>pathname.replace(/^\/selfhost\/ai\/?/,"").split("/").filter(Boolean).map(decodeURIComponent);
 
-async function principalFor(runtime,request,scope){const principal=await runtime.auth.authenticateRequest({headers:request.headers});runtime.auth.requireScope(principal,scope);return principal;}
-async function ensureInitialAgents(runtime,organizationId){const count=await runtime.services.database.query(`SELECT count(*)::int AS count FROM ledgerly_ai.agents WHERE organization_id=$1`,[organizationId]);if(Number(count.rows[0]?.count??0)===0)await runtime.ai.store.seedTemplates(organizationId,(key)=>agentIdFor(organizationId,key));}
-async function getAgent(runtime,ctx,agentId){if(!agentId)fail(422,"AI_AGENT_REQUIRED","AI employee is required");const agent=await runtime.ai.agents.get(ctx,agentId);if(!agent)fail(404,"AI_AGENT_NOT_FOUND","AI employee not found");return agent;}
-async function requireActiveAgent(runtime,ctx,agentId){const agent=await getAgent(runtime,ctx,agentId);if(agent.status!=="active")fail(409,"AI_AGENT_NOT_ACTIVE",`AI employee is ${agent.status}`);return agent;}
-function validateAllowedTools(runtime,input){if(!Object.prototype.hasOwnProperty.call(input??{},"allowedTools"))return;const known=new Set(runtime.ai.gateway.describeAll().map((tool)=>tool.name));const unknown=(Array.isArray(input.allowedTools)?input.allowedTools:[]).filter((name)=>!known.has(name));if(unknown.length)fail(422,"AI_TOOL_UNKNOWN",`Unknown AI tool(s): ${unknown.join(", ")}`);}
-async function approvalExecutionContext(runtime,principal,approval,agent){let actorScopes=principal.effectiveScopes??principal.scopes??[];if(approval.task_id){const task=(await runtime.services.database.query(`SELECT requested_by FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[approval.task_id,principal.organizationId])).rows[0];if(task?.requested_by){const access=await runtime.authorization.resolveCurrentActorAccess({organizationId:principal.organizationId,actorId:task.requested_by});actorScopes=access.effectiveScopes??access.scopes??[];}}const permissions=runtime.authorization?.intersectPermissions?runtime.authorization.intersectPermissions(actorScopes,agent.permissions??[]):agent.permissions??[];return {...context(principal),permissions};}
+async function principalFor(runtime,request,scope){
+ const authenticated=await runtime.auth.authenticateRequest({headers:request.headers});
+ const live=await runtime.authorization.resolveCurrentActorAccess({organizationId:authenticated.organizationId,actorId:authenticated.userId});
+ const principal={...authenticated,role:live.role,scopes:live.effectiveScopes};
+ runtime.auth.requireScope(principal,scope);
+ return principal;
+}
+
+async function ensureInitialAgents(runtime,organizationId){
+ const count=await runtime.services.database.query(`SELECT count(*)::int AS count FROM ledgerly_ai.agents WHERE organization_id=$1`,[organizationId]);
+ if(Number(count.rows[0]?.count??0)===0)await runtime.ai.store.seedTemplates(organizationId,(key)=>agentIdFor(organizationId,key));
+}
+
+async function delegatedApprovalContext(runtime,ctx,approval,agent){
+ let requesterScopes=ctx.permissions;
+ if(approval.task_id){
+  const task=(await runtime.services.database.query(`SELECT requested_by FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[approval.task_id,ctx.organizationId])).rows[0];
+  if(!task?.requested_by){const error=new Error("approval task has no attributable requester");error.code="BACKGROUND_ACTOR_REVOKED";throw error;}
+  const requester=await runtime.authorization.resolveCurrentActorAccess({organizationId:ctx.organizationId,actorId:task.requested_by});
+  requesterScopes=requester.effectiveScopes;
+ }
+ return {...ctx,permissions:runtime.authorization.intersectPermissions(ctx.permissions,requesterScopes,agent.permissions??[])};
+}
 
 export async function handleAiRequest({request,url,runtime}){
-  if(!runtime.ai)return json(503,{error:{code:"AI_WORKFORCE_DISABLED",message:"AI Workforce is disabled on this Ledgerly server."}});
-  const parts=pathParts(url.pathname),method=request.method??"GET";
-  if(method==="GET"&&parts[0]==="health"){const principal=await principalFor(runtime,request,"ai:read");const ctx=context(principal);return json(200,{organizationId:principal.organizationId,...await runtime.ai.health(ctx)});}
+ if(!runtime.ai)return json(503,{error:{code:"AI_WORKFORCE_DISABLED",message:"AI Workforce is disabled on this Ledgerly server."}});
+ const parts=pathParts(url.pathname),method=request.method??"GET";
+ if(method==="GET"&&parts[0]==="health"){
+  const principal=await principalFor(runtime,request,"ai:read");
+  return json(200,{organizationId:principal.organizationId,...await runtime.ai.health()});
+ }
+ const principal=await principalFor(runtime,request,method==="GET"?"ai:read":"ai:write"),ctx=context(principal),db=runtime.services.database;
 
-  const principal=await principalFor(runtime,request,method==="GET"?"ai:read":"ai:write"),ctx=context(principal),db=runtime.services.database;
+ if(parts[0]==="employees"){
+  await ensureInitialAgents(runtime,ctx.organizationId);
+  if(method==="GET"&&parts.length===1)return json(200,{items:await runtime.ai.agents.list(ctx)});
+  if(method==="GET"&&parts.length===2){const item=await runtime.ai.agents.get(ctx,parts[1]);return item?json(200,item):json(404,{error:{code:"AI_AGENT_NOT_FOUND",message:"AI employee not found"}});}
+  if(method==="POST"&&parts.length===1)return json(201,await runtime.ai.agents.create(ctx,await body(request)));
+  if((method==="PATCH"||method==="PUT")&&parts.length===2)return json(200,await runtime.ai.agents.update(ctx,parts[1],await body(request)));
+  if(method==="POST"&&parts[2]==="disable")return json(200,await runtime.ai.agents.disable(ctx,parts[1],(await body(request)).reason??null));
+ }
 
-  if(parts[0]==="employees"){
-    await ensureInitialAgents(runtime,ctx.organizationId);
-    if(method==="GET"&&parts.length===1)return json(200,{items:await runtime.ai.agents.list(ctx)});
-    if(method==="GET"&&parts.length===2){const item=await runtime.ai.agents.get(ctx,parts[1]);return item?json(200,item):json(404,{error:{code:"AI_AGENT_NOT_FOUND",message:"AI employee not found"}});}
-    if(method==="POST"&&parts.length===1){const input=await body(request);validateAllowedTools(runtime,input);return json(201,await runtime.ai.agents.create(ctx,input));}
-    if((method==="PATCH"||method==="PUT")&&parts.length===2){const input=await body(request);validateAllowedTools(runtime,input);return json(200,await runtime.ai.agents.update(ctx,parts[1],input));}
-    if(method==="POST"&&parts[2]==="disable")return json(200,await runtime.ai.agents.disable(ctx,parts[1],(await body(request)).reason??null));
+ if(parts[0]==="tasks"){
+  if(method==="GET"&&parts.length===1){const status=url.searchParams.get("status"),values=[ctx.organizationId];let filter="organization_id=$1";if(status){values.push(status);filter+=` AND status=$${values.length}`;}const result=await db.query(`SELECT * FROM ledgerly_ai.tasks WHERE ${filter} ORDER BY priority DESC,created_at DESC LIMIT 200`,values);return json(200,{items:result.rows});}
+  if(method==="GET"&&parts.length===2){const result=await db.query(`SELECT * FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[parts[1],ctx.organizationId]);return result.rows[0]?json(200,result.rows[0]):json(404,{error:{code:"AI_TASK_NOT_FOUND",message:"AI task not found"}});}
+  if(method==="POST"&&parts.length===1){const input=await body(request);return json(201,await runtime.ai.tasks.create({context:ctx,assignedAgent:input.assignedAgent,instruction:input.instruction,priority:input.priority,dueTime:input.dueTime,inputReferences:input.inputReferences,idempotencyKey:input.idempotencyKey}));}
+  if(method==="POST"&&parts[2]==="handoff"){
+   const task=(await db.query(`SELECT * FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[parts[1],ctx.organizationId])).rows[0];if(!task)return json(404,{error:{code:"AI_TASK_NOT_FOUND",message:"AI task not found"}});
+   const fromAgent=await runtime.ai.agents.get(ctx,task.assigned_agent);if(!fromAgent)return json(409,{error:{code:"AI_HANDOFF_SOURCE_MISSING",message:"Source AI employee no longer exists"}});
+   const input=await body(request);return json(201,await runtime.ai.tasks.handoff({context:ctx,task,fromAgent,toAgent:input.toAgent,instruction:input.instruction}));
   }
+  if(method==="POST"&&parts[2]==="cancel")return json(200,await runtime.ai.tasks.setStatus({organizationId:ctx.organizationId,taskId:parts[1],status:"cancelled"}));
+ }
 
-  if(parts[0]==="tools"&&method==="GET")return json(200,{items:runtime.ai.gateway.describeAll()});
-
-  if(parts[0]==="tasks"){
-    if(method==="GET"&&parts.length===1){const status=url.searchParams.get("status"),values=[ctx.organizationId];let filter="organization_id=$1";if(status){values.push(status);filter+=` AND status=$${values.length}`;}const result=await db.query(`SELECT * FROM ledgerly_ai.tasks WHERE ${filter} ORDER BY priority DESC,created_at DESC LIMIT 200`,values);return json(200,{items:result.rows});}
-    if(method==="GET"&&parts.length===2){const result=await db.query(`SELECT * FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[parts[1],ctx.organizationId]);return result.rows[0]?json(200,result.rows[0]):json(404,{error:{code:"AI_TASK_NOT_FOUND",message:"AI task not found"}});}
-    if(method==="POST"&&parts.length===1){const input=await body(request);await requireActiveAgent(runtime,ctx,input.assignedAgent);return json(201,await runtime.ai.tasks.create({context:ctx,assignedAgent:input.assignedAgent,instruction:input.instruction,priority:input.priority,dueTime:input.dueTime,inputReferences:input.inputReferences,idempotencyKey:idempotencyKey(request,input)}));}
-    if(method==="POST"&&parts[2]==="handoff"){const task=(await db.query(`SELECT * FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[parts[1],ctx.organizationId])).rows[0];if(!task)return json(404,{error:{code:"AI_TASK_NOT_FOUND",message:"AI task not found"}});const fromAgent=await runtime.ai.agents.get(ctx,task.assigned_agent);if(!fromAgent)return json(404,{error:{code:"AI_AGENT_NOT_FOUND",message:"Source AI employee not found"}});const input=await body(request);await requireActiveAgent(runtime,ctx,input.toAgent);return json(201,await runtime.ai.tasks.handoff({context:ctx,task,fromAgent,toAgent:input.toAgent,instruction:input.instruction}));}
-    if(method==="POST"&&parts[2]==="cancel"){const input=await body(request);return json(200,await runtime.ai.tasks.cancel({context:ctx,taskId:parts[1],reason:input.reason??null}));}
-    if(method==="POST"&&parts[2]==="retry"){const task=(await db.query(`SELECT assigned_agent FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[parts[1],ctx.organizationId])).rows[0];if(!task)return json(404,{error:{code:"AI_TASK_NOT_FOUND",message:"AI task not found"}});await requireActiveAgent(runtime,ctx,task.assigned_agent);const input=await body(request);return json(200,await runtime.ai.tasks.retry({context:ctx,taskId:parts[1],reason:input.reason??null}));}
+ if(parts[0]==="approvals"){
+  if(method==="GET"&&parts.length===1){const result=await db.query(`SELECT * FROM ledgerly_ai.approvals WHERE organization_id=$1 ORDER BY requested_at DESC LIMIT 200`,[ctx.organizationId]);return json(200,{items:result.rows});}
+  if(method==="POST"&&parts[2]==="decision"){
+   runtime.auth.requireScope(principal,"ai:approve");const input=await body(request);
+   return json(200,await runtime.ai.approvals.decide({context:ctx,approvalId:parts[1],approve:Boolean(input.approve),reason:input.reason??null}));
   }
-
-  if(parts[0]==="approvals"){
-    if(method==="GET"&&parts.length===1){const result=await db.query(`SELECT * FROM ledgerly_ai.approvals WHERE organization_id=$1 ORDER BY requested_at DESC LIMIT 200`,[ctx.organizationId]);return json(200,{items:result.rows});}
-    if(method==="POST"&&parts[2]==="decision"){runtime.auth.requireScope(principal,"ai:approve");const input=await body(request);return json(200,await runtime.ai.approvals.decide({context:ctx,approvalId:parts[1],approve:Boolean(input.approve),reason:input.reason??null}));}
-    if(method==="POST"&&parts[2]==="execute"){
-      runtime.auth.requireScope(principal,"ai:approve");
-      const approval=await runtime.ai.approvals.get({context:ctx,approvalId:parts[1]});if(!approval)return json(404,{error:{code:"AI_APPROVAL_NOT_FOUND",message:"Approval not found"}});
-      if(approval.status==="executed"){const resumed=approval.task_id?await runtime.ai.tasks.resumeAfterApproval({context:ctx,taskId:approval.task_id,approvalId:approval.approval_id,result:approval.executed_result}):{resumed:false,reason:"approval_has_no_task"};return json(200,{status:"executed",output:approval.executed_result,resumed,recovered:true,approval});}
-      if(approval.status!=="approved")return json(409,{error:{code:"AI_APPROVAL_NOT_EXECUTABLE",message:`Approval is ${approval.status}, not approved`}});
-      const agent=await runtime.ai.agents.get(ctx,approval.agent_id);if(!agent)return json(404,{error:{code:"AI_AGENT_NOT_FOUND",message:"AI employee not found"}});
-      const executionContext=await approvalExecutionContext(runtime,principal,approval,agent);
-      const result=await runtime.ai.gateway.executeApproved({approval,agent:{...agent,permissions:executionContext.permissions},context:executionContext});
-      const executed=await runtime.ai.approvals.get({context:ctx,approvalId:parts[1]});
-      const resumed=approval.task_id?await runtime.ai.tasks.resumeAfterApproval({context:ctx,taskId:approval.task_id,approvalId:approval.approval_id,result}):{resumed:false,reason:"approval_has_no_task"};
-      return json(200,{...result,approval:executed,resumed});
-    }
+  if(method==="POST"&&parts[2]==="execute"){
+   runtime.auth.requireScope(principal,"ai:approve");
+   const claimed=await runtime.ai.approvals.claimExecution({context:ctx,approvalId:parts[1]});
+   try{
+    const agent=await runtime.ai.agents.get(ctx,claimed.agent_id);if(!agent){const error=new Error("Approval agent no longer exists");error.status=409;error.code="AI_APPROVAL_AGENT_MISSING";throw error;}
+    const executionContext=await delegatedApprovalContext(runtime,ctx,claimed,agent);
+    const execution=await runtime.ai.gateway.executeApproved({approval:claimed,agent,context:executionContext});
+    const saved=await runtime.ai.approvals.markExecuted({context:ctx,approvalId:parts[1],result:execution.output});
+    if(claimed.task_id)await runtime.ai.tasks.setStatus({organizationId:ctx.organizationId,taskId:claimed.task_id,status:"completed",agent,outputReferences:[{type:"approved_action",approvalId:claimed.approval_id,result:execution.output}]});
+    return json(200,{approval:saved,execution});
+   }catch(error){
+    await runtime.ai.approvals.markExecutionFailed({context:ctx,approvalId:parts[1],error}).catch(()=>undefined);
+    throw error;
+   }
   }
+ }
 
-  if(parts[0]==="documents"){
-    if(method==="GET"&&parts.length===1){const result=await db.query(`SELECT * FROM ledgerly_ai.documents WHERE organization_id=$1 ORDER BY updated_at DESC LIMIT 200`,[ctx.organizationId]);return json(200,{items:result.rows});}
-    if(method==="GET"&&parts.length===2){const result=await db.query(`SELECT * FROM ledgerly_ai.documents WHERE document_id=$1 AND organization_id=$2`,[parts[1],ctx.organizationId]);return result.rows[0]?json(200,result.rows[0]):json(404,{error:{code:"AI_DOCUMENT_NOT_FOUND",message:"Document not found"}});}
-    if(method==="PATCH"&&parts.length===2){const input=await body(request);return json(200,await runtime.ai.documents.reviseHuman({context:ctx,documentId:parts[1],content:input.content,reason:input.reason??null}));}
-    if(method==="POST"&&parts[2]==="status"){const input=await body(request);return json(200,await runtime.ai.documents.setStatus({context:ctx,documentId:parts[1],status:input.status,reason:input.reason??null}));}
-    if(method==="GET"&&parts[2]==="history"){const result=await db.query(`SELECT * FROM ledgerly_ai.document_versions WHERE document_id=$1 AND organization_id=$2 ORDER BY version DESC`,[parts[1],ctx.organizationId]);return json(200,{items:result.rows});}
-    if(method==="POST"&&parts[2]==="attachments"&&parts.length===3){const bytes=await readRaw(request,MAX_UPLOAD_BYTES);if(!bytes.length)fail(422,"AI_DOCUMENT_ATTACHMENT_EMPTY","Document attachment is empty");const name=cleanFilename(header(request,"x-file-name")||url.searchParams.get("name")||"attachment"),contentType=String(header(request,"content-type")||"application/octet-stream").split(";")[0].trim();return json(201,await runtime.ai.uploadDocumentAttachment({context:ctx,documentId:parts[1],name,bytes,contentType}));}
-    if(method==="DELETE"&&parts[2]==="attachments"&&parts[3])return json(200,await runtime.ai.removeDocumentAttachment({context:ctx,documentId:parts[1],attachmentId:parts[3]}));
-    if(method==="POST"&&parts[2]==="render-pdf")return json(200,await runtime.ai.documents.renderPdf({context:ctx,documentId:parts[1]}));
-    if(method==="GET"&&parts[2]==="pdf"){const expires=Math.max(60,Math.min(Number(url.searchParams.get("expires"))||900,3600));return json(200,await runtime.ai.getRenderedDocumentUrl({context:ctx,documentId:parts[1],expiresSeconds:expires}));}
+ if(parts[0]==="documents"){
+  if(method==="GET"&&parts.length===1){const result=await db.query(`SELECT * FROM ledgerly_ai.documents WHERE organization_id=$1 ORDER BY updated_at DESC LIMIT 200`,[ctx.organizationId]);return json(200,{items:result.rows});}
+  if(method==="GET"&&parts.length===2){const result=await db.query(`SELECT * FROM ledgerly_ai.documents WHERE document_id=$1 AND organization_id=$2`,[parts[1],ctx.organizationId]);return result.rows[0]?json(200,result.rows[0]):json(404,{error:{code:"AI_DOCUMENT_NOT_FOUND",message:"Document not found"}});}
+  if(method==="PATCH"&&parts.length===2){const input=await body(request);return json(200,await runtime.ai.documents.reviseHuman({context:ctx,documentId:parts[1],content:input.content,reason:input.reason??null}));}
+  if(method==="POST"&&parts[2]==="status"){
+   const input=await body(request),status=String(input.status??"");
+   if(OFFICIAL_DOCUMENT_STATUSES.has(status))runtime.auth.requireScope(principal,"ai:approve");
+   return json(200,await runtime.ai.documents.setStatus({context:ctx,documentId:parts[1],status,reason:input.reason??null,officialApproval:OFFICIAL_DOCUMENT_STATUSES.has(status)}));
   }
+  if(method==="POST"&&parts[2]==="render")return json(200,await runtime.ai.documents.renderPdf({context:ctx,documentId:parts[1]}));
+  if(method==="GET"&&parts[2]==="history"){const result=await db.query(`SELECT * FROM ledgerly_ai.document_versions WHERE document_id=$1 AND organization_id=$2 ORDER BY version DESC`,[parts[1],ctx.organizationId]);return json(200,{items:result.rows});}
+ }
 
-  if(parts[0]==="knowledge"){
-    if(method==="GET"&&parts[1]==="sources"){const result=await db.query(`SELECT * FROM ledgerly_ai.knowledge_sources WHERE organization_id=$1 ORDER BY created_at DESC`,[ctx.organizationId]);return json(200,{items:result.rows,capabilities:runtime.ai.storeCapabilities});}
-    if(method==="POST"&&parts[1]==="upload"){const bytes=await readRaw(request,MAX_UPLOAD_BYTES);if(!bytes.length){const e=new Error("Knowledge upload is empty");e.status=422;throw e;}const name=cleanFilename(header(request,"x-file-name")||url.searchParams.get("name")||"knowledge-document"),contentType=String(header(request,"content-type")||"application/octet-stream").split(";")[0].trim(),sourceType=String(header(request,"x-source-type")||"uploaded_document");return json(201,await runtime.ai.uploadKnowledge({context:ctx,name,bytes,contentType,sourceType}));}
-    if(method==="POST"&&parts[1]==="sources"&&parts.length===2){const input=await body(request);return json(201,await runtime.ai.knowledge.createSource({context:ctx,name:input.name,sourceType:input.sourceType,storageRef:input.storageRef,metadata:input.metadata}));}
-    if(method==="POST"&&parts[1]==="sources"&&parts[3]==="chunks"){const input=await body(request);return json(200,await runtime.ai.knowledge.indexChunks({context:ctx,sourceId:parts[2],chunks:input.chunks??[]}));}
-    if(method==="POST"&&parts[1]==="retrieve"){const input=await body(request);return json(200,{items:await runtime.ai.knowledge.retrieve({context:ctx,query:input.query,sourceIds:input.sourceIds,limit:input.limit})});}
-  }
+ if(parts[0]==="academics"){
+  if(method==="POST"&&parts[1]==="lesson-plan-tasks"){const input=await body(request);return json(201,await runtime.ai.academic.createLessonPlanTask({context:ctx,agentId:input.agentId,instruction:input.instruction,academicContext:input.academicContext??{}}));}
+  if(method==="POST"&&parts[1]==="review-tasks"){const input=await body(request);return json(201,await runtime.ai.academic.createReviewTask({context:ctx,reviewerAgentId:input.reviewerAgentId,documentId:input.documentId,instruction:input.instruction}));}
+  if(method==="GET"&&parts[1]==="reviews"&&parts[2])return json(200,{items:await runtime.ai.academic.listReviews({context:ctx,documentId:parts[2]})});
+ }
 
-  if(parts[0]==="memory"&&parts[1]){const agentId=parts[1];if(method==="GET")return json(200,{items:await runtime.ai.memory.list({context:ctx,agentId,type:url.searchParams.get("type"),includeDisabled:url.searchParams.get("includeDisabled")==="true",includeExpired:url.searchParams.get("includeExpired")==="true"})});if(method==="POST"&&parts.length===2){await getAgent(runtime,ctx,agentId);const input=await body(request);return json(200,await runtime.ai.memory.put({context:ctx,agentId,type:input.type,key:input.key,value:input.value,expiresAt:input.expiresAt}));}if(method==="DELETE"&&parts.length===2){await getAgent(runtime,ctx,agentId);const input=await body(request);return json(200,await runtime.ai.memory.clear({context:ctx,agentId,type:input.type??null}));}if(method==="POST"&&parts[2]&&parts[3]==="disable"){await getAgent(runtime,ctx,agentId);const input=await body(request);return json(200,await runtime.ai.memory.disable({context:ctx,memoryId:parts[2],disabled:input.disabled!==false}));}}
+ if(parts[0]==="knowledge"){
+  if(method==="GET"&&parts[1]==="sources"){const result=await db.query(`SELECT * FROM ledgerly_ai.knowledge_sources WHERE organization_id=$1 ORDER BY created_at DESC`,[ctx.organizationId]);return json(200,{items:result.rows,capabilities:runtime.ai.storeCapabilities});}
+  if(method==="POST"&&parts[1]==="ingest"){const input=await body(request);return json(201,await runtime.ai.ingestion.ingestStored({context:ctx,name:input.name,sourceType:input.sourceType,storageRef:input.storageRef,contentType:input.contentType,metadata:input.metadata??{}}));}
+  if(method==="POST"&&parts[1]==="sources"&&parts.length===2){const input=await body(request);return json(201,await runtime.ai.knowledge.createSource({context:ctx,name:input.name,sourceType:input.sourceType,storageRef:input.storageRef,metadata:input.metadata}));}
+  if(method==="POST"&&parts[1]==="sources"&&parts[3]==="chunks"){const input=await body(request);return json(200,await runtime.ai.knowledge.indexChunks({context:ctx,sourceId:parts[2],chunks:input.chunks??[]}));}
+  if(method==="POST"&&parts[1]==="retrieve"){const input=await body(request);return json(200,{items:await runtime.ai.knowledge.retrieve({context:ctx,query:input.query,sourceIds:input.sourceIds,limit:input.limit})});}
+ }
 
-  if(parts[0]==="schedules"){if(method==="GET"){const items=await runtime.services.scheduler.list({organizationId:ctx.organizationId,limit:200});return json(200,{items:items.filter((item)=>item.kind==="ai.task")});}if(method==="POST"&&parts.length===1){const input=await body(request);await requireActiveAgent(runtime,ctx,input.agentId);return json(201,await runtime.ai.schedules.register({context:ctx,name:input.name,agentId:input.agentId,instruction:input.instruction,cron:input.cron,timezone:input.timezone,priority:input.priority,enabled:input.enabled}));}if(method==="DELETE"&&parts.length===2)return json(200,await runtime.ai.schedules.cancel({context:ctx,scheduleId:parts[1]}));}
-
-  if(parts[0]==="academic"){if(method==="POST"&&parts[1]==="draft"){const input=await body(request);await requireActiveAgent(runtime,ctx,input.agentId);return json(201,await runtime.ai.academic.requestDraft({context:ctx,...input}));}if(method==="POST"&&parts[1]==="review"){const input=await body(request);await requireActiveAgent(runtime,ctx,input.reviewerAgentId);return json(201,await runtime.ai.academic.requestReview({context:ctx,...input}));}if(method==="GET"&&parts[1]==="reviews"&&parts[2])return json(200,{items:await runtime.ai.academic.listReviews({context:ctx,documentId:parts[2]})});}
-
-  if(parts[0]==="activity"&&method==="GET"){const rows=await runtime.services.audit.list({organizationId:ctx.organizationId,limit:300});return json(200,{items:rows.filter((row)=>row.actor_type==="ai_agent"||String(row.action||"").startsWith("ai.")||String(row.entity_type||"")==="document").map((row)=>({activity_id:row.id,organization_id:row.organization_id,agent_id:row.agent_id,task_id:row.metadata?.task_id??null,activity_type:row.action,summary:row.reason||row.action,data:row.metadata,occurred_at:row.occurred_at}))});}
-  if(parts[0]==="audit"&&method==="GET"){const rows=await runtime.services.audit.list({organizationId:ctx.organizationId,limit:300});return json(200,{items:rows.filter((row)=>row.actor_type==="ai_agent"||String(row.action||"").startsWith("ai.")||String(row.entity_type||"")==="document")});}
-  if(parts[0]==="settings"&&method==="GET")return json(200,{provider:runtime.ai.config.providerConfig,embeddingModel:runtime.ai.config.embeddingModel,limits:runtime.ai.config.limits,knowledge:runtime.ai.storeCapabilities});
-
-  return json(404,{error:{code:"AI_ROUTE_NOT_FOUND",message:"AI Workforce route not found"}});
+ if(parts[0]==="memory"&&parts[1]){
+  const agentId=parts[1];
+  if(method==="GET")return json(200,{items:await runtime.ai.memory.list({context:ctx,agentId,type:url.searchParams.get("type"),includeDisabled:url.searchParams.get("includeDisabled")==="true"})});
+  if(method==="POST"&&parts.length===2){const input=await body(request);return json(200,await runtime.ai.memory.put({context:ctx,agentId,type:input.type,key:input.key,value:input.value,expiresAt:input.expiresAt}));}
+  if(method==="DELETE"&&parts.length===2){const input=await body(request);return json(200,await runtime.ai.memory.clear({context:ctx,agentId,type:input.type??null}));}
+  if(method==="POST"&&parts[2]&&parts[3]==="disable"){const input=await body(request);return json(200,await runtime.ai.memory.disable({context:ctx,memoryId:parts[2],disabled:input.disabled!==false}));}
+ }
+ if(parts[0]==="schedules"){
+  if(method==="GET"){const items=await runtime.services.scheduler.list({organizationId:ctx.organizationId,limit:200});return json(200,{items:items.filter((item)=>item.kind==="ai.task")});}
+  if(method==="POST"&&parts.length===1){const input=await body(request);return json(201,await runtime.ai.schedules.register({context:ctx,name:input.name,agentId:input.agentId,instruction:input.instruction,cron:input.cron,timezone:input.timezone,priority:input.priority,enabled:input.enabled}));}
+  if(method==="DELETE"&&parts.length===2)return json(200,await runtime.ai.schedules.cancel({context:ctx,scheduleId:parts[1]}));
+ }
+ if(parts[0]==="activity"&&method==="GET"){const result=await db.query(`SELECT * FROM ledgerly_ai.activity WHERE organization_id=$1 ORDER BY occurred_at DESC LIMIT 300`,[ctx.organizationId]);return json(200,{items:result.rows});}
+ if(parts[0]==="audit"&&method==="GET"){const result=await db.query(`SELECT * FROM ledgerly_meta.audit_events WHERE organization_id=$1 AND (action LIKE 'ai.%' OR actor_type='ai_agent') ORDER BY occurred_at DESC LIMIT 300`,[ctx.organizationId]);return json(200,{items:result.rows});}
+ if(parts[0]==="settings"&&method==="GET")return json(200,{provider:{provider:runtime.ai.config.provider,endpoint:runtime.ai.config.providerConfig?.endpoint,model:runtime.ai.config.providerConfig?.model},limits:runtime.ai.config.limits,knowledge:runtime.ai.storeCapabilities});
+ return json(404,{error:{code:"AI_ROUTE_NOT_FOUND",message:"AI Workforce route not found"}});
 }

@@ -33,12 +33,10 @@ export class OllamaProvider extends AiModelProvider {
     const started = Date.now();
     try {
       const models = await this.listModels();
-      if (!this.model) return { ok:false,provider:this.id,online:true,model:null,modelInstalled:null,latencyMs:Date.now()-started,models:models.map((m)=>m.name),state:"model_unconfigured",code:"AI_MODEL_NOT_CONFIGURED",error:"No AI model configured" };
-      const installed = models.some((m) => m.name === this.model || m.name?.split(":")[0] === this.model);
-      return { ok:installed, provider:this.id, online:true, model:this.model, modelInstalled:installed, latencyMs:Date.now()-started, models:models.map((m)=>m.name), state:installed?"ready":"model_missing", ...(installed?{}:{code:"AI_MODEL_NOT_INSTALLED",error:`Configured model ${this.model} is not installed`}) };
+      const installed = !this.model || models.some((m) => m.name === this.model || m.name?.split(":")[0] === this.model);
+      return { ok:installed, provider:this.id, online:true, model:this.model, modelInstalled:installed, latencyMs:Date.now()-started, models:models.map((m)=>m.name), state:installed?"ready":"model_missing" };
     } catch (error) {
-      const code=error?.code;
-      return { ok:false, provider:this.id, online:code!=="AI_RUNTIME_OFFLINE", model:this.model, modelInstalled:code==="AI_MODEL_NOT_INSTALLED"?false:null, latencyMs:Date.now()-started, state:code==="AI_RUNTIME_OVERLOADED"?"overloaded":code==="AI_RUNTIME_TIMEOUT"?"timeout":"offline", error:error instanceof Error ? error.message : String(error), code };
+      return { ok:false, provider:this.id, online:false, model:this.model, modelInstalled:false, latencyMs:Date.now()-started, state:error?.code === "AI_RUNTIME_OVERLOADED" ? "overloaded" : "offline", error:error instanceof Error ? error.message : String(error), code:error?.code };
     }
   }
 
@@ -49,15 +47,6 @@ export class OllamaProvider extends AiModelProvider {
     if (format) body.format = format;
     const data = await this.request("/api/chat", { method:"POST", body:JSON.stringify(body) });
     return { provider:this.id, model:data.model ?? this.model, message:data.message ?? {}, done:data.done === true, promptEvalCount:data.prompt_eval_count ?? null, evalCount:data.eval_count ?? null, totalDurationNs:data.total_duration ?? null };
-  }
-
-  async embed(input) {
-    if (!this.model) throw new AiRuntimeError("AI_MODEL_NOT_CONFIGURED", "No embedding model configured");
-    const text=typeof input==="string"?input:input?.input;
-    const data=await this.request("/api/embed",{method:"POST",body:JSON.stringify({model:this.model,input:String(text??"")})});
-    const vector=data.embeddings?.[0]??data.embedding;
-    if(!Array.isArray(vector)||vector.length===0)throw new AiRuntimeError("AI_EMBEDDING_ERROR","Ollama returned no embedding vector");
-    return vector.map(Number);
   }
 }
 

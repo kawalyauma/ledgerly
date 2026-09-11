@@ -82,23 +82,6 @@ services:
       - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
     networks: [ledgerly_backend]
 
-  ollama:
-    image: ollama/ollama:latest
-    restart: unless-stopped
-    environment:
-      OLLAMA_HOST: 0.0.0.0:11434
-    volumes:
-      - ledgerly_ollama_data:/root/.ollama
-    ports:
-      - "127.0.0.1:${OLLAMA_HOST_PORT:-11434}:11434"
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 15s
-    networks: [ledgerly_backend]
-
   api:
     build:
       context: ./server
@@ -134,26 +117,6 @@ services:
       LEDGERLY_JWT_SECRET: ${LEDGERLY_JWT_SECRET}
       LEDGERLY_ACCESS_TOKEN_TTL_SECONDS: ${LEDGERLY_ACCESS_TOKEN_TTL_SECONDS:-900}
       LEDGERLY_REFRESH_TOKEN_TTL_DAYS: ${LEDGERLY_REFRESH_TOKEN_TTL_DAYS:-30}
-      LEDGERLY_AI_ENABLED: ${LEDGERLY_AI_ENABLED:-true}
-      LEDGERLY_AI_PROVIDER: ${LEDGERLY_AI_PROVIDER:-ollama}
-      LEDGERLY_AI_ENDPOINT: ${LEDGERLY_AI_ENDPOINT:-http://ollama:11434}
-      LEDGERLY_AI_MODEL: ${LEDGERLY_AI_MODEL:-}
-      LEDGERLY_AI_EMBEDDING_MODEL: ${LEDGERLY_AI_EMBEDDING_MODEL:-}
-      LEDGERLY_AI_EMBEDDING_DIMENSIONS: ${LEDGERLY_AI_EMBEDDING_DIMENSIONS:-768}
-      LEDGERLY_AI_TIMEOUT_MS: ${LEDGERLY_AI_TIMEOUT_MS:-60000}
-      LEDGERLY_AI_CONTEXT_LIMIT: ${LEDGERLY_AI_CONTEXT_LIMIT:-8192}
-      LEDGERLY_AI_TEMPERATURE: ${LEDGERLY_AI_TEMPERATURE:-0.2}
-      LEDGERLY_AI_TOOL_SUPPORT: ${LEDGERLY_AI_TOOL_SUPPORT:-true}
-      LEDGERLY_AI_WORKER_ENABLED: ${LEDGERLY_AI_WORKER_ENABLED:-true}
-      LEDGERLY_AI_QUEUE_NAME: ${LEDGERLY_AI_QUEUE_NAME:-ai-workforce}
-      LEDGERLY_AI_MAX_CONCURRENCY: ${LEDGERLY_AI_MAX_CONCURRENCY:-2}
-      LEDGERLY_AI_MAX_RETRIES: ${LEDGERLY_AI_MAX_RETRIES:-2}
-      LEDGERLY_AI_TASK_TIMEOUT_MS: ${LEDGERLY_AI_TASK_TIMEOUT_MS:-120000}
-      LEDGERLY_AI_MAX_PROMPT_CHARS: ${LEDGERLY_AI_MAX_PROMPT_CHARS:-48000}
-      LEDGERLY_AI_MAX_OUTPUT_CHARS: ${LEDGERLY_AI_MAX_OUTPUT_CHARS:-32000}
-      LEDGERLY_AI_MAX_TOOL_CALLS: ${LEDGERLY_AI_MAX_TOOL_CALLS:-12}
-      LEDGERLY_AI_MAX_HANDOFFS: ${LEDGERLY_AI_MAX_HANDOFFS:-3}
-      LEDGERLY_AI_POLL_INTERVAL_MS: ${LEDGERLY_AI_POLL_INTERVAL_MS:-500}
       LEDGERLY_NOTIFICATION_TIMEOUT_MS: ${LEDGERLY_NOTIFICATION_TIMEOUT_MS:-10000}
       LEDGERLY_NOTIFICATION_REQUIRED_CHANNELS: ${LEDGERLY_NOTIFICATION_REQUIRED_CHANNELS:-}
       EGOSMS_API_URL: ${EGOSMS_API_URL:-https://www.egosms.co/api/v1/plain/}
@@ -182,8 +145,6 @@ services:
       redis:
         condition: service_healthy
       minio:
-        condition: service_started
-      ollama:
         condition: service_started
     volumes:
       - ledgerly_app_storage:/var/lib/ledgerly/storage
@@ -247,7 +208,6 @@ volumes:
   ledgerly_postgres_data:
   ledgerly_redis_data:
   ledgerly_object_data:
-  ledgerly_ollama_data:
   ledgerly_app_storage:
   ledgerly_caddy_data:
   ledgerly_caddy_config:
