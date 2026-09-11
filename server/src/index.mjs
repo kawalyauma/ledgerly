@@ -2,12 +2,14 @@ import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { loadConfig } from "./config.mjs";
 import { createRuntime } from "./runtime.mjs";
+import { createHttpRouteRegistry } from "./http/routes.mjs";
 
 const config = loadConfig();
 const runtime = await createRuntime(config);
+const routes = await createHttpRouteRegistry({ runtime, config });
 const startedAt = Date.now();
 
-function writeJson(response, status, body, requestId) {
+function writeJson(response, status, body, requestId, extraHeaders = {}) {
   const payload = JSON.stringify(body);
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
@@ -17,6 +19,7 @@ function writeJson(response, status, body, requestId) {
     "x-frame-options": "DENY",
     "referrer-policy": "no-referrer",
     "x-request-id": requestId,
+    ...extraHeaders,
   });
   response.end(payload);
 }
@@ -47,34 +50,43 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/selfhost/contracts") {
-      return writeJson(response, 200, runtime.describeContracts(), requestId);
+      return writeJson(response, 200, {
+        ...runtime.describeContracts(),
+        httpRoutes: routes.describe(),
+      }, requestId);
     }
+
+    const routed = await routes.dispatch({ request, url, requestId });
+    if (routed) return writeJson(response, routed.status, routed.body, requestId, routed.headers);
 
     return writeJson(response, 404, {
       error: {
         code: "SELFHOST_ROUTE_NOT_FOUND",
-        message: "The self-hosted foundation exposes only health, readiness, and contract inspection. Ledgerly business traffic still uses the Cloudflare runtime.",
+        message: "The requested self-hosted route is not enabled. Ledgerly business traffic remains on Cloudflare until the corresponding migration and cutover checks complete.",
         requestId,
       },
     }, requestId);
   } catch (error) {
+    const requestedStatus = Number(error?.status ?? error?.statusCode ?? 500);
+    const status = Number.isInteger(requestedStatus) && requestedStatus >= 400 && requestedStatus <= 599 ? requestedStatus : 500;
     console.error(JSON.stringify({
       level: "error",
       requestId,
+      status,
       message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
+      stack: status >= 500 && error instanceof Error ? error.stack : undefined,
     }));
-    return writeJson(response, 500, {
+    return writeJson(response, status, {
       error: {
-        code: "SELFHOST_INTERNAL_ERROR",
-        message: "The self-hosted foundation request could not be completed.",
+        code: error?.code ?? (status === 500 ? "SELFHOST_INTERNAL_ERROR" : "SELFHOST_REQUEST_FAILED"),
+        message: status === 500 ? "The self-hosted request could not be completed." : String(error?.message ?? "Request failed"),
         requestId,
       },
     }, requestId);
   }
 });
 
-server.requestTimeout = 15_000;
+server.requestTimeout = 130_000;
 server.headersTimeout = 10_000;
 server.keepAliveTimeout = 5_000;
 server.maxRequestsPerSocket = 1000;
@@ -87,6 +99,7 @@ server.listen(config.port, config.host, () => {
     port: config.port,
     environment: config.environment,
     runtimeMode: config.runtimeMode,
+    domainRoutes: routes.describe().map((route) => route.name),
   }));
 });
 
