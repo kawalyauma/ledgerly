@@ -40,7 +40,7 @@ export class AiWorker {
       return {completed:true,jobId:item.job.jobId};
     } catch (error) {
       const taskId=item.job.payload?.taskId??item.job.jobId;
-      const nonRetryable=["AI_AGENT_DISABLED","AI_TOOL_NOT_ALLOWED","AI_PERMISSION_DENIED","AI_ACTION_PROHIBITED","BACKGROUND_ACTOR_REVOKED","BACKGROUND_ACTOR_BLOCKED"].includes(error?.code);
+      const nonRetryable=["AI_AGENT_DISABLED","AI_TOOL_NOT_ALLOWED","AI_PERMISSION_DENIED","AI_ACTION_PROHIBITED","AI_MODEL_NOT_CONFIGURED","AI_MODEL_NOT_INSTALLED","BACKGROUND_ACTOR_REVOKED","BACKGROUND_ACTOR_BLOCKED"].includes(error?.code);
       if (!item.job.payload?.aiScheduled) {
         await this.taskService.setStatus({organizationId:item.job.organizationId,taskId,status:nonRetryable?"failed":"queued",error:error instanceof Error?error.message:String(error)}).catch(()=>undefined);
       }
@@ -97,12 +97,12 @@ export class AiWorker {
     const memories=this.memory ? await this.memory.list({context:{organizationId:org},agentId:agent.agentId,type:"durable"}) : [];
     const sources=this.knowledge && (agent.knowledgeSources?.length) ? await this.knowledge.retrieve({context:{organizationId:org},query:task.instruction,sourceIds:agent.knowledgeSources,limit:8}) : [];
     const executedApprovals=(await this.database.query(`SELECT approval_id,requested_action,payload,executed_result FROM ledgerly_ai.approvals WHERE organization_id=$1 AND task_id=$2 AND status='executed' ORDER BY executed_at`,[org,taskId])).rows;
-    const approvalReplay=new Map(executedApprovals.map((item)=>[replayKey(item.requested_action,item.payload),{approvalId:item.approval_id,result:item.executed_result}]));
+    const approvalReplay=new Map(executedApprovals.map((item)=>[replayKey(item.requested_action,item.payload),{approvalId:item.approval_id,result:item.executed_result?.output??item.executed_result}]));
     const messages=[
       {role:"system",content:truncate(`${agent.systemInstructions||defaultInstructions(agent)}\n\nSecurity: never request database credentials or unrestricted SQL. Use only provided Ledgerly tools.\nAI review is not official approval.`,this.limits.maxPromptChars)},
       {role:"system",content:truncate(`Durable structured memory: ${safeJson(memories.map((m)=>({key:m.key,value:m.value})))}`,8000)},
       {role:"system",content:truncate(`Permitted knowledge excerpts with source references: ${safeJson(sources.map((s)=>({source_id:s.source_id,chunk_id:s.chunk_id,content:s.content})))}`,16000)},
-      ...(executedApprovals.length?[{role:"system",content:truncate(`These human-approved tool actions have already executed successfully. Do not execute them again; if the same tool and payload is requested, Ledgerly will replay the saved result: ${safeJson(executedApprovals.map((a)=>({approval_id:a.approval_id,tool:a.requested_action,payload:a.payload,result:a.executed_result})))}`,12000)}]:[]),
+      ...(executedApprovals.length?[{role:"system",content:truncate(`These human-approved tool actions have already executed successfully. Do not execute them again; if the same tool and payload is requested, Ledgerly will replay the saved result: ${safeJson(executedApprovals.map((a)=>({approval_id:a.approval_id,tool:a.requested_action,payload:a.payload,result:a.executed_result?.output??a.executed_result})))}`,12000)}]:[]),
       {role:"user",content:truncate(task.instruction,this.limits.maxPromptChars)},
     ];
     const tools=this.gateway.describeForAgent({...agent,permissions}).map((tool)=>({type:"function",function:{name:tool.name,description:tool.description??tool.name,parameters:tool.parameters??{type:"object",additionalProperties:true}}}));
