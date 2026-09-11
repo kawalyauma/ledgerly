@@ -1,0 +1,24 @@
+[Unit]
+Description=Ledgerly verified backup set
+Wants=docker.service
+After=docker.service network-online.target
+ConditionPathExists=/etc/ledgerly/ledgerly.env
+ConditionPathExists=/etc/ledgerly/backup.env
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/etc/ledgerly/backup.env
+WorkingDirectory=/opt/ledgerly
+ExecStart=/opt/ledgerly/selfhost/backups/backup-all.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/backups/ledgerly /run /var/run
+NoNewPrivileges=true
+UMask=0077
+TimeoutStartSec=6h

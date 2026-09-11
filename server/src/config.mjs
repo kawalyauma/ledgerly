@@ -49,6 +49,14 @@ export function loadConfig(env = process.env) {
     1500,
     "LEDGERLY_DEPENDENCY_TIMEOUT_MS",
   );
+  const databasePoolMax = readPositiveInt(env.LEDGERLY_DATABASE_POOL_MAX, 20, "LEDGERLY_DATABASE_POOL_MAX");
+  if (databasePoolMax > 50) {
+    throw new Error("LEDGERLY_DATABASE_POOL_MAX must not exceed 50; scale HTTP/workers without unbounded PostgreSQL pools");
+  }
+  const jwtSecret = env.LEDGERLY_JWT_SECRET || "";
+  if (environment === "production" && jwtSecret.length < 32) {
+    throw new Error("LEDGERLY_JWT_SECRET must be at least 32 characters in production");
+  }
 
   return Object.freeze({
     serviceName: "ledgerly-selfhost-api",
@@ -57,13 +65,19 @@ export function loadConfig(env = process.env) {
     host: env.LEDGERLY_API_HOST ?? "0.0.0.0",
     port: readPort(env.LEDGERLY_API_PORT, 8788, "LEDGERLY_API_PORT"),
     dependencyTimeoutMs,
+    http: Object.freeze({
+      trustProxyHeaders: readBoolean(env.LEDGERLY_TRUST_PROXY_HEADERS, false),
+      rateLimitWindowMs: readPositiveInt(env.LEDGERLY_RATE_LIMIT_WINDOW_MS, 60000, "LEDGERLY_RATE_LIMIT_WINDOW_MS"),
+      rateLimitMaxRequests: readPositiveInt(env.LEDGERLY_RATE_LIMIT_MAX_REQUESTS, 600, "LEDGERLY_RATE_LIMIT_MAX_REQUESTS"),
+      maxRequestBodyBytes: readPositiveInt(env.LEDGERLY_MAX_REQUEST_BODY_BYTES, 67108864, "LEDGERLY_MAX_REQUEST_BODY_BYTES"),
+    }),
     database: Object.freeze({
       host: env.LEDGERLY_DATABASE_HOST ?? "127.0.0.1",
       port: readPort(env.LEDGERLY_DATABASE_PORT, 6432, "LEDGERLY_DATABASE_PORT"),
       database: env.LEDGERLY_DATABASE_NAME ?? "ledgerly",
       user: env.LEDGERLY_DATABASE_USER ?? "ledgerly",
       password: env.LEDGERLY_DATABASE_PASSWORD ?? "",
-      poolMax: readPositiveInt(env.LEDGERLY_DATABASE_POOL_MAX, 20, "LEDGERLY_DATABASE_POOL_MAX"),
+      poolMax: databasePoolMax,
       connectionTimeoutMs: dependencyTimeoutMs,
       idleTimeoutMs: readPositiveInt(env.LEDGERLY_DATABASE_IDLE_TIMEOUT_MS, 30000, "LEDGERLY_DATABASE_IDLE_TIMEOUT_MS"),
       ssl: readBoolean(env.LEDGERLY_DATABASE_SSL, false),
@@ -92,7 +106,7 @@ export function loadConfig(env = process.env) {
     auth: Object.freeze({
       issuer: env.LEDGERLY_JWT_ISSUER || "your-finance-pro",
       audience: env.LEDGERLY_JWT_AUDIENCE || "your-finance-pro-api",
-      secret: env.LEDGERLY_JWT_SECRET || "",
+      secret: jwtSecret,
       accessTokenTtlSeconds: readPositiveInt(env.LEDGERLY_ACCESS_TOKEN_TTL_SECONDS, 900, "LEDGERLY_ACCESS_TOKEN_TTL_SECONDS"),
       refreshTtlDays: readPositiveInt(env.LEDGERLY_REFRESH_TOKEN_TTL_DAYS, 30, "LEDGERLY_REFRESH_TOKEN_TTL_DAYS"),
     }),

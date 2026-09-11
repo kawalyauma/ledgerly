@@ -3,25 +3,50 @@
 }
 
 {$LEDGERLY_SITE_ADDRESS:http://localhost} {
-  encode zstd gzip
+  route {
+    request_body {
+      max_size {$LEDGERLY_MAX_REQUEST_BODY:64MB}
+    }
 
-  header {
-    X-Content-Type-Options nosniff
-    X-Frame-Options DENY
-    Referrer-Policy no-referrer
-    -Server
-  }
+    encode zstd gzip
 
-  handle /healthz {
-    respond "ledgerly-selfhost-edge-ok" 200
-  }
+    header {
+      X-Content-Type-Options nosniff
+      X-Frame-Options DENY
+      Referrer-Policy no-referrer
+      Permissions-Policy "camera=(), microphone=(), geolocation=()"
+      Strict-Transport-Security "max-age=31536000"
+      -Server
+    }
 
-  # Foundation-only Node runtime. No business routes are cut over yet.
-  handle /selfhost/* {
-    reverse_proxy api:8788
-  }
+    handle /healthz {
+      respond "ledgerly-selfhost-edge-ok" 200
+    }
 
-  handle {
-    respond "Ledgerly self-hosted edge is running. API/web cutover is not enabled yet." 503
+    # Readiness/contracts/ops are host-administration surfaces. They stay
+    # reachable only through loopback/private administration, never public edge.
+    @privateOps path /selfhost/ready /selfhost/contracts /selfhost/ops*
+    handle @privateOps {
+      respond 404
+    }
+
+    handle /selfhost/* {
+      reverse_proxy api:8788 {
+        # Overwrite client-address headers at the only trusted public edge.
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Host {host}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Real-IP {remote_host}
+        transport http {
+          dial_timeout 3s
+          response_header_timeout 30s
+          keepalive 30s
+        }
+      }
+    }
+
+    handle {
+      respond "Ledgerly self-hosted edge is running. API/web cutover is not enabled yet." 503
+    }
   }
 }

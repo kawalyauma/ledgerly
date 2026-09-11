@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Ledgerly disposable restore rehearsal weekly
+
+[Timer]
+OnCalendar=Sun *-*-* 04:30:00
+RandomizedDelaySec=30m
+Persistent=true
+Unit=ledgerly-restore-test.service
+
+[Install]
+WantedBy=timers.target
