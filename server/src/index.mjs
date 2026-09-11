@@ -12,6 +12,7 @@ const startedAt = Date.now();
 function writeJson(response, status, body, requestId, extraHeaders = {}) {
   const payload = JSON.stringify(body);
   response.writeHead(status, {
+    ...extraHeaders,
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(payload),
     "cache-control": "no-store",
@@ -19,7 +20,6 @@ function writeJson(response, status, body, requestId, extraHeaders = {}) {
     "x-frame-options": "DENY",
     "referrer-policy": "no-referrer",
     "x-request-id": requestId,
-    ...extraHeaders,
   });
   response.end(payload);
 }
@@ -86,7 +86,7 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
-server.requestTimeout = 130_000;
+server.requestTimeout = 15_000;
 server.headersTimeout = 10_000;
 server.keepAliveTimeout = 5_000;
 server.maxRequestsPerSocket = 1000;
