@@ -1,32 +1,21 @@
 const RESOURCE_DEFINITIONS = Object.freeze({
-  "academic-years": { table: "school_academic_years", order: "starts_on DESC, name" },
-  terms: { table: "school_terms", order: "academic_year_id, sequence_no, starts_on" },
-  classes: { table: "school_classes", order: "academic_year_id, name" },
-  streams: { table: "school_streams", order: "class_id, name" },
-  subjects: { table: "school_subjects", order: "name" },
-  students: { table: "school_students", order: "last_name, first_name, admission_number" },
-  guardians: { table: "school_guardians", order: "last_name, first_name" },
-  staff: { table: "school_staff_profiles", order: "last_name, first_name, staff_number" },
-  schemes: { table: "acad_schemes", order: "academic_year_id, term_id, updated_at DESC" },
-  "lesson-plans": { table: "acad_lesson_plans", order: "lesson_date DESC, updated_at DESC" },
-  observations: { table: "acad_observations", order: "observed_at DESC, created_at DESC" },
-  inspections: { table: "acad_inspections", order: "inspection_date DESC, created_at DESC" },
-  "attendance-sessions": { table: "att_sessions", order: "attendance_date DESC, starts_at DESC" },
-  "attendance-records": { table: "att_records", order: "attendance_date DESC, updated_at DESC" },
-  "attendance-events": { table: "att_events", order: "captured_at DESC" },
-  "book-batches": { table: "bks_distribution_batches", order: "created_at DESC" },
-  "book-distributions": { table: "bks_distributions", order: "issued_at DESC, created_at DESC" },
-});
-
-const FILTER_COLUMNS = Object.freeze({
-  academicYearId: "academic_year_id",
-  termId: "term_id",
-  classId: "class_id",
-  streamId: "stream_id",
-  subjectId: "subject_id",
-  studentId: "student_id",
-  staffId: "staff_id",
-  status: "status",
+  "academic-years": { table: "school_academic_years", order: "starts_on DESC, name", filters: { status: "status" } },
+  terms: { table: "school_terms", order: "academic_year_id, sequence_no, starts_on", filters: { academicYearId: "academic_year_id", status: "status" } },
+  classes: { table: "school_classes", order: "academic_year_id, name", filters: { academicYearId: "academic_year_id" } },
+  streams: { table: "school_streams", order: "class_id, name", filters: { classId: "class_id" } },
+  subjects: { table: "school_subjects", order: "name", filters: {} },
+  students: { table: "school_students", order: "last_name, first_name, admission_number", filters: { academicYearId: "current_academic_year_id", classId: "current_class_id", streamId: "current_stream_id", status: "status" } },
+  guardians: { table: "school_guardians", order: "last_name, first_name", filters: {} },
+  staff: { table: "school_staff_profiles", order: "last_name, first_name, staff_number", filters: { status: "employment_status" } },
+  schemes: { table: "acad_schemes", order: "academic_year_id, term_id, updated_at DESC", filters: { academicYearId: "academic_year_id", termId: "term_id", classId: "class_id", streamId: "stream_id", subjectId: "subject_id", status: "status" } },
+  "lesson-plans": { table: "acad_lesson_plans", order: "lesson_date DESC, updated_at DESC", filters: { academicYearId: "academic_year_id", termId: "term_id", classId: "class_id", streamId: "stream_id", subjectId: "subject_id", status: "status" } },
+  observations: { table: "acad_observations", order: "observed_at DESC NULLS LAST, created_at DESC", filters: { classId: "class_id", streamId: "stream_id", subjectId: "subject_id", status: "status" } },
+  inspections: { table: "acad_inspections", order: "inspected_on DESC, created_at DESC", filters: { classId: "class_id", streamId: "stream_id", subjectId: "subject_id", status: "status" } },
+  "attendance-sessions": { table: "att_sessions", order: "attendance_date DESC, starts_at DESC", filters: { academicYearId: "academic_year_id", termId: "term_id", classId: "class_id", streamId: "stream_id", subjectId: "subject_id", status: "status" } },
+  "attendance-records": { table: "att_records", order: "attendance_date DESC, updated_at DESC", filters: { status: "status" } },
+  "attendance-events": { table: "att_events", order: "captured_at DESC", filters: {} },
+  "book-batches": { table: "bks_distribution_batches", order: "distributed_on DESC, created_at DESC", filters: { academicYearId: "academic_year_id", termId: "term_id", classId: "class_id", streamId: "stream_id" } },
+  "book-distributions": { table: "bks_distributions", order: "distributed_on DESC, created_at DESC", filters: { academicYearId: "academic_year_id", termId: "term_id", classId: "class_id", streamId: "stream_id", studentId: "student_id" } },
 });
 
 function boundedInt(value, fallback, min, max) {
@@ -52,7 +41,7 @@ function camelizeRow(row) {
 function filtersFor(definition, query) {
   const clauses = ["organization_id=$1"];
   const values = [query.organizationId];
-  for (const [input, column] of Object.entries(FILTER_COLUMNS)) {
+  for (const [input, column] of Object.entries(definition.filters ?? {})) {
     const value = query[input];
     if (value == null || value === "") continue;
     values.push(String(value));
@@ -69,11 +58,7 @@ export class SchoolPlatformService {
   }
 
   describe() {
-    return {
-      provider: this.provider,
-      mode: "read-only-until-cutover",
-      resources: Object.keys(RESOURCE_DEFINITIONS),
-    };
+    return { provider: this.provider, mode: "read-only-until-cutover", resources: Object.keys(RESOURCE_DEFINITIONS) };
   }
 
   async readiness() {
@@ -123,13 +108,7 @@ export class SchoolPlatformService {
             ORDER BY s.name`, [organizationId, classId])
         : this.database.query("SELECT id,code,name,short_name,subject_type,active FROM school_subjects WHERE organization_id=$1 ORDER BY name", [organizationId]),
     ]);
-    return {
-      academicYears: years.rows.map(camelizeRow),
-      terms: terms.rows.map(camelizeRow),
-      classes: classes.rows.map(camelizeRow),
-      streams: streams.rows.map(camelizeRow),
-      subjects: subjects.rows.map(camelizeRow),
-    };
+    return { academicYears: years.rows.map(camelizeRow), terms: terms.rows.map(camelizeRow), classes: classes.rows.map(camelizeRow), streams: streams.rows.map(camelizeRow), subjects: subjects.rows.map(camelizeRow) };
   }
 
   async list(resource, query) {

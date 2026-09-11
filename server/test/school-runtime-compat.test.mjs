@@ -33,6 +33,20 @@ test("school platform lists only tenant-scoped rows with bounded pagination", as
   assert.deepEqual(database.calls[0].values, ["org-1", "active", 500, 0]);
 });
 
+test("resource filters are allow-listed per physical table", async () => {
+  const database = fakeDatabase();
+  const service = new SchoolPlatformService({ database });
+  await service.list("guardians", { organizationId: "org-1", status: "active", subjectId: "sub-1" });
+  assert.doesNotMatch(database.calls[0].sql, /status=|subject_id=/);
+  await service.list("staff", { organizationId: "org-1", status: "active" });
+  assert.match(database.calls[1].sql, /employment_status=\$2/);
+  await service.list("book-distributions", { organizationId: "org-1", studentId: "std-1" });
+  assert.match(database.calls[2].sql, /student_id=\$2/);
+  assert.match(database.calls[2].sql, /ORDER BY distributed_on DESC/);
+  await service.list("inspections", { organizationId: "org-1" });
+  assert.match(database.calls[3].sql, /ORDER BY inspected_on DESC/);
+});
+
 test("reference API applies year/class context instead of returning unrelated terms and subjects", async () => {
   const database = fakeDatabase();
   const service = new SchoolPlatformService({ database });
