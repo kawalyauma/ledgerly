@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createJobEnvelope } from "../contracts.mjs";
 import { DOCUMENT_STATUSES, TASK_STATUSES, DEFAULT_LIMITS } from "./constants.mjs";
 import { aiAttribution, humanEditProvenance } from "./provenance.mjs";
 
@@ -39,7 +40,9 @@ export class AiTaskService {
       ON CONFLICT (organization_id,idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE SET updated_at=ledgerly_ai.tasks.updated_at
       RETURNING *`, [taskId,org,assignedAgent,context.userId,instruction,priority,dueTime,JSON.stringify(inputReferences),idempotencyKey,parentTaskId,handoffDepth]);
     const task=result.rows[0];
-    if (task.task_id===taskId) await this.queue.enqueue({ type:"ai.task", taskId, organizationId:org }, { idempotencyKey:`ai:${taskId}`, maxAttempts:this.limits.maxRetries+1 });
+    if (task.task_id===taskId) {
+      await this.queue.enqueue(createJobEnvelope({ kind:"ai.task", organizationId:org, jobId:taskId, idempotencyKey:`ai:${taskId}`, payload:{taskId} }));
+    }
     await this.audit?.write?.({ organization_id:org, actor_type:"human", actor_id:context.userId, action:"ai.task.created", entity_type:"ai_task", entity_id:task.task_id, reason:instruction, metadata:{assigned_agent:assignedAgent,parent_task_id:parentTaskId} });
     return task;
   }
