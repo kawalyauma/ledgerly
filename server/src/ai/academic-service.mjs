@@ -2,10 +2,15 @@ import { randomUUID } from "node:crypto";
 
 export class AiAcademicService{
   constructor({database,tasks,documents,audit}){this.database=database;this.tasks=tasks;this.documents=documents;this.audit=audit;}
+  async requestDraft(input){return this.createLessonPlanTask(input);}
+  async requestReview(input){return this.createReviewTask(input);}
   async createLessonPlanTask({context,agentId,instruction,academicContext={}}){
+    if(!agentId)throw new Error("academic draft requires an AI employee");
+    if(!instruction)throw new Error("academic draft instruction is required");
     return this.tasks.create({context,assignedAgent:agentId,instruction,priority:60,inputReferences:[{type:"academic_context",value:academicContext}],idempotencyKey:academicContext.lessonPlanId?`lesson-draft:${academicContext.lessonPlanId}`:null});
   }
   async createReviewTask({context,reviewerAgentId,documentId,instruction="Review this lesson plan for curriculum alignment, completeness, learner activities, assessment, resources, sequence and school standards."}){
+    if(!reviewerAgentId)throw new Error("academic review requires a reviewer AI employee");
     const document=(await this.database.query(`SELECT document_id,status,type FROM ledgerly_ai.documents WHERE document_id=$1 AND organization_id=$2`,[documentId,context.organizationId])).rows[0];
     if(!document)throw new Error("lesson-plan document not found");
     return this.tasks.create({context,assignedAgent:reviewerAgentId,instruction,priority:65,inputReferences:[{type:"document",id:documentId}],idempotencyKey:`academic-review:${documentId}:${document.status}`});
