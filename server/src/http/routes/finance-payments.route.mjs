@@ -1,0 +1,11 @@
+import {authenticateFinance,mapFinanceError,ok,pagination,readJson,requiredHeader} from '../../finance/http.mjs';
+const PREFIX='/api/v1/payments',parts=url=>url.pathname.slice(PREFIX.length).split('/').filter(Boolean);
+export default{name:'finance-payments',prefix:PREFIX,business:true,priority:95,enabled(config){return config.extensions?.['finance-api']?.paymentsCutover==='node'},async handle({request,url,runtime}){try{const api=runtime.extensions?.['finance-api']?.payments;if(!api)throw Object.assign(new Error('Finance payments runtime unavailable'),{status:503,code:'FINANCE_SELFHOST_NOT_READY'});const p=parts(url);
+ if(request.method==='GET'&&p.length===0){const x=await authenticateFinance(runtime,request,'payments:read'),page=pagination(url);return ok({data:await api.list(x.organizationId,page),pagination:page})}
+ if(request.method==='POST'&&p.length===0){const x=await authenticateFinance(runtime,request,'payments:write'),key=requiredHeader(request,'Idempotency-Key');return ok({data:await api.create(x.organizationId,x.userId,await readJson(request),key)},201)}
+ if(request.method==='POST'&&p.length===2&&p[1]==='post'){const x=await authenticateFinance(runtime,request,'payments:write'),body=await readJson(request,{optional:true});return ok({data:await api.post(x.organizationId,x.userId,p[0],body.allocations??[])})}
+ if(request.method==='POST'&&p.length===2&&p[1]==='allocations'){const x=await authenticateFinance(runtime,request,'payments:write'),body=await readJson(request),key=request.headers.get('Idempotency-Key');return ok({data:await api.allocate(x.organizationId,x.userId,p[0],body.allocations??[],key)})}
+ if(request.method==='POST'&&p.length===2&&p[1]==='reverse'){const x=await authenticateFinance(runtime,request,'payments:write');return ok({data:await api.reverse(x.organizationId,x.userId,p[0],await readJson(request))})}
+ if(request.method==='DELETE'&&p.length===1){const x=await authenticateFinance(runtime,request,'payments:write');await api.remove(x.organizationId,x.userId,p[0]);return{status:204,body:null}}
+ throw Object.assign(new Error('Finance payments route not found'),{status:404,code:'NOT_FOUND'});
+}catch(error){if(error instanceof TypeError)throw Object.assign(error,{status:422,code:'VALIDATION_ERROR'});throw mapFinanceError(error)}}};
