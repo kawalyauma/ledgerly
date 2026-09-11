@@ -8,4 +8,8 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 DEST="$ROOT/objects/$STAMP"
 mkdir -p "$DEST"
 mc mirror --overwrite "$MC_ALIAS/$MINIO_DEFAULT_BUCKET" "$DEST"
-find "$DEST" -type f -print0 | sort -z | xargs -0 sha256sum > "$DEST/SHA256SUMS"
+TMP_SUMS="$DEST/.SHA256SUMS.tmp"
+find "$DEST" -type f ! -name 'SHA256SUMS' ! -name '.SHA256SUMS.tmp' -print0 \
+  | sort -z \
+  | xargs -0 -r sha256sum > "$TMP_SUMS"
+mv "$TMP_SUMS" "$DEST/SHA256SUMS"
