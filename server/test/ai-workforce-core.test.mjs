@@ -30,7 +30,7 @@ test("consequential actions default to approval",()=>{
 test("core prohibited tools cannot be approved into execution",async()=>{
   const gateway=registerCoreTools(new AiToolGateway({audit:{write:async()=>{}}}),{});
   const restricted={agentId:"a1",name:"Restricted",role:"Test",status:"active",autonomyLevel:3,allowedTools:["post_payment"],permissions:["ai:restricted"]};
-  await assert.rejects(()=>gateway.invoke({agent:restricted,context:{organizationId:"org-a",permissions:["ai:restricted"]},toolName:"post_payment",input:{amount:10}}),(error)=>error.code==="AI_ACTION_PROHIBITED");
+  await assert.rejects(()=>gateway.invoke({agent:restricted,context:{organizationId:"org-a",permissions:["ai:restricted"]},toolName:"post_payment",input:{}}),(error)=>error.code==="AI_ACTION_PROHIBITED");
   const definition=gateway.describeAll().find((tool)=>tool.name==="post_payment");
   assert.equal(definition.risk,"prohibited");
   assert.equal(definition.approvalRequired,false);
@@ -44,6 +44,26 @@ test("core tool definitions expose explicit model argument schemas",()=>{
   assert.deepEqual(student.parameters.required,["studentId"]);
   assert.deepEqual(notification.parameters.required,["channel","to","message"]);
   assert.equal(notification.parameters.additionalProperties,false);
+});
+
+test("tool arguments are validated server-side before policy or handlers",async()=>{
+  let handled=false;
+  const gateway=registerCoreTools(new AiToolGateway({audit:{write:async()=>{}}}),{sendNotification:async()=>{handled=true;return {sent:true};}});
+  const notifier={agentId:"a1",name:"Mirembe",role:"Secretary",status:"active",autonomyLevel:3,allowedTools:["send_notification"],permissions:["notifications:send"]};
+  await assert.rejects(()=>gateway.invoke({agent:notifier,context:{organizationId:"org-a",permissions:["notifications:send"]},toolName:"send_notification",input:{message:"Missing destination"}}),(error)=>error.code==="AI_TOOL_INPUT_INVALID");
+  assert.equal(handled,false);
+});
+
+test("generic request_approval uses the durable approval gate rather than nesting approvals",async()=>{
+  const requests=[];
+  const gateway=registerCoreTools(new AiToolGateway({audit:{write:async()=>{}},approvalService:{request:async(input)=>{requests.push(input);return {approval_id:"p1",organization_id:input.organizationId,status:"pending"};}}}),{});
+  const reviewer={agentId:"a1",name:"Kato",role:"Reviewer",status:"active",autonomyLevel:2,allowedTools:["request_approval"],permissions:["approvals:write"]};
+  const input={action:"publish report",reason:"Human sign-off required",payload:{documentId:"d1"}};
+  const result=await gateway.invoke({agent:reviewer,context:{organizationId:"org-a",permissions:["approvals:write"]},taskId:"t1",toolName:"request_approval",input});
+  assert.equal(result.status,"waiting_for_approval");
+  assert.equal(requests.length,1);
+  assert.equal(requests[0].action,"request_approval");
+  assert.deepEqual(requests[0].payload,input);
 });
 
 test("AI provenance survives later human edit",()=>{

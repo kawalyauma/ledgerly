@@ -24,9 +24,24 @@ const TOOL_META=Object.freeze({
  prepare_fee_reminder:{description:"Prepare a non-sent fee reminder draft using the authoritative current student balance.",parameters:object({studentId:string("Student ID."),tone:{type:"string",enum:["neutral","friendly","firm"],description:"Optional reminder tone."},dueDate:string("Optional due date or payment date text.")},["studentId"])},
  create_task:{description:"Create another durable AI Workforce task for an allowed employee.",parameters:object({assignedAgent:string("Target AI employee ID."),instruction:string("Task instruction."),priority:integer("Priority from 1 to 100.",1,100),inputReferences:array("Optional structured input references."),idempotencyKey:string("Optional idempotency key.")},["assignedAgent","instruction"])},
  send_notification:{description:"Send a Ledgerly notification. This consequential action always requires human approval.",parameters:object({channel:string("Notification channel/provider."),to:string("Recipient/address/phone understood by the configured provider."),message:string("Exact approved message content."),subject:string("Optional subject."),deliveryId:string("Optional idempotent delivery ID.")},["channel","to","message"])},
- generate_report:{description:"Create a structured AI-authored report draft in Ledgerly Documents. It is not published automatically.",parameters:object({title:string("Report title."),content:{type:"object",description:"Structured report content."}},["title","content"])},
- request_approval:{description:"Create an explicit human approval request for a described action or artifact.",parameters:object({action:string("Action requiring approval."),reason:string("Why approval is required."),payload:{type:"object",description:"Exact payload to be reviewed."},riskLevel:{type:"string",enum:["low","medium","high"]},requestedApprover:string("Optional intended approver ID.")},["action","reason"])},
+ generate_report:{description:"Prepare a structured unpublished report draft from supplied report content.",parameters:object({title:string("Report title."),content:{type:"object",description:"Structured report content."}},["title","content"])},
+ request_approval:{description:"Pause the current AI task and request explicit human approval of a proposed action or decision.",parameters:object({action:string("Proposed action or decision requiring human approval."),reason:string("Why approval is required."),payload:{type:"object",description:"Exact proposal/payload for the human reviewer."},riskLevel:{type:"string",enum:["low","medium","high"]},requestedApprover:string("Optional intended approver ID.")},["action","reason"])},
 });
+
+function inputError(message){const error=new Error(message);error.code="AI_TOOL_INPUT_INVALID";error.status=422;return error;}
+function validateSchema(schema,value,path="input"){
+ if(!schema?.type)return;
+ if(schema.type==="object"){
+  if(value==null||typeof value!=="object"||Array.isArray(value))throw inputError(`${path} must be an object`);
+  const props=schema.properties??{};for(const key of schema.required??[])if(value[key]===undefined||value[key]===null||value[key]==="")throw inputError(`${path}.${key} is required`);
+  if(schema.additionalProperties===false)for(const key of Object.keys(value))if(!Object.prototype.hasOwnProperty.call(props,key))throw inputError(`${path}.${key} is not allowed`);
+  for(const [key,child] of Object.entries(props))if(value[key]!==undefined)validateSchema(child,value[key],`${path}.${key}`);return;
+ }
+ if(schema.type==="string"){if(typeof value!=="string")throw inputError(`${path} must be a string`);if(schema.enum&&!schema.enum.includes(value))throw inputError(`${path} must be one of ${schema.enum.join(", ")}`);return;}
+ if(schema.type==="integer"){if(!Number.isInteger(value))throw inputError(`${path} must be an integer`);if(schema.minimum!=null&&value<schema.minimum)throw inputError(`${path} must be at least ${schema.minimum}`);if(schema.maximum!=null&&value>schema.maximum)throw inputError(`${path} must be at most ${schema.maximum}`);return;}
+ if(schema.type==="array"){if(!Array.isArray(value))throw inputError(`${path} must be an array`);for(let i=0;i<value.length;i++)validateSchema(schema.items,value[i],`${path}[${i}]`);return;}
+}
+function validateToolInput(tool,input){validateSchema(tool.parameters??object(),input??{},tool.name);}
 
 export class AiToolGateway {
   constructor({ audit, approvalService = null }) { this.audit=audit; this.approvalService=approvalService; this.tools=new Map(); }
@@ -36,6 +51,7 @@ export class AiToolGateway {
 
   async invoke({agent,context,taskId=null,toolName,input={}}){
     const tool=this.tools.get(toolName);if(!tool){const error=new Error(`Unknown AI tool: ${toolName}`);error.code="AI_TOOL_NOT_ALLOWED";throw error;}
+    validateToolInput(tool,input);
     const policy=evaluateToolPolicy({agent,tool,context,input});
     await this.audit?.write?.({organization_id:context.organizationId,actor_type:"ai_agent",actor_id:agent.agentId,agent_id:agent.agentId,agent_name:agent.name,agent_role:agent.role,action:"ai.tool.requested",entity_type:"ai_tool",entity_id:toolName,reason:context.reason??null,metadata:{task_id:taskId,policy,input:tool.auditInput===false?undefined:input,authorized_by:context.authority?.userId??context.userId??null}});
     if(policy.decision==="approval_required"){
@@ -52,6 +68,7 @@ export class AiToolGateway {
     if(approval.agent_id!==agent.agentId)throw new Error("approval agent mismatch");
     const tool=this.tools.get(approval.requested_action);if(!tool)throw new Error(`Unknown approved AI tool: ${approval.requested_action}`);
     if(!(agent.allowedTools??[]).includes(tool.name)){const error=new Error("agent no longer has permission for approved tool");error.code="AI_TOOL_NOT_ALLOWED";throw error;}
+    validateToolInput(tool,approval.payload??{});
     const currentPermissions=context.permissions??[];
     const effectivePermissions=intersect(agent.permissions??[],currentPermissions);
     evaluateToolPolicy({agent:{...agent,permissions:effectivePermissions},tool,context:{...context,permissions:effectivePermissions,approvalGranted:true},input:approval.payload??{}});
@@ -88,7 +105,7 @@ export function registerCoreTools(gateway,services={}){
   register("create_task",["tasks:write"],services.createTask??unavailable("create_task"));
   register("send_notification",["notifications:send"],services.sendNotification??unavailable("send_notification"),{risk:"medium",consequential:true,approvalRequired:true});
   register("generate_report",["reports:read"],services.generateReport??unavailable("generate_report"));
-  register("request_approval",["approvals:write"],services.requestApproval??unavailable("request_approval"));
+  register("request_approval",["approvals:write"],approvalAcknowledgement,{risk:"medium",consequential:true,approvalRequired:true});
   for(const name of ["delete_student","alter_marks","reverse_journal","post_payroll","post_payment","alter_financial_record","adjust_stock"]){
     gateway.register({name,description:"Prohibited AI action. Ledgerly requires a human-operated domain workflow instead.",parameters:object(),permissions:["ai:restricted"],risk:"prohibited",consequential:true,approvalRequired:false},prohibited(name));
   }
@@ -97,3 +114,4 @@ export function registerCoreTools(gateway,services={}){
 function intersect(left,right){const b=new Set(right??[]);if(b.has("*"))return [...new Set(left??[])];return [...new Set(left??[])].filter((x)=>b.has(x));}
 function unavailable(name){return async()=>{const error=new Error(`Ledgerly business adapter for ${name} is not connected yet`);error.code="AI_TOOL_ADAPTER_UNAVAILABLE";throw error;};}
 function prohibited(name){return async()=>{const error=new Error(`${name} is prohibited for AI execution`);error.code="AI_ACTION_PROHIBITED";throw error;};}
+async function approvalAcknowledgement({input,approved,approvalId,taskId}){return {approved:approved===true,approvalId:approvalId??null,taskId:taskId??null,request:input};}
