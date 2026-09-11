@@ -6,6 +6,7 @@ const org=(context)=>{if(!context?.organizationId)throw new Error("organization 
 const stamp=()=>new Date().toISOString();
 const transitions=Object.freeze({draft:new Set(["in_review","archived"]),in_review:new Set(["changes_requested","approved","archived"]),changes_requested:new Set(["draft","in_review","archived"]),approved:new Set(["published","archived"]),published:new Set(["archived"]),archived:new Set()});
 const editable=(status)=>["draft","in_review","changes_requested"].includes(status);
+const hasPermission=(context,permission)=>{const permissions=context?.permissions??[];return permissions.includes("*")||permissions.includes(permission);};
 
 export class AiDocumentEngine{
   constructor({database,audit,renderer=null}){this.database=database;this.audit=audit;this.renderer=renderer;}
@@ -45,6 +46,7 @@ export class AiDocumentEngine{
   }
   async setStatus({context,documentId,status,reason=null}){
     if(!DOCUMENT_STATUSES.includes(status))throw new Error(`invalid document status ${status}`);const organizationId=org(context);
+    if(["approved","published"].includes(status)&&!hasPermission(context,"ai:approve")){const error=new Error(`Missing permission: ai:approve`);error.code="AI_PERMISSION_DENIED";error.status=403;throw error;}
     return this.database.transaction(async(tx)=>{
       const current=(await tx.query(`SELECT * FROM ledgerly_ai.documents WHERE document_id=$1 AND organization_id=$2 FOR UPDATE`,[documentId,organizationId])).rows[0];if(!current)throw new Error("document not found");
       if(current.status===status)return current;
