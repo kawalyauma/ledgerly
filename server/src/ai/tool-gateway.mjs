@@ -61,7 +61,7 @@ export class AiToolGateway {
 
   async executeApproved({ approval, agent, context }) {
     if (!approval || approval.organization_id !== context.organizationId) throw new Error("approval is outside organization scope");
-    if (approval.status !== "approved") throw new Error("approval is not approved");
+    if (approval.status !== "executing") throw new Error("approval execution has not been atomically claimed");
     if (approval.agent_id !== agent.agentId) throw new Error("approval agent mismatch");
     const tool = this.tools.get(approval.requested_action);
     if (!tool) throw new Error(`Unknown approved AI tool: ${approval.requested_action}`);
