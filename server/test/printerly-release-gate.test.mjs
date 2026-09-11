@@ -9,6 +9,8 @@ test('active Printerly management path uses cryptographic pairing codes',async()
   const hardened=await readFile(new URL('../src/printerly/management-hardening-service.mjs',import.meta.url),'utf8');
   assert.match(extension,/PrinterlyHardenedManagementService/);
   assert.match(hardened,/randomInt\(0,1_000_000\)/);
+  assert.match(hardened,/pairing_code_hash=\$1[\s\S]*pairing_expires_at>now\(\)/);
+  assert.match(hardened,/attempt<20/);
   assert.doesNotMatch(hardened,/Math\.random/);
 });
 

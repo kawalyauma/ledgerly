@@ -10,8 +10,14 @@ export class PrinterlyHardenedManagementService extends PrinterlyManagementServi
   async createNode(organizationId,userId,data={}){
     const name=String(data.name||'').trim().slice(0,160);
     if(!name)throw fail('VALIDATION_ERROR','Node name is required',422);
-    const pairingCode=String(randomInt(0,1_000_000)).padStart(6,'0');
-    const pairingDigest=createHash('sha256').update(pairingCode).digest('hex');
+    let pairingCode='',pairingDigest='';
+    for(let attempt=0;attempt<20;attempt++){
+      pairingCode=String(randomInt(0,1_000_000)).padStart(6,'0');
+      pairingDigest=createHash('sha256').update(pairingCode).digest('hex');
+      const clash=(await this.database.query(`SELECT 1 FROM prn_nodes WHERE pairing_code_hash=$1 AND revoked_at IS NULL AND pairing_expires_at>now() LIMIT 1`,[pairingDigest])).rows[0];
+      if(!clash)break;
+      if(attempt===19)throw fail('PAIRING_CODE_BUSY','Could not allocate a unique Printerly pairing code. Try again.',503);
+    }
     const nodeId=id('prnnode');
     const minutes=int(data.ttlMinutes,2,120,15);
     await this.database.query(
