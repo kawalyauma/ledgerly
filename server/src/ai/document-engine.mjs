@@ -3,6 +3,7 @@ import { DOCUMENT_STATUSES } from "./constants.mjs";
 import { aiAttribution, humanEditProvenance, createFieldProvenance, updateFieldProvenance } from "./provenance.mjs";
 
 const EDITABLE_STATUSES = new Set(["draft", "in_review", "changes_requested"]);
+const OFFICIAL_STATUSES = new Set(["approved", "published"]);
 const STATUS_TRANSITIONS = Object.freeze({
   draft: new Set(["in_review", "archived"]),
   in_review: new Set(["changes_requested", "approved", "archived"]),
@@ -26,6 +27,13 @@ function editableError(status){
   const error=new Error(`document in ${status} state must be reopened before editing`);
   error.status=409;
   error.code="AI_DOCUMENT_NOT_EDITABLE";
+  return error;
+}
+
+function approvalAuthorityError(from,status){
+  const error=new Error(`document status transition ${from} -> ${status} requires official approval authority`);
+  error.status=403;
+  error.code="AI_DOCUMENT_APPROVAL_REQUIRED";
   return error;
 }
 
@@ -71,7 +79,7 @@ export class AiDocumentEngine{
     });
   }
 
-  async setStatus({context,documentId,status,reason=null}){
+  async setStatus({context,documentId,status,reason=null,approvalAuthority=false}){
     if(!DOCUMENT_STATUSES.includes(status))throw new Error(`invalid document status ${status}`);
     const organizationId=org(context);
     return this.database.transaction(async(tx)=>{
@@ -79,10 +87,11 @@ export class AiDocumentEngine{
       if(!current)throw new Error("document not found");
       if(current.status===status)return current;
       if(!STATUS_TRANSITIONS[current.status]?.has(status))throw transitionError(current.status,status);
+      if((OFFICIAL_STATUSES.has(current.status)||OFFICIAL_STATUSES.has(status))&&!approvalAuthority)throw approvalAuthorityError(current.status,status);
       const decidedAt=stamp();
       const approvalEntry=status==="approved"?{status:"approved",approved_by:context.userId,approved_by_name:context.userName??context.userId,approved_at:decidedAt,reason,version:Number(current.version)}:null;
       const result=await tx.query(`UPDATE ledgerly_ai.documents SET status=$1,approvals=CASE WHEN $2::jsonb IS NULL THEN approvals ELSE approvals || jsonb_build_array($2::jsonb) END,rendered_pdf_ref=CASE WHEN $1='changes_requested' THEN NULL ELSE rendered_pdf_ref END,updated_at=now() WHERE document_id=$3 AND organization_id=$4 RETURNING *`,[status,approvalEntry?JSON.stringify(approvalEntry):null,documentId,organizationId]);
-      await this.audit?.write?.({organization_id:organizationId,actor_type:"human",actor_id:context.userId,action:`document.${status}`,entity_type:"document",entity_id:documentId,reason,metadata:{from_status:current.status,to_status:status,version:current.version,official_approval:status==="approved"}});
+      await this.audit?.write?.({organization_id:organizationId,actor_type:"human",actor_id:context.userId,action:`document.${status}`,entity_type:"document",entity_id:documentId,reason,metadata:{from_status:current.status,to_status:status,version:current.version,official_approval:approvalAuthority}});
       return result.rows[0];
     });
   }
@@ -92,10 +101,10 @@ export class AiDocumentEngine{
     if(!this.renderer){const error=new Error("Document PDF renderer is not configured");error.status=503;throw error;}
     const document=(await this.database.query(`SELECT * FROM ledgerly_ai.documents WHERE document_id=$1 AND organization_id=$2`,[documentId,organizationId])).rows[0];
     if(!document)throw new Error("document not found");
-    if(!["approved","published"].includes(document.status)){const error=new Error("Only approved or published structured documents may be rendered to PDF");error.status=409;throw error;}
+    if(!OFFICIAL_STATUSES.has(document.status)){const error=new Error("Only approved or published structured documents may be rendered to PDF");error.status=409;throw error;}
     const rendered=await this.renderer({document,context});const ref=rendered?.ref??rendered?.storageRef??rendered;
     if(!ref)throw new Error("PDF renderer returned no storage reference");
-    const result=await this.database.query(`UPDATE ledgerly_ai.documents SET rendered_pdf_ref=$1,updated_at=now() WHERE document_id=$2 AND organization_id=$3 AND version=$4 RETURNING *`,[String(ref),documentId,organizationId,document.version]);
+    const result=await this.database.query(`UPDATE ledgerly_ai.documents SET rendered_pdf_ref=$1,updated_at=now() WHERE document_id=$2 AND organization_id=$3 AND version=$4 AND status=$5 RETURNING *`,[String(ref),documentId,organizationId,document.version,document.status]);
     if(!result.rowCount){const error=new Error("document changed while PDF was rendering");error.status=409;error.code="AI_DOCUMENT_RENDER_STALE";throw error;}
     await this.audit?.write?.({organization_id:organizationId,actor_type:"human",actor_id:context.userId,action:"document.pdf_rendered",entity_type:"document",entity_id:documentId,metadata:{pdf_ref:String(ref),version:document.version,status:document.status}});
     return result.rows[0];
