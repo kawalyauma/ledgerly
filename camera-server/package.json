@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.mjs",
-    "check": "node --check src/index.mjs && node --check src/recorder.mjs && node --check src/catalog.mjs && node --check src/cloud.mjs && node --check src/ingest.mjs && node --check src/storage-pool.mjs && node --check src/media-files.mjs && node --check src/events.mjs && node --check src/validation.mjs && node --check src/backup.mjs && node --check src/integrity.mjs && node --check scripts/smoke.mjs && node --check scripts/commission.mjs",
+    "check": "node --check src/index.mjs && node --check src/recorder.mjs && node --check src/catalog.mjs && node --check src/catalog-reconciler.mjs && node --check src/cloud.mjs && node --check src/ingest.mjs && node --check src/storage-pool.mjs && node --check src/media-files.mjs && node --check src/events.mjs && node --check src/validation.mjs && node --check src/backup.mjs && node --check src/integrity.mjs && node --check scripts/smoke.mjs && node --check scripts/commission.mjs && node --check test/catalog.test.mjs && node --check test/catalog-reconciler.test.mjs && node --check test/cloud-auth.test.mjs",
+    "test": "node --test test/*.test.mjs",
     "smoke": "node scripts/smoke.mjs",
     "commission": "node scripts/commission.mjs"
   },
