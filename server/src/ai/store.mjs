@@ -71,8 +71,10 @@ export class AiWorkforceStore {
       CREATE TABLE IF NOT EXISTS ledgerly_ai.knowledge_sources (
         source_id uuid PRIMARY KEY, organization_id text NOT NULL, name text NOT NULL, source_type text NOT NULL,
         storage_ref text, status text NOT NULL DEFAULT 'pending', metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+        required_permissions jsonb NOT NULL DEFAULT '["ai:knowledge:read"]'::jsonb,
         created_by text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), indexed_at timestamptz
       )`);
+    await this.database.query(`ALTER TABLE ledgerly_ai.knowledge_sources ADD COLUMN IF NOT EXISTS required_permissions jsonb NOT NULL DEFAULT '["ai:knowledge:read"]'::jsonb`);
     await this.#ensureKnowledgeChunks();
     await this.database.query(`CREATE INDEX IF NOT EXISTS ai_knowledge_org_source_idx ON ledgerly_ai.knowledge_chunks (organization_id, source_id)`);
     await this.database.query(`CREATE INDEX IF NOT EXISTS ai_knowledge_text_idx ON ledgerly_ai.knowledge_chunks USING gin (to_tsvector('simple', content))`);
@@ -109,7 +111,7 @@ export class AiWorkforceStore {
   }
 
   capabilities() {
-    return Object.freeze({ vectorSearch:this.vectorEnabled, embeddingDimensions:this.embeddingDimensions, fullTextSearch:true });
+    return Object.freeze({ vectorSearch:this.vectorEnabled, embeddingDimensions:this.embeddingDimensions, fullTextSearch:true, permissionScopedKnowledge:true });
   }
 
   async #ensureVector() {
@@ -170,15 +172,16 @@ function defaultTools(key) {
   return map[key] ?? [];
 }
 function defaultPermissions(key) {
+  const knowledge=["ai:knowledge:read"];
   const map = {
-    secretary:["school:read","documents:write","tasks:write","reports:read","approvals:write","notifications:send"],
-    academic_assistant:["school:read","staff:read","academics:read","academics:write","documents:write","tasks:write","reports:read","approvals:write"],
-    academic_reviewer:["school:read","academics:read","documents:write","tasks:write","reports:read","approvals:write"],
-    finance_assistant:["students:read","fees:read","finance:read","reports:read","approvals:write"],
-    hr_assistant:["staff:read","school:read","documents:write","tasks:write","reports:read","approvals:write"],
-    reception_assistant:["students:read","staff:read","school:read","tasks:write","notifications:send"],
-    inventory_assistant:["inventory:read","reports:read","tasks:write","approvals:write"],
-    support_assistant:["support:read","reports:read","tasks:write","approvals:write"]
+    secretary:["school:read","documents:write","tasks:write","reports:read","approvals:write","notifications:send",...knowledge],
+    academic_assistant:["school:read","staff:read","academics:read","academics:write","documents:write","tasks:write","reports:read","approvals:write",...knowledge],
+    academic_reviewer:["school:read","academics:read","documents:write","tasks:write","reports:read","approvals:write",...knowledge],
+    finance_assistant:["students:read","fees:read","finance:read","reports:read","approvals:write",...knowledge],
+    hr_assistant:["staff:read","school:read","documents:write","tasks:write","reports:read","approvals:write",...knowledge],
+    reception_assistant:["students:read","staff:read","school:read","tasks:write","notifications:send",...knowledge],
+    inventory_assistant:["inventory:read","reports:read","tasks:write","approvals:write",...knowledge],
+    support_assistant:["support:read","reports:read","tasks:write","approvals:write",...knowledge]
   };
-  return map[key] ?? [];
+  return map[key] ?? knowledge;
 }
