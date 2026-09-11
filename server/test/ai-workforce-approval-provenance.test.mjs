@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AiToolGateway } from "../src/ai/tool-gateway.mjs";
+import { AiDocumentEngine } from "../src/ai/document-engine.mjs";
 import { createFieldProvenance, updateFieldProvenance } from "../src/ai/provenance.mjs";
 
 test("approved gateway execution reuses exact saved payload",async()=>{
@@ -12,6 +13,24 @@ test("approved gateway execution reuses exact saved payload",async()=>{
   const result=await gateway.executeApproved({approval,agent,context:{organizationId:"org-a",userId:"u1",permissions:["notifications:send"]}});
   assert.equal(result.status,"executed");
   assert.deepEqual(calls,[{input:{message:"Approved text"},approved:true}]);
+});
+
+test("official document approval requires ai:approve and follows state transitions",async()=>{
+  let current={document_id:"doc-1",organization_id:"org-a",status:"in_review",version:1,content:{title:"Draft"}};
+  const tx={query:async(sql,values)=>{if(String(sql).startsWith("SELECT"))return {rows:[current],rowCount:1};if(String(sql).startsWith("UPDATE")){current={...current,status:values[0]};return {rows:[current],rowCount:1};}return {rows:[],rowCount:0};}};
+  const database={transaction:async(fn)=>fn(tx),query:tx.query};
+  const engine=new AiDocumentEngine({database,audit:{write:async()=>{}}});
+  await assert.rejects(()=>engine.setStatus({context:{organizationId:"org-a",userId:"u1",permissions:["ai:write"]},documentId:"doc-1",status:"approved"}),(error)=>error.code==="AI_PERMISSION_DENIED");
+  const approved=await engine.setStatus({context:{organizationId:"org-a",userId:"u2",permissions:["ai:approve"]},documentId:"doc-1",status:"approved"});
+  assert.equal(approved.status,"approved");
+  await assert.rejects(()=>engine.setStatus({context:{organizationId:"org-a",userId:"u2",permissions:["ai:approve"]},documentId:"doc-1",status:"draft"}),/invalid document transition approved -> draft/);
+});
+
+test("approved documents cannot be silently edited after approval",async()=>{
+  const current={document_id:"doc-1",organization_id:"org-a",status:"approved",version:2,content:{title:"Approved"},ai_provenance:{}};
+  const tx={query:async(sql)=>String(sql).startsWith("SELECT")?{rows:[current],rowCount:1}:{rows:[],rowCount:0}};
+  const engine=new AiDocumentEngine({database:{transaction:async(fn)=>fn(tx)},audit:{write:async()=>{}}});
+  await assert.rejects(()=>engine.reviseHuman({context:{organizationId:"org-a",userId:"u1"},documentId:"doc-1",content:{title:"Changed"}}),(error)=>error.status===409);
 });
 
 test("field provenance preserves original AI attribution after human edit",()=>{
