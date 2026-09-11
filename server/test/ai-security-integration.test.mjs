@@ -21,11 +21,11 @@ test("AI tool visibility and execution are bounded by delegated permissions", as
   assert.equal(calls,0);
 });
 
-test("approved actions still require current delegated tool authority", async () => {
+test("approved actions still require current delegated tool authority after atomic claim", async () => {
   const gateway=new AiToolGateway({audit:null});
   gateway.register({name:"post_sensitive",permissions:["finance:write"],risk:"high",consequential:true,approvalRequired:true},async()=>({posted:true}));
   const agent={agentId:"agent-1",name:"Finance",role:"Finance Assistant",status:"active",permissions:["finance:write"],allowedTools:["post_sensitive"]};
-  const approval={approval_id:"approval-1",organization_id:"org-1",agent_id:"agent-1",requested_action:"post_sensitive",status:"approved",payload:{amount:1},task_id:"task-1"};
+  const approval={approval_id:"approval-1",organization_id:"org-1",agent_id:"agent-1",requested_action:"post_sensitive",status:"executing",payload:{amount:1},task_id:"task-1"};
 
   await assert.rejects(
     gateway.executeApproved({approval,agent,context:{organizationId:"org-1",userId:"approver",permissions:["ai:approve"]}}),
@@ -85,14 +85,15 @@ test("AI worker re-resolves requester and intersects requester and agent authori
   assert.deepEqual(statuses,["working","completed"]);
 });
 
-test("AI knowledge ingestion can only read through the organization storage view", async () => {
+test("AI knowledge ingestion can only read through the organization storage view and inherits source-domain permissions", async () => {
   let requestedOrganization;
+  let sourceInput;
   const storage={
     head:async(key)=>{assert.equal(key,"academics/book.txt");return {size:11,metadata:{contentType:"text/plain"}};},
     get:async(key)=>{assert.equal(key,"academics/book.txt");return Buffer.from("hello world");},
   };
   const knowledge={
-    createSource:async(input)=>({source_id:"source-1",...input}),
+    createSource:async(input)=>{sourceInput=input;return {source_id:"source-1",...input};},
     indexChunks:async({chunks})=>({indexed:chunks.length}),
   };
   const ingestion=new AiKnowledgeIngestionService({
@@ -100,8 +101,9 @@ test("AI knowledge ingestion can only read through the organization storage view
     storageForOrganization:(organizationId)=>{requestedOrganization=organizationId;return storage;},
     audit:null,
   });
-  const result=await ingestion.ingestStored({context:{organizationId:"org-1",userId:"user-1"},name:"Book",storageRef:"academics/book.txt"});
+  const result=await ingestion.ingestStored({context:{organizationId:"org-1",userId:"user-1",permissions:["ai:knowledge:write","ai:knowledge:read","academics:read"]},name:"Book",storageRef:"academics/book.txt"});
   assert.equal(requestedOrganization,"org-1");
   assert.equal(result.chunks,1);
   assert.equal(result.source.metadata.tenantScoped,true);
+  assert.deepEqual(sourceInput.requiredPermissions,["academics:read"]);
 });
