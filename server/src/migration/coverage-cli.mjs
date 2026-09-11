@@ -1,19 +1,29 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
-import { auditRepositoryMigrationCoverage } from "./coverage-audit.mjs";
-
-function csv(value) {
-  return String(value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
-}
+import {
+  auditRepositoryMigrationCoverage,
+  loadMigrationCoverageAllowlist,
+} from "./coverage-audit.mjs";
 
 async function main() {
   const migrationsDir = process.env.LEDGERLY_MIGRATIONS_DIR
     ? resolve(process.env.LEDGERLY_MIGRATIONS_DIR)
     : resolve(process.cwd(), "..", "migrations");
-  const allowlist = csv(process.env.LEDGERLY_MIGRATION_COVERAGE_ALLOWLIST);
-  const result = await auditRepositoryMigrationCoverage({ migrationsDir, allowlist });
+  const allowlistFile = process.env.LEDGERLY_MIGRATION_COVERAGE_ALLOWLIST_FILE
+    ? resolve(process.env.LEDGERLY_MIGRATION_COVERAGE_ALLOWLIST_FILE)
+    : resolve(process.cwd(), "src", "migration", "coverage-allowlist.json");
+  const policy = await loadMigrationCoverageAllowlist({ file: allowlistFile });
+  const result = await auditRepositoryMigrationCoverage({
+    migrationsDir,
+    allowlist: policy.entries,
+  });
   console.log(JSON.stringify({
     checkedAt: new Date().toISOString(),
+    policy: {
+      file: policy.file,
+      version: policy.version,
+      exceptions: policy.entries.length,
+    },
     ...result,
   }, null, 2));
   if (!result.ok) process.exitCode = 2;
