@@ -75,6 +75,10 @@ export class FinanceTransactions {
     if (amount <= 0) throw new FinanceIntegrityError("INVALID_ALLOCATION","Allocation amount must be positive");
 
     return this.database.transaction(async (tx) => {
+      await tx.query(
+        `SELECT pg_advisory_xact_lock(hashtext($1),hashtext($2))`,
+        [`allocation:${organizationId}`,allocationId],
+      );
       const existing = await tx.query(
         `SELECT id,payment_id,document_id,amount_minor,reversed_at
            FROM payment_allocations
