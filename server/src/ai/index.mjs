@@ -10,6 +10,7 @@ import { AiMemoryService, AiKnowledgeService } from "./knowledge-memory.mjs";
 import { AiKnowledgeIngestionService } from "./knowledge-ingestion.mjs";
 import { AiScheduleService } from "./schedules.mjs";
 import { AiToolGateway, registerCoreTools } from "./tool-gateway.mjs";
+import { createLedgerlyBusinessTools } from "./business-tools.mjs";
 import { AiWorker } from "./worker.mjs";
 import { createLocalPdfRenderer } from "./pdf-renderer.mjs";
 import { DEFAULT_LIMITS } from "./constants.mjs";
@@ -71,7 +72,8 @@ export async function createAiWorkforce({services,config={},businessTools={},aut
     recordAcademicReview:async({input,context,agent,taskId})=>academic.recordReview({context,agent,taskId,documentId:input.documentId,recommendation:input.recommendation,findings:input.findings??[],sourceReferences:input.sourceReferences??[]}),
     sendNotification:async({input,context,taskId})=>services.notifications.send({...input,organizationId:context.organizationId,deliveryId:input.deliveryId??`ai:${taskId??randomUUID()}`}),
   };
-  const gateway=registerCoreTools(new AiToolGateway({audit:services.audit,approvalService:approvals}),{...internalTools,...businessTools});
+  const defaultBusinessTools=createLedgerlyBusinessTools({database:services.database,health:()=>health()});
+  const gateway=registerCoreTools(new AiToolGateway({audit:services.audit,approvalService:approvals}),{...defaultBusinessTools,...internalTools,...businessTools});
   const worker=new AiWorker({database:services.database,queue:services.queue,agents,taskService:tasks,gateway,providerRegistry,providerConfig,knowledge,memory,audit:services.audit,authorization,limits,logger});
   if(config.workerEnabled!==false)worker.start(Number(config.pollIntervalMs??500));
 

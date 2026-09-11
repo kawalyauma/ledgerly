@@ -24,9 +24,10 @@ export class AiToolGateway {
     if(approval.agent_id!==agent.agentId)throw new Error("approval agent mismatch");
     const tool=this.tools.get(approval.requested_action);if(!tool)throw new Error(`Unknown approved AI tool: ${approval.requested_action}`);
     if(!(agent.allowedTools??[]).includes(tool.name)){const error=new Error("agent no longer has permission for approved tool");error.code="AI_TOOL_NOT_ALLOWED";throw error;}
-    const recheck=evaluateToolPolicy({agent,tool,context:{...context,approvalGranted:true},input:approval.payload??{}});
+    const currentPermissions=context.permissions??[];
+    const recheck=evaluateToolPolicy({agent:{...agent,permissions:intersect(agent.permissions??[],currentPermissions)},tool,context:{...context,permissions:intersect(agent.permissions??[],currentPermissions),approvalGranted:true},input:approval.payload??{}});
     if(recheck.decision==="deny"){const error=new Error(recheck.reason??"Approved action is no longer permitted");error.code="AI_PERMISSION_DENIED";throw error;}
-    return this.#execute({tool,agent,context:{...context,permissions:agent.permissions??[],reason:approval.reason},taskId:approval.task_id,input:approval.payload??{},approved:true,approvalId:approval.approval_id});
+    return this.#execute({tool,agent,context:{...context,permissions:intersect(agent.permissions??[],currentPermissions),reason:approval.reason},taskId:approval.task_id,input:approval.payload??{},approved:true,approvalId:approval.approval_id});
   }
 
   async #execute({tool,agent,context,taskId,input,approved,approvalId=null}){
@@ -51,6 +52,11 @@ export function registerCoreTools(gateway,services={}){
   draft("record_academic_review",["academics:read"],services.recordAcademicReview??unavailable("record_academic_review"));
   read("get_student_balance",["fees:read"],services.getStudentBalance??unavailable("get_student_balance"));
   read("get_finance_summary",["finance:read"],services.getFinanceSummary??unavailable("get_finance_summary"));
+  read("find_finance_anomalies",["finance:read"],services.findFinanceAnomalies??unavailable("find_finance_anomalies"));
+  read("find_unmatched_payments",["finance:read"],services.findUnmatchedPayments??unavailable("find_unmatched_payments"));
+  read("get_inventory_summary",["inventory:read"],services.getInventorySummary??unavailable("get_inventory_summary"));
+  read("run_consistency_checks",["reports:read"],services.runConsistencyChecks??unavailable("run_consistency_checks"));
+  read("get_system_status",["support:read"],services.getSystemStatus??unavailable("get_system_status"));
   draft("prepare_fee_reminder",["fees:read"],services.prepareFeeReminder??unavailable("prepare_fee_reminder"));
   draft("create_task",["tasks:write"],services.createTask??unavailable("create_task"));
   gateway.register({name:"send_notification",permissions:["notifications:send"],risk:"medium",consequential:true,approvalRequired:true},services.sendNotification??unavailable("send_notification"));
@@ -61,4 +67,5 @@ export function registerCoreTools(gateway,services={}){
   }
   return gateway;
 }
+function intersect(left,right){const b=new Set(right??[]);if(b.has("*"))return [...new Set(left??[])];return [...new Set(left??[])].filter((x)=>b.has(x));}
 function unavailable(name){return async()=>{const error=new Error(`Ledgerly business adapter for ${name} is not connected yet`);error.code="AI_TOOL_ADAPTER_UNAVAILABLE";throw error;};}
