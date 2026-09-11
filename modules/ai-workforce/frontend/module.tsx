@@ -1,10 +1,11 @@
 import type { FrontendModuleDefinition } from "../../frontend-types";
 import { Bot } from "lucide-react";
 import { AiWorkforceWorkspaceV2 } from "./AiWorkforceWorkspaceV2";
+import { AiDocumentsWorkspace } from "./AiDocumentsWorkspace";
 import "./ai-workforce.css";
 
-const paths=["employees","roles","tasks","tools","documents","knowledge","memory","approvals","schedules","activity","audit","settings"] as const;
-const routes=Object.fromEntries(paths.map((section)=>[`ai-workforce/${section}`,{scope:"ai:read",view:AiWorkforceWorkspaceV2}]));
+const paths=["employees","roles","tasks","tools","knowledge","memory","approvals","schedules","activity","audit","settings"] as const;
+const routes={...Object.fromEntries(paths.map((section)=>[`ai-workforce/${section}`,{scope:"ai:read",view:AiWorkforceWorkspaceV2}])),"ai-workforce/documents":{scope:"ai:read",view:AiDocumentsWorkspace}};
 const moduleDefinition:FrontendModuleDefinition={
  key:"ai-workforce",name:"AI Workforce",version:"1.0.0",order:72,
  routes,
