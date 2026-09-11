@@ -1,5 +1,42 @@
 import { randomUUID } from "node:crypto";
 
+const KNOWLEDGE_READ_SCOPE="ai:knowledge:read";
+const KNOWLEDGE_WRITE_SCOPE="ai:knowledge:write";
+
+function permissionError(message,details={}){
+  const error=new Error(message);
+  error.status=403;
+  error.code="AI_KNOWLEDGE_PERMISSION_DENIED";
+  error.details=details;
+  return error;
+}
+function contextPermissions(context){return Array.isArray(context?.permissions)?context.permissions.filter((item)=>typeof item==="string"):[];}
+function hasPermission(context,permission){const granted=new Set(contextPermissions(context));return granted.has("*")||granted.has(permission);}
+function requirePermission(context,permission){if(!hasPermission(context,permission))throw permissionError(`Missing AI knowledge permission: ${permission}`,{permission});}
+function parsePermissionArray(value){
+  if(Array.isArray(value))return value;
+  if(typeof value==="string")try{const parsed=JSON.parse(value);return Array.isArray(parsed)?parsed:[];}catch{return[];}
+  return [];
+}
+function normalizeRequiredPermissions(value){
+  const raw=parsePermissionArray(value);
+  if(raw.length>32)throw new TypeError("knowledge source requiredPermissions may contain at most 32 scopes");
+  const normalized=[KNOWLEDGE_READ_SCOPE];
+  for(const item of raw){
+    if(typeof item!=="string"||!item.trim())throw new TypeError("knowledge source permissions must be non-empty strings");
+    const permission=item.trim();
+    if(!/^[a-z0-9][a-z0-9:_*-]*$/.test(permission))throw new TypeError(`invalid knowledge source permission: ${permission}`);
+    if(!normalized.includes(permission))normalized.push(permission);
+  }
+  return normalized;
+}
+function assertRequiredPermissions(context,required){
+  const granted=new Set(contextPermissions(context));
+  if(granted.has("*"))return;
+  const missing=normalizeRequiredPermissions(required).filter((permission)=>!granted.has(permission));
+  if(missing.length)throw permissionError("AI knowledge source exceeds current authority",{missingPermissions:missing});
+}
+
 export class AiMemoryService {
   constructor({ database, audit }) { this.database=database; this.audit=audit; }
 
@@ -47,27 +84,48 @@ export class AiMemoryService {
 }
 
 export class AiKnowledgeService {
-  constructor({ database, storage, audit, embedder=null, embeddingDimensions=768, vectorEnabled=false }) {
-    this.database=database; this.storage=storage; this.audit=audit; this.embedder=embedder;
+  constructor({ database, audit, embedder=null, embeddingDimensions=768, vectorEnabled=false }) {
+    this.database=database; this.audit=audit; this.embedder=embedder;
     this.embeddingDimensions=embeddingDimensions; this.vectorEnabled=Boolean(vectorEnabled && embedder);
   }
 
-  async createSource({ context, name, sourceType, storageRef=null, metadata={} }) {
+  async createSource({ context, name, sourceType, storageRef=null, metadata={}, requiredPermissions=[] }) {
     const org=context.organizationId;
+    if(!org)throw new Error("organization context required");
+    if(!context?.userId)throw new Error("knowledge source creation requires an attributable requester");
+    requirePermission(context,KNOWLEDGE_WRITE_SCOPE);
+    const required=normalizeRequiredPermissions(requiredPermissions);
+    assertRequiredPermissions(context,required);
     const sourceId=randomUUID();
     const result=await this.database.query(`INSERT INTO ledgerly_ai.knowledge_sources
-      (source_id,organization_id,name,source_type,storage_ref,metadata,created_by)
-      VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7) RETURNING *`, [sourceId,org,name,sourceType,storageRef,JSON.stringify(metadata),context.userId]);
+      (source_id,organization_id,name,source_type,storage_ref,metadata,required_permissions,created_by)
+      VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8) RETURNING *`, [sourceId,org,name,sourceType,storageRef,JSON.stringify(metadata),JSON.stringify(required),context.userId]);
+    await this.audit?.write?.({organization_id:org,actor_type:"human",actor_id:context.userId,action:"ai.knowledge.source_created",entity_type:"ai_knowledge_source",entity_id:sourceId,metadata:{source_type:sourceType,storage_ref:storageRef,required_permissions:required}});
     return result.rows[0];
+  }
+
+  async listSources({context}){
+    const org=context?.organizationId;
+    if(!org)throw new Error("organization context required");
+    requirePermission(context,KNOWLEDGE_READ_SCOPE);
+    const permissions=contextPermissions(context),wildcard=permissions.includes("*");
+    const result=await this.database.query(`SELECT * FROM ledgerly_ai.knowledge_sources
+      WHERE organization_id=$1 AND ($2::boolean OR required_permissions <@ $3::jsonb)
+      ORDER BY created_at DESC`,[org,wildcard,JSON.stringify(permissions)]);
+    return result.rows;
   }
 
   async indexChunks({ context, sourceId, chunks }) {
     const org=context.organizationId;
+    if(!org)throw new Error("organization context required");
+    requirePermission(context,KNOWLEDGE_WRITE_SCOPE);
     const source=(await this.database.query(`SELECT * FROM ledgerly_ai.knowledge_sources WHERE source_id=$1 AND organization_id=$2`,[sourceId,org])).rows[0];
     if (!source) throw new Error("knowledge source not found");
+    assertRequiredPermissions(context,source.required_permissions);
     let indexed=0;
     for (let i=0;i<chunks.length;i++) {
       const chunk=typeof chunks[i]==="string" ? {content:chunks[i]} : chunks[i];
+      if(!chunk?.content||typeof chunk.content!=="string")throw new TypeError("knowledge chunks require text content");
       const embedding=this.vectorEnabled ? await this.embedder.embed(chunk.content) : null;
       if (embedding && embedding.length!==this.embeddingDimensions) throw new Error("embedding dimension mismatch");
       if (this.vectorEnabled) {
@@ -86,29 +144,39 @@ export class AiKnowledgeService {
       indexed++;
     }
     await this.database.query(`UPDATE ledgerly_ai.knowledge_sources SET status='indexed',indexed_at=now() WHERE source_id=$1 AND organization_id=$2`,[sourceId,org]);
-    await this.audit?.write?.({ organization_id:org,actor_type:"human",actor_id:context.userId,action:"ai.knowledge.indexed",entity_type:"ai_knowledge_source",entity_id:sourceId,metadata:{chunks:indexed,vector_search:this.vectorEnabled} });
+    await this.audit?.write?.({ organization_id:org,actor_type:"human",actor_id:context.userId,action:"ai.knowledge.indexed",entity_type:"ai_knowledge_source",entity_id:sourceId,metadata:{chunks:indexed,vector_search:this.vectorEnabled,required_permissions:normalizeRequiredPermissions(source.required_permissions)} });
     return { sourceId,indexed,vectorSearch:this.vectorEnabled };
   }
 
   async retrieve({ context, query, sourceIds=null, limit=8 }) {
     const org=context.organizationId;
     if (!org) throw new Error("organization context required");
+    requirePermission(context,KNOWLEDGE_READ_SCOPE);
+    if(typeof query!=="string"||!query.trim())throw new TypeError("knowledge retrieval query is required");
     const bounded=Math.max(1,Math.min(Number(limit)||8,20));
+    const permissions=contextPermissions(context),wildcard=permissions.includes("*");
+    const selected=Array.isArray(sourceIds)&&sourceIds.length?sourceIds:null;
+    if(selected&&selected.length>100)throw new TypeError("knowledge retrieval supports at most 100 sourceIds");
+    const permissionJson=JSON.stringify(permissions);
     if (this.vectorEnabled) {
       const embedding=await this.embedder.embed(query);
-      const values=[org,`[${embedding.join(",")}]`,bounded];
-      let filter="organization_id=$1";
-      if (sourceIds?.length) { values.push(sourceIds); filter+=` AND source_id=ANY($4::uuid[])`; }
-      const result=await this.database.query(`SELECT chunk_id,source_id,content,metadata,(embedding <=> $2::vector) AS distance
-        FROM ledgerly_ai.knowledge_chunks WHERE ${filter} AND embedding IS NOT NULL ORDER BY embedding <=> $2::vector LIMIT $3`,values);
+      const values=[org,`[${embedding.join(",")}]`,bounded,wildcard,permissionJson,selected];
+      const result=await this.database.query(`SELECT c.chunk_id,c.source_id,c.content,c.metadata,(c.embedding <=> $2::vector) AS distance
+        FROM ledgerly_ai.knowledge_chunks c
+        JOIN ledgerly_ai.knowledge_sources s ON s.organization_id=c.organization_id AND s.source_id=c.source_id
+        WHERE c.organization_id=$1 AND s.status='indexed' AND ($4::boolean OR s.required_permissions <@ $5::jsonb)
+          AND ($6::uuid[] IS NULL OR c.source_id=ANY($6::uuid[])) AND c.embedding IS NOT NULL
+        ORDER BY c.embedding <=> $2::vector LIMIT $3`,values);
       return result.rows;
     }
-    const values=[org,query,bounded];
-    let filter="c.organization_id=$1";
-    if (sourceIds?.length) { values.push(sourceIds); filter+=` AND c.source_id=ANY($4::uuid[])`; }
+    const values=[org,query,bounded,wildcard,permissionJson,selected];
     const result=await this.database.query(`SELECT c.chunk_id,c.source_id,c.content,c.metadata,
       ts_rank_cd(to_tsvector('simple',c.content),plainto_tsquery('simple',$2)) AS rank
-      FROM ledgerly_ai.knowledge_chunks c WHERE ${filter} AND to_tsvector('simple',c.content) @@ plainto_tsquery('simple',$2)
+      FROM ledgerly_ai.knowledge_chunks c
+      JOIN ledgerly_ai.knowledge_sources s ON s.organization_id=c.organization_id AND s.source_id=c.source_id
+      WHERE c.organization_id=$1 AND s.status='indexed' AND ($4::boolean OR s.required_permissions <@ $5::jsonb)
+        AND ($6::uuid[] IS NULL OR c.source_id=ANY($6::uuid[]))
+        AND to_tsvector('simple',c.content) @@ plainto_tsquery('simple',$2)
       ORDER BY rank DESC LIMIT $3`,values);
     return result.rows;
   }
