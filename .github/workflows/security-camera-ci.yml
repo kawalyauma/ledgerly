@@ -8,6 +8,7 @@ on:
       - 'modules/security-camera/**'
       - 'attendance-mobile/src/mobile/camera/**'
       - 'attendance-mobile/src/mobile/security-cameras/**'
+      - 'attendance-mobile/android/app/src/main/java/com/ledgerlyattendance/**'
       - 'camera-server/**'
       - 'migrations/*security_camera*'
       - '.github/workflows/security-camera-ci.yml'
@@ -18,6 +19,7 @@ on:
       - 'modules/security-camera/**'
       - 'attendance-mobile/src/mobile/camera/**'
       - 'attendance-mobile/src/mobile/security-cameras/**'
+      - 'attendance-mobile/android/app/src/main/java/com/ledgerlyattendance/**'
       - 'camera-server/**'
       - 'migrations/*security_camera*'
       - '.github/workflows/security-camera-ci.yml'
@@ -45,7 +47,31 @@ jobs:
       - name: Sync module registries
         run: npm run modules:sync
       - name: Run focused camera policy tests
-        run: npx vitest run modules/security-camera/backend/health-remediation.test.ts modules/security-camera/backend/readiness-policy.test.ts modules/security-camera/backend/integrity-policy.test.ts modules/security-camera/backend/forensic-policy.test.ts attendance-mobile/src/mobile/camera/healthPolicy.test.ts
+        run: npx vitest run modules/security-camera/backend/health-remediation.test.ts modules/security-camera/backend/readiness-policy.test.ts modules/security-camera/backend/integrity-policy.test.ts modules/security-camera/backend/forensic-policy.test.ts modules/security-camera/frontend/nvrPlaybackPolicy.test.ts attendance-mobile/src/mobile/camera/healthPolicy.test.ts
+      - name: Typecheck Ledgerly web and Worker code
+        run: npm run typecheck
+      - name: Build security-camera web integration
+        run: npm run build:web
+
+  android-viewer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: attendance-mobile/package-lock.json
+      - name: Install mobile dependencies
+        run: npm ci
+        working-directory: attendance-mobile
+      - name: Typecheck Android app
+        run: npm run typecheck
+        working-directory: attendance-mobile
+      - name: Compile Android debug app
+        run: ./gradlew assembleDebug --no-daemon
+        working-directory: attendance-mobile/android
 
   nvr-validation:
     runs-on: ubuntu-latest
