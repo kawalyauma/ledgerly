@@ -3,13 +3,25 @@ import { DEFAULT_LIMITS } from "./constants.mjs";
 function safeJson(value) { try { return JSON.stringify(value); } catch { return "{}"; } }
 function truncate(value, max) { const text=String(value??""); return text.length>max ? `${text.slice(0,max)}\n[truncated]` : text; }
 
+const PERMANENT_AUTH_CODES = new Set([
+  "AI_AGENT_DISABLED",
+  "AI_TOOL_NOT_ALLOWED",
+  "AI_PERMISSION_DENIED",
+  "AI_ACTION_PROHIBITED",
+  "BACKGROUND_ACTOR_REVOKED",
+  "BACKGROUND_ACTOR_BLOCKED",
+]);
+
 export class AiWorker {
   #running=0;
   #lastSuccessAt=null;
   #durations=[];
-  constructor({ database, queue, agents, taskService, gateway, providerRegistry, providerConfig, knowledge=null, memory=null, audit, limits=DEFAULT_LIMITS, logger=console }) {
+  constructor({ database, queue, agents, taskService, gateway, providerRegistry, providerConfig, knowledge=null, memory=null, audit, authorization, limits=DEFAULT_LIMITS, logger=console }) {
+    if (!authorization?.resolveCurrentActorAccess || !authorization?.intersectPermissions) {
+      throw new TypeError("AiWorker requires live background authorization services");
+    }
     this.database=database; this.queue=queue; this.agents=agents; this.taskService=taskService; this.gateway=gateway;
-    this.providerRegistry=providerRegistry; this.providerConfig=providerConfig; this.knowledge=knowledge; this.memory=memory; this.audit=audit;
+    this.providerRegistry=providerRegistry; this.providerConfig=providerConfig; this.knowledge=knowledge; this.memory=memory; this.audit=audit; this.authorization=authorization;
     this.limits={...DEFAULT_LIMITS,...limits}; this.logger=logger; this.stopped=true; this.timer=null;
   }
 
@@ -37,7 +49,7 @@ export class AiWorker {
       return {completed:true,jobId:item.job.jobId};
     } catch (error) {
       const taskId=item.job.payload?.taskId??item.job.jobId;
-      const retryable=!(["AI_AGENT_DISABLED","AI_TOOL_NOT_ALLOWED","AI_PERMISSION_DENIED","AI_ACTION_PROHIBITED"].includes(error?.code));
+      const retryable=!PERMANENT_AUTH_CODES.has(error?.code);
       if (!item.job.payload?.aiScheduled) {
         await this.taskService.setStatus({organizationId:item.job.organizationId,taskId,status:retryable?"queued":"failed",error:error instanceof Error?error.message:String(error)}).catch(()=>undefined);
       }
@@ -52,7 +64,13 @@ export class AiWorker {
 
   async materializeScheduledTask(job) {
     const payload=job.payload;
-    const context={organizationId:job.organizationId,userId:"scheduler",userName:"Ledgerly Scheduler"};
+    if (!payload.requestedBy) {
+      const error=new Error("Scheduled AI task is missing its original requester");
+      error.code="BACKGROUND_ACTOR_REVOKED";
+      throw error;
+    }
+    await this.authorization.resolveCurrentActorAccess({organizationId:job.organizationId,actorId:payload.requestedBy});
+    const context={organizationId:job.organizationId,userId:payload.requestedBy,userName:"Scheduled requester"};
     return this.taskService.create({
       context,
       assignedAgent:payload.assignedAgent,
@@ -68,25 +86,32 @@ export class AiWorker {
     const taskId=job.payload?.taskId??job.jobId;
     const task=(await this.database.query(`SELECT * FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[taskId,org])).rows[0];
     if (!task) throw new Error("AI task not found");
+    if (!task.requested_by) {
+      const error=new Error("AI task has no attributable requester");
+      error.code="BACKGROUND_ACTOR_REVOKED";
+      throw error;
+    }
+    const requester=await this.authorization.resolveCurrentActorAccess({organizationId:org,actorId:task.requested_by});
     const agent=await this.agents.get({organizationId:org},task.assigned_agent);
     if (!agent) throw new Error("Assigned AI agent not found");
     if (agent.status==="disabled") { const error=new Error("AI agent is disabled"); error.code="AI_AGENT_DISABLED"; throw error; }
+    const effectivePermissions=this.authorization.intersectPermissions(requester.effectiveScopes,agent.permissions??[]);
     await this.taskService.setStatus({organizationId:org,taskId,status:"working",agent});
 
     const provider=this.providerRegistry.create(agent.provider??"ollama",{...this.providerConfig,model:agent.model??this.providerConfig.model});
     const health=await provider.health();
     if (!health.ok) { const error=new Error(health.error??`AI runtime unavailable: ${health.state}`); error.code=health.code??(health.modelInstalled===false?"AI_MODEL_NOT_INSTALLED":"AI_RUNTIME_OFFLINE"); throw error; }
 
-    const context={organizationId:org,permissions:agent.permissions??[],reason:task.instruction};
+    const context={organizationId:org,userId:task.requested_by,permissions:effectivePermissions,reason:task.instruction};
     const memories=this.memory ? await this.memory.list({context:{organizationId:org},agentId:agent.agentId,type:"durable"}) : [];
     const sources=this.knowledge && (agent.knowledgeSources?.length) ? await this.knowledge.retrieve({context:{organizationId:org},query:task.instruction,sourceIds:agent.knowledgeSources,limit:8}) : [];
     const messages=[
-      {role:"system",content:truncate(`${agent.systemInstructions||defaultInstructions(agent)}\n\nSecurity: never request database credentials or unrestricted SQL. Use only provided Ledgerly tools.\nAI review is not official approval.`,this.limits.maxPromptChars)},
+      {role:"system",content:truncate(`${agent.systemInstructions||defaultInstructions(agent)}\n\nSecurity: never request database credentials or unrestricted SQL. Use only provided Ledgerly tools. Your effective tool authority is the intersection of the requester's current permissions and your own assigned permissions. AI review is not official approval.`,this.limits.maxPromptChars)},
       {role:"system",content:truncate(`Durable structured memory: ${safeJson(memories.map((m)=>({key:m.key,value:m.value})))}`,8000)},
       {role:"system",content:truncate(`Permitted knowledge excerpts with source references: ${safeJson(sources.map((s)=>({source_id:s.source_id,chunk_id:s.chunk_id,content:s.content})))}`,16000)},
       {role:"user",content:truncate(task.instruction,this.limits.maxPromptChars)},
     ];
-    const tools=this.gateway.describeForAgent(agent).map((tool)=>({type:"function",function:{name:tool.name,description:tool.description??tool.name,parameters:tool.parameters??{type:"object",additionalProperties:true}}}));
+    const tools=this.gateway.describeForAgent(agent,effectivePermissions).map((tool)=>({type:"function",function:{name:tool.name,description:tool.description??tool.name,parameters:tool.parameters??{type:"object",additionalProperties:true}}}));
     let toolCalls=0;
     for (;;) {
       const result=await withDeadline(()=>provider.generate({messages,tools,maxTokens:Math.ceil(this.limits.maxOutputChars/4)}),this.limits.taskTimeoutMs);
@@ -96,7 +121,7 @@ export class AiWorker {
         const text=truncate(message.content??"",this.limits.maxOutputChars);
         const refs=sources.map((s)=>({type:"knowledge",sourceId:s.source_id,chunkId:s.chunk_id}));
         await this.taskService.setStatus({organizationId:org,taskId,status:"completed",agent,outputReferences:[...refs,{type:"text",content:text,provider:result.provider,model:result.model}]});
-        await this.audit?.write?.({organization_id:org,actor_type:"ai_agent",actor_id:agent.agentId,agent_id:agent.agentId,agent_name:agent.name,agent_role:agent.role,action:"ai.task.inference_completed",entity_type:"ai_task",entity_id:taskId,reason:task.instruction,metadata:{provider:result.provider,model:result.model,tool_calls:toolCalls,source_refs:refs}});
+        await this.audit?.write?.({organization_id:org,actor_type:"ai_agent",actor_id:agent.agentId,agent_id:agent.agentId,agent_name:agent.name,agent_role:agent.role,action:"ai.task.inference_completed",entity_type:"ai_task",entity_id:taskId,reason:task.instruction,metadata:{provider:result.provider,model:result.model,tool_calls:toolCalls,source_refs:refs,requested_by:task.requested_by}});
         return {text,refs};
       }
       toolCalls+=calls.length;
