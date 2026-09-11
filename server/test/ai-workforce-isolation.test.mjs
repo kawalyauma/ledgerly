@@ -31,6 +31,16 @@ test("AI schema degrades to full-text knowledge when pgvector is unavailable",as
   assert.ok(warnings.length>0);
 });
 
+test("AI schema can add vector storage after an earlier full-text-only deployment",async()=>{
+  const sql=[];
+  const database={query:async(statement)=>{sql.push(String(statement));return {rows:[],rowCount:0};}};
+  const store=new AiWorkforceStore({database,embeddingDimensions:384,logger:{warn:()=>{}}});
+  const caps=await store.ensureSchema();
+  assert.equal(caps.vectorSearch,true);
+  assert.ok(sql.some((statement)=>statement.includes("ADD COLUMN IF NOT EXISTS embedding vector(384)")));
+  assert.ok(sql.some((statement)=>statement.includes("ADD COLUMN IF NOT EXISTS embedding_json jsonb")));
+});
+
 test("RAG retrieval always scopes full-text search to the authenticated organization",async()=>{
   const calls=[];
   const database={query:async(sql,values)=>{calls.push({sql,values});return {rows:[]};}};
