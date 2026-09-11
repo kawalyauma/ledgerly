@@ -154,9 +154,7 @@ export class PrinterlyRuntimeService{
         await this.#outbox(tx,{organizationId,jobId,eventType:'completed'});
       }else if(status==='failed'){
         await this.#releaseReservations(tx,{organizationId,jobId});
-        await tx.query(`UPDATE prn_jobs SET status='failed',error_message=$1,claim_expires_at=NULL,updated_at=now() WHERE id=$2 AND organizationId=$3`,[String(errorMessage||'').slice(0,1000),jobId,organizationId]).catch(async()=>{
-          await tx.query(`UPDATE prn_jobs SET status='failed',error_message=$1,claim_expires_at=NULL,updated_at=now() WHERE id=$2 AND organization_id=$3`,[String(errorMessage||'').slice(0,1000),jobId,organizationId]);
-        });
+        await tx.query(`UPDATE prn_jobs SET status='failed',error_message=$1,claim_expires_at=NULL,updated_at=now() WHERE id=$2 AND organization_id=$3`,[String(errorMessage||'').slice(0,1000),jobId,organizationId]);
         await this.#outbox(tx,{organizationId,jobId,eventType:'failed'});
       }else{
         await tx.query(`UPDATE prn_jobs SET status=$1,claim_expires_at=now()+interval '15 minutes',updated_at=now() WHERE id=$2 AND organization_id=$3`,[status,jobId,organizationId]);
