@@ -87,6 +87,13 @@ export function loadConfig(env = process.env) {
       lockTimeoutMs: readPositiveInt(env.LEDGERLY_SCHEDULER_LOCK_TIMEOUT_MS, 300000, "LEDGERLY_SCHEDULER_LOCK_TIMEOUT_MS"),
       workerId: env.LEDGERLY_SCHEDULER_WORKER_ID || null,
     }),
+    auth: Object.freeze({
+      issuer: env.LEDGERLY_JWT_ISSUER || "your-finance-pro",
+      audience: env.LEDGERLY_JWT_AUDIENCE || "your-finance-pro-api",
+      secret: env.LEDGERLY_JWT_SECRET || "",
+      accessTokenTtlSeconds: readPositiveInt(env.LEDGERLY_ACCESS_TOKEN_TTL_SECONDS, 900, "LEDGERLY_ACCESS_TOKEN_TTL_SECONDS"),
+      refreshTtlDays: readPositiveInt(env.LEDGERLY_REFRESH_TOKEN_TTL_DAYS, 30, "LEDGERLY_REFRESH_TOKEN_TTL_DAYS"),
+    }),
     notifications: Object.freeze({
       timeoutMs: readPositiveInt(env.LEDGERLY_NOTIFICATION_TIMEOUT_MS, 10000, "LEDGERLY_NOTIFICATION_TIMEOUT_MS"),
       requiredChannels: Object.freeze(readCsv(env.LEDGERLY_NOTIFICATION_REQUIRED_CHANNELS)),

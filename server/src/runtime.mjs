@@ -8,11 +8,13 @@ import { RedisQueue } from "./adapters/redis-queue.mjs";
 import { createMinioStorage } from "./adapters/minio-storage.mjs";
 import { createNotificationBridge } from "./adapters/notification-bridge.mjs";
 import { SchedulerRunner } from "./scheduler-runner.mjs";
+import { createJwtCodec } from "./auth/jwt.mjs";
+import { AuthCompatibilityService } from "./auth/service.mjs";
 
 export async function createRuntime(config) {
   if (config.runtimeMode === "production") {
     throw new Error(
-      "Self-hosted production mode is intentionally blocked until auth compatibility and migrated business routes/data are verified",
+      "Self-hosted production mode is intentionally blocked until migrated business routes/data and cutover validation are complete",
     );
   }
 
@@ -51,6 +53,17 @@ export async function createRuntime(config) {
       audit,
     });
 
+    const jwt = await createJwtCodec(config.auth);
+    const auth = new AuthCompatibilityService({
+      database,
+      jwt,
+      appSecret: config.auth.secret,
+      environment: config.environment,
+      accessTokenTtlSeconds: config.auth.accessTokenTtlSeconds,
+      refreshTtlDays: config.auth.refreshTtlDays,
+      audit,
+    });
+
     if (config.scheduler.enabled) {
       schedulerRunner = new SchedulerRunner({
         scheduler,
@@ -84,9 +97,16 @@ export async function createRuntime(config) {
         events: eventsHealth,
         notifications: notificationsHealth,
       };
+      const authMigration = await auth.health().catch((error) => ({
+        ok: false,
+        provider: auth.provider,
+        schemaReady: false,
+        error: error instanceof Error ? error.message : String(error),
+      }));
       return {
         ok: Object.values(dependencies).every((item) => item.ok === true),
         dependencies,
+        migration: { auth: authMigration },
         schedulerRunner: schedulerRunner?.status() ?? { running: false, disabled: true },
       };
     }
@@ -103,10 +123,12 @@ export async function createRuntime(config) {
         durableAuditReady: true,
         distributedEventsReady: true,
         notificationBridgeReady: true,
+        authCompatibilityReady: true,
+        auth: auth.describe(),
         schedulerRunner: schedulerRunner?.status() ?? { running: false, disabled: true },
         businessRoutesEnabled: false,
         authoritativeDataStore: "cloudflare-d1-until-migration",
-        productionBlockers: ["auth", "business-route-migration", "data-migration-validation"],
+        productionBlockers: ["auth-data-migration", "business-route-migration", "data-migration-validation"],
       };
     }
 
@@ -119,7 +141,7 @@ export async function createRuntime(config) {
       ]);
     }
 
-    return Object.freeze({ services, readiness, describeContracts, close });
+    return Object.freeze({ services, auth, readiness, describeContracts, close });
   } catch (error) {
     await schedulerRunner?.stop().catch(() => undefined);
     await events?.close().catch(() => undefined);
