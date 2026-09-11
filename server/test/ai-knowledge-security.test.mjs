@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AiKnowledgeService } from "../src/ai/knowledge-memory.mjs";
+import { AiKnowledgeIngestionService } from "../src/ai/knowledge-ingestion.mjs";
 import { AiWorker } from "../src/ai/worker.mjs";
 
 function fakeKnowledgeDb() {
@@ -50,6 +51,27 @@ test("knowledge retrieval requires the explicit RAG read scope", async () => {
     (error)=>error?.code==="AI_KNOWLEDGE_PERMISSION_DENIED",
   );
   assert.equal(database.calls.length,0);
+});
+
+test("knowledge ingestion rejects missing source-domain authority before object storage is touched", async () => {
+  let storageTouched=false;
+  const ingestion=new AiKnowledgeIngestionService({
+    knowledge:{createSource:async()=>{throw new Error("not expected");},indexChunks:async()=>{throw new Error("not expected");}},
+    storageForOrganization:()=>({
+      head:async()=>{storageTouched=true;return {size:1};},
+      get:async()=>{storageTouched=true;return Buffer.from("x");},
+    }),
+    audit:null,
+  });
+  await assert.rejects(
+    ingestion.ingestStored({
+      context:{organizationId:"org-1",userId:"teacher-1",permissions:["ai:knowledge:write","ai:knowledge:read"]},
+      name:"Restricted curriculum",
+      storageRef:"academics/restricted.txt",
+    }),
+    (error)=>error?.code==="AI_KNOWLEDGE_PERMISSION_DENIED" && error?.details?.missingPermissions?.includes("academics:read"),
+  );
+  assert.equal(storageTouched,false);
 });
 
 test("AI worker passes only delegated requester-agent permissions into RAG retrieval", async () => {
