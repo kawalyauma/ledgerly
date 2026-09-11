@@ -12,6 +12,16 @@ import { AiToolGateway, registerCoreTools } from "./tool-gateway.mjs";
 import { AiWorker } from "./worker.mjs";
 import { DEFAULT_LIMITS } from "./constants.mjs";
 
+function documentDomainPermissions(agent){
+ const identity=`${agent?.department??""} ${agent?.role??""}`.toLowerCase();
+ if(identity.includes("academic"))return["academics:read"];
+ if(identity.includes("finance"))return["finance:read"];
+ if(identity.includes("human resource")||identity.includes(" hr")||identity.startsWith("hr"))return["staff:read"];
+ if(identity.includes("inventory"))return["inventory:read"];
+ if(identity.includes("support")||identity.includes("technology"))return["support:read"];
+ return["school:read"];
+}
+
 export async function createAiWorkforce({services,config={},authorization,tenantStorage,businessTools={},embedder=null,documentRenderer=null,logger=console}){
  if(!authorization?.resolveCurrentActorAccess||!authorization?.intersectPermissions)throw new TypeError("AI Workforce requires live authorization services");
  if(!tenantStorage?.forOrganization)throw new TypeError("AI Workforce requires tenant-scoped storage");
@@ -28,7 +38,8 @@ export async function createAiWorkforce({services,config={},authorization,tenant
  const schedules=new AiScheduleService({scheduler:services.scheduler,audit:services.audit,agents});
  const academic=new AiAcademicService({database:services.database,tasks,documents,audit:services.audit});
  const internalTools={
-   createLessonPlanDraft:async({input,context,agent,taskId})=>documents.createAiDraft({context,agent,taskId,type:"lesson_plan",title:input.title??"Lesson Plan Draft",content:input.content??input,reason:context.reason}),
+   createDocumentDraft:async({input,context,agent,taskId})=>documents.createAiDraft({context,agent,taskId,type:input.type??"document",title:input.title??"Untitled Draft",content:input.content??input,reason:context.reason,requiredPermissions:documentDomainPermissions(agent)}),
+   createLessonPlanDraft:async({input,context,agent,taskId})=>documents.createAiDraft({context,agent,taskId,type:"lesson_plan",title:input.title??"Lesson Plan Draft",content:input.content??input,reason:context.reason,requiredPermissions:["academics:read"]}),
    updateDocumentDraft:async({input,context,agent,taskId})=>documents.reviseAi({context,agent,taskId,documentId:input.documentId,content:input.content,reason:context.reason}),
    createTask:async({input,context,agent,taskId})=>{
      if(!taskId)throw new Error("AI delegation requires a parent task");
