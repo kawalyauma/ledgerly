@@ -10,6 +10,7 @@ export const SCHOOL_PEOPLE_RELATIONSHIP_CHECKS = Object.freeze([
   ["school_people.student_contact", `SELECT count(*)::bigint AS count FROM school_students x LEFT JOIN contacts p ON p.id=x.contact_id WHERE x.contact_id IS NOT NULL AND p.id IS NULL`],
   ["school_people.student_contact_tenant", `SELECT count(*)::bigint AS count FROM school_students x JOIN contacts p ON p.id=x.contact_id WHERE x.contact_id IS NOT NULL AND p.organization_id<>x.organization_id`],
   ["school_people.sponsor_contact", `SELECT count(*)::bigint AS count FROM school_students x LEFT JOIN contacts p ON p.id=x.financial_sponsor_contact_id WHERE x.financial_sponsor_contact_id IS NOT NULL AND p.id IS NULL`],
+  ["school_people.sponsor_contact_tenant", `SELECT count(*)::bigint AS count FROM school_students x JOIN contacts p ON p.id=x.financial_sponsor_contact_id WHERE x.financial_sponsor_contact_id IS NOT NULL AND p.organization_id<>x.organization_id`],
   ["school_people.guardian_contact", `SELECT count(*)::bigint AS count FROM school_guardians x LEFT JOIN contacts p ON p.id=x.contact_id WHERE x.contact_id IS NOT NULL AND p.id IS NULL`],
   ["school_people.guardian_contact_tenant", `SELECT count(*)::bigint AS count FROM school_guardians x JOIN contacts p ON p.id=x.contact_id WHERE x.contact_id IS NOT NULL AND p.organization_id<>x.organization_id`],
   ["school_people.guardian_link_student", `SELECT count(*)::bigint AS count FROM school_student_guardians x LEFT JOIN school_students p ON p.id=x.student_id WHERE p.id IS NULL`],

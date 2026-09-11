@@ -10,8 +10,13 @@ const checkNames = (checks) => checks.map(([name]) => name);
 test("school identity phases require shared contacts before copying cross-module IDs", () => {
   assert.ok(getMigrationPhase("school-people").prerequisites.includes("contacts"));
   assert.ok(getMigrationPhase("school-staff").prerequisites.includes("contacts"));
-  assert.ok(checkNames(SCHOOL_PEOPLE_RELATIONSHIP_CHECKS).includes("school_people.student_contact"));
-  assert.ok(checkNames(SCHOOL_PEOPLE_RELATIONSHIP_CHECKS).includes("school_people.guardian_contact_tenant"));
+  const peopleChecks = checkNames(SCHOOL_PEOPLE_RELATIONSHIP_CHECKS);
+  assert.ok(peopleChecks.includes("school_people.student_contact"));
+  assert.ok(peopleChecks.includes("school_people.student_contact_tenant"));
+  assert.ok(peopleChecks.includes("school_people.sponsor_contact"));
+  assert.ok(peopleChecks.includes("school_people.sponsor_contact_tenant"));
+  assert.ok(peopleChecks.includes("school_people.guardian_contact"));
+  assert.ok(peopleChecks.includes("school_people.guardian_contact_tenant"));
   assert.ok(checkNames(SCHOOL_STAFF_RELATIONSHIP_CHECKS).includes("school_staff.profile_contact"));
   assert.ok(checkNames(SCHOOL_STAFF_RELATIONSHIP_CHECKS).includes("school_staff.profile_contact_tenant"));
 });
