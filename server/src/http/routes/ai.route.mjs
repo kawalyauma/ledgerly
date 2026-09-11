@@ -3,6 +3,7 @@ import { handleAiKnowledgeRequest } from "../../ai/knowledge-http.mjs";
 import { handleAiTaskRequest } from "../../ai/task-http.mjs";
 import { handleAiDocumentRequest } from "../../ai/document-http.mjs";
 import { handleAiMemoryRequest } from "../../ai/memory-http.mjs";
+import { handleAiApprovalRequest } from "../../ai/approval-http.mjs";
 
 async function requireLiveScope(runtime,request,scope){
   const authenticated=await runtime.auth.authenticateRequest({headers:request.headers});
@@ -26,11 +27,11 @@ export default {
     if(path==="/selfhost/ai/tasks"||path.startsWith("/selfhost/ai/tasks/"))return handleAiTaskRequest({request,url,runtime:scopedRuntime});
     if(path==="/selfhost/ai/documents"||path.startsWith("/selfhost/ai/documents/"))return handleAiDocumentRequest({request,url,runtime:scopedRuntime});
     if(path==="/selfhost/ai/memory"||path.startsWith("/selfhost/ai/memory/"))return handleAiMemoryRequest({request,url,runtime:scopedRuntime});
+    if(path==="/selfhost/ai/approvals"||path.startsWith("/selfhost/ai/approvals/"))return handleAiApprovalRequest({request,url,runtime:scopedRuntime});
 
     if(path==="/selfhost/ai/employees"||path.startsWith("/selfhost/ai/employees/")){
       if(method!=="GET")await requireLiveScope(runtime,request,"ai:approve");
     }
-    if(path==="/selfhost/ai/approvals"||path.startsWith("/selfhost/ai/approvals/"))await requireLiveScope(runtime,request,"ai:approve");
     if(path==="/selfhost/ai/academics"||path.startsWith("/selfhost/ai/academics/"))await requireLiveScope(runtime,request,method==="GET"?"academics:read":"academics:write");
     if(path==="/selfhost/ai/schedules"||path.startsWith("/selfhost/ai/schedules/")){
       if(method!=="GET")await requireLiveScope(runtime,request,"ai:approve");
