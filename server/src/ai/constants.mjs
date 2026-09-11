@@ -1,7 +1,7 @@
 export const AUTONOMY_LEVELS = Object.freeze({ ADVISER: 1, ASSISTANT: 2, AUTONOMOUS: 3 });
 export const TASK_STATUSES = Object.freeze(["queued","working","waiting_for_approval","blocked","completed","failed","cancelled"]);
 export const DOCUMENT_STATUSES = Object.freeze(["draft","in_review","changes_requested","approved","published","archived"]);
-export const APPROVAL_STATUSES = Object.freeze(["pending","approved","rejected","executed","cancelled"]);
+export const APPROVAL_STATUSES = Object.freeze(["pending","approved","executing","rejected","executed","cancelled"]);
 export const RISK_LEVELS = Object.freeze(["low","medium","high","prohibited"]);
 
 export const INITIAL_AGENT_TEMPLATES = Object.freeze([

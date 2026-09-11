@@ -72,7 +72,16 @@ export class AiToolGateway {
     const currentPermissions=context.permissions??[];
     const effectivePermissions=intersect(agent.permissions??[],currentPermissions);
     evaluateToolPolicy({agent:{...agent,permissions:effectivePermissions},tool,context:{...context,permissions:effectivePermissions,approvalGranted:true},input:approval.payload??{}});
-    return this.#execute({tool,agent,context:{...context,permissions:effectivePermissions,reason:approval.reason},taskId:approval.task_id,input:approval.payload??{},approved:true,approvalId:approval.approval_id});
+    let claimed=approval;
+    if(this.approvalService?.claimExecution)claimed=await this.approvalService.claimExecution({context,approvalId:approval.approval_id});
+    try{
+      const result=await this.#execute({tool,agent,context:{...context,permissions:effectivePermissions,reason:approval.reason},taskId:approval.task_id,input:approval.payload??{},approved:true,approvalId:approval.approval_id});
+      if(this.approvalService?.markExecuted)await this.approvalService.markExecuted({context,approvalId:approval.approval_id,result});
+      return result;
+    }catch(error){
+      if(claimed?.status==="executing"&&this.approvalService?.releaseExecution)await this.approvalService.releaseExecution({context,approvalId:approval.approval_id,reason:error instanceof Error?error.message:String(error)}).catch(()=>undefined);
+      throw error;
+    }
   }
 
   async #execute({tool,agent,context,taskId,input,approved,approvalId=null}){
