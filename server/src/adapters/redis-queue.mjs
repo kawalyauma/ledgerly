@@ -9,6 +9,18 @@ const ENQUEUE_IDEMPOTENT_SCRIPT = `
   return 1
 `;
 
+const PROMOTE_DUE_SCRIPT = `
+  local rows = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, ARGV[2])
+  local moved = 0
+  for _, raw in ipairs(rows) do
+    if redis.call('ZREM', KEYS[1], raw) == 1 then
+      redis.call('LPUSH', KEYS[2], raw)
+      moved = moved + 1
+    end
+  end
+  return moved
+`;
+
 function requireJob(job) {
   if (!job || typeof job !== "object" || typeof job.jobId !== "string" || job.jobId.trim() === "") {
     throw new TypeError("queue expects a Ledgerly job envelope");
@@ -23,6 +35,14 @@ function encodeReceipt(raw) {
 function decodeReceipt(receipt) {
   if (typeof receipt !== "string" || receipt === "") throw new TypeError("receipt is required");
   return Buffer.from(receipt, "base64url").toString("utf8");
+}
+
+function delayScore(value) {
+  if (value == null) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  const score = date.getTime();
+  if (!Number.isFinite(score)) throw new TypeError("delayUntil must be a valid date");
+  return score;
 }
 
 export class RedisQueue {
@@ -47,6 +67,7 @@ export class RedisQueue {
     this.keys = Object.freeze({
       ready: `${namespace}:${name}:ready`,
       processing: `${namespace}:${name}:processing`,
+      delayed: `${namespace}:${name}:delayed`,
       dead: `${namespace}:${name}:dead`,
     });
   }
@@ -64,17 +85,25 @@ export class RedisQueue {
         keys: [this.#idempotencyKey(String(valid.idempotencyKey)), this.keys.ready],
         arguments: [valid.jobId, String(this.idempotencyTtlSeconds), raw],
       });
-      if (Number(inserted) !== 1) {
-        return { jobId: valid.jobId, queued: false, duplicate: true };
-      }
+      if (Number(inserted) !== 1) return { jobId: valid.jobId, queued: false, duplicate: true };
       return { jobId: valid.jobId, queued: true, duplicate: false };
     }
-
     await this.client.lPush(this.keys.ready, raw);
     return { jobId: valid.jobId, queued: true, duplicate: false };
   }
 
+  async promoteDue({ now = new Date(), limit = 100 } = {}) {
+    if (typeof this.client.zCard !== "function") return 0;
+    const score = delayScore(now);
+    const boundedLimit = Math.max(1, Math.min(Number(limit) || 100, 1000));
+    return Number(await this.client.eval(PROMOTE_DUE_SCRIPT, {
+      keys: [this.keys.delayed, this.keys.ready],
+      arguments: [String(score), String(boundedLimit)],
+    })) || 0;
+  }
+
   async take() {
+    await this.promoteDue();
     const raw = await this.client.rPopLPush(this.keys.ready, this.keys.processing);
     if (raw == null) return null;
     return { job: JSON.parse(raw), receipt: encodeReceipt(raw) };
@@ -86,7 +115,7 @@ export class RedisQueue {
     return removed > 0;
   }
 
-  async retry(receipt, { reason = null } = {}) {
+  async retry(receipt, { reason = null, delayUntil = null } = {}) {
     const raw = decodeReceipt(receipt);
     const job = JSON.parse(raw);
     const next = { ...job, attempt: Number(job.attempt ?? 0) + 1 };
@@ -94,21 +123,27 @@ export class RedisQueue {
       return this.deadLetter(receipt, { reason: reason ?? "max_attempts_reached" });
     }
 
+    const nextRaw = JSON.stringify(next);
+    const score = delayScore(delayUntil);
+    const shouldDelay = score != null && score > Date.now();
     const multi = this.client.multi();
     multi.lRem(this.keys.processing, 1, raw);
-    multi.lPush(this.keys.ready, JSON.stringify(next));
+    if (shouldDelay) multi.zAdd(this.keys.delayed, [{ score, value: nextRaw }]);
+    else multi.lPush(this.keys.ready, nextRaw);
     await multi.exec();
-    return { jobId: next.jobId, retried: true, attempt: next.attempt };
+    return {
+      jobId: next.jobId,
+      retried: true,
+      attempt: next.attempt,
+      delayed: shouldDelay,
+      availableAt: score == null ? null : new Date(score).toISOString(),
+    };
   }
 
   async deadLetter(receipt, { reason = "failed" } = {}) {
     const raw = decodeReceipt(receipt);
     const job = JSON.parse(raw);
-    const record = JSON.stringify({
-      job,
-      reason,
-      failedAt: new Date().toISOString(),
-    });
+    const record = JSON.stringify({ job, reason, failedAt: new Date().toISOString() });
     const multi = this.client.multi();
     multi.lRem(this.keys.processing, 1, raw);
     multi.lPush(this.keys.dead, record);
@@ -124,25 +159,23 @@ export class RedisQueue {
     return this.client.lLen(this.keys.processing);
   }
 
+  async delayedSize() {
+    return typeof this.client.zCard === "function" ? this.client.zCard(this.keys.delayed) : 0;
+  }
+
   async deadLetterSize() {
     return this.client.lLen(this.keys.dead);
   }
 
   async health() {
     try {
-      const [queued, processing, dead] = await Promise.all([
+      const [queued, processing, delayed, dead] = await Promise.all([
         this.size(),
         this.processingSize(),
+        this.delayedSize(),
         this.deadLetterSize(),
       ]);
-      return {
-        ok: true,
-        provider: this.provider,
-        name: this.name,
-        queued,
-        processing,
-        dead,
-      };
+      return { ok: true, provider: this.provider, name: this.name, queued, processing, delayed, dead };
     } catch (error) {
       return {
         ok: false,
