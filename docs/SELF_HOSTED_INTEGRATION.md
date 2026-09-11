@@ -66,6 +66,104 @@ auth-core
 
 Do not bypass prerequisite checks by manually editing migration metadata.
 
+## Runtime extension contract
+
+Domain services that need process lifecycle integration must be added as drop-in descriptors under:
+
+```text
+server/src/extensions/*.extension.mjs
+```
+
+Do not import every domain directly from `server/src/runtime.mjs`.
+
+A runtime extension may define:
+
+```js
+export default {
+  name: "domain-name",
+  required: false,
+
+  configure(env) {
+    return {
+      enabled: env.LEDGERLY_DOMAIN_ENABLED !== "false",
+    };
+  },
+
+  enabled(extensionConfig, coreConfig) {
+    return extensionConfig.enabled;
+  },
+
+  async create({
+    config,
+    extensionConfig,
+    services,
+    auth,
+    createQueue,
+  }) {
+    const queue = createQueue({ name: "domain-jobs" });
+    return {
+      value: domainService,
+      schedulerQueues: {
+        "domain.scheduled-job": queue,
+      },
+      async readiness() { return { ok: true }; },
+      describe() { return { provider: "domain" }; },
+      async close() {},
+    };
+  },
+};
+```
+
+Extension-owned environment parsing belongs in `configure(env)`. The resulting values are available under:
+
+```text
+config.extensions[extensionName]
+```
+
+This avoids repeatedly editing core `config.mjs` for every module.
+
+An extension may contribute dedicated scheduler queues. The core scheduler routes a job by `job.kind` to the extension queue and falls back to the core queue for unregistered kinds.
+
+Extension readiness is reported separately. Only extensions declared `required: true` may make global readiness fail.
+
+## HTTP route contract
+
+Domain HTTP routes are drop-in descriptors under:
+
+```text
+server/src/http/routes/*.route.mjs
+```
+
+Do not add every domain route directly to `server/src/index.mjs`.
+
+Example:
+
+```js
+export default {
+  name: "domain-name",
+  prefix: "/selfhost/domain",
+  enabled: (config) => config.extensions["domain-name"]?.enabled === true,
+  async handle({ request, url, runtime, config, requestId }) {
+    return {
+      status: 200,
+      body: { ok: true },
+    };
+  },
+};
+```
+
+One descriptor owns its prefix and all subpaths below it.
+
+Reserved core routes cannot be replaced by a domain descriptor:
+
+- `/selfhost/health`
+- `/selfhost/ready`
+- `/selfhost/contracts`
+
+Domain handlers must use the shared auth service for authentication, tenant scope and permissions. A route registry is a dispatch mechanism, not an authorization bypass.
+
+The core server retains its security headers and request timeout even when a domain response provides additional headers. Long-running work should enqueue a durable job rather than extending the HTTP timeout.
+
 ## Syntax-check contract
 
 `server/package.json` uses:
@@ -94,7 +192,9 @@ Treat these as high-conflict integration files:
 - `compose.selfhost.yml`
 - `docs/SELF_HOSTED_ARCHITECTURE.md`
 
-Prefer modular additions over rewriting them. When a shared-file change is required, fetch the newest `main` immediately before editing and preserve other stream changes.
+The phase, runtime-extension and HTTP-route registries exist specifically to reduce edits to these files.
+
+Prefer modular additions over rewriting shared files. When a shared-file change is truly required, fetch the newest `main` immediately before editing and preserve other stream changes.
 
 ## Data ownership boundaries
 
@@ -127,6 +227,8 @@ Before integration it should have, where applicable:
 - prerequisite definition;
 - relationship/orphan checks;
 - executable tests;
+- runtime extension(s) rather than unnecessary core runtime rewrites;
+- HTTP route descriptor(s) rather than unnecessary core index rewrites;
 - runtime/API compatibility work for owned routes;
 - idempotency/concurrency checks for consequential workflows;
 - Cloudflare fallback preserved;
@@ -157,10 +259,11 @@ When two branches modify the same shared file:
 
 1. keep the newest `main` behavior;
 2. identify the intent of each stream change;
-3. compose the behaviors instead of taking one side wholesale;
-4. rerun the affected tests;
-5. verify Cloudflare fallback is still intact;
-6. commit the resolved integration as its own coherent change.
+3. move domain-specific logic into a phase/extension/route descriptor where possible;
+4. compose the remaining shared behavior instead of taking one side wholesale;
+5. rerun the affected tests;
+6. verify Cloudflare fallback is still intact;
+7. commit the resolved integration as its own coherent change.
 
 Do not resolve conflicts by blindly choosing `ours` or `theirs` for runtime/config/migration files.
 
