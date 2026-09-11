@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
+const LOOPBACK_HOSTS = ["127.0.0.1", "localhost", "[::1]"];
 const PRIVATE_SERVICE_NAMES = new Set(["postgres", "pgbouncer", "redis", "minio", "api"]);
 const APPROVED_PUBLIC = Object.freeze({
   caddy: Object.freeze([
@@ -85,19 +85,34 @@ export function parseComposeSurface(source, { filename = "compose.yml" } = {}) {
 
 export function parsePortBinding(binding) {
   const raw = String(binding).trim();
-  const [withoutProtocol, protocolRaw = "tcp"] = raw.split("/");
-  const protocol = protocolRaw.toLowerCase();
-  const parts = withoutProtocol.split(":");
-  if (parts.length === 1) {
-    return { raw, host: null, published: null, containerPort: parts[0], protocol, public: false };
+  const slash = raw.lastIndexOf("/");
+  const withoutProtocol = slash >= 0 ? raw.slice(0, slash) : raw;
+  const protocol = (slash >= 0 ? raw.slice(slash + 1) : "tcp").toLowerCase();
+
+  if (!withoutProtocol.includes(":")) {
+    return { raw, host: null, published: null, containerPort: withoutProtocol, protocol, public: false };
   }
-  if (parts.length === 2) {
-    return { raw, host: null, published: parts[0], containerPort: parts[1], protocol, public: true };
+
+  const containerMatch = withoutProtocol.match(/:([^:]+)$/);
+  if (!containerMatch) throw new Error(`Unsupported port binding: ${raw}`);
+  const containerPort = containerMatch[1];
+  const left = withoutProtocol.slice(0, -(containerPort.length + 1));
+
+  for (const host of LOOPBACK_HOSTS) {
+    const prefix = `${host}:`;
+    if (left.startsWith(prefix)) {
+      return {
+        raw,
+        host,
+        published: left.slice(prefix.length),
+        containerPort,
+        protocol,
+        public: false,
+      };
+    }
   }
-  const containerPort = parts.at(-1);
-  const published = parts.at(-2);
-  const host = parts.slice(0, -2).join(":");
-  return { raw, host, published, containerPort, protocol, public: !LOOPBACK_HOSTS.has(host) };
+
+  return { raw, host: null, published: left, containerPort, protocol, public: true };
 }
 
 function approvedPublicBinding(serviceName, binding) {
@@ -125,7 +140,13 @@ export function evaluateComposeExposure({ base, overlays = [] }) {
 
     for (const service of surface.services ?? []) {
       for (const rawBinding of service.ports ?? []) {
-        const binding = parsePortBinding(rawBinding);
+        let binding;
+        try {
+          binding = parsePortBinding(rawBinding);
+        } catch (error) {
+          failures.push(`${surface.filename}:${service.name}:UNPARSEABLE_PORT:${rawBinding}`);
+          continue;
+        }
         observations.push({ filename: surface.filename, service: service.name, ...binding });
 
         if (PRIVATE_SERVICE_NAMES.has(service.name) && binding.public) {
