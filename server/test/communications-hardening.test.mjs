@@ -4,7 +4,8 @@ import { projectMobilePayload } from '../src/mobile-sync/privacy.mjs';
 import { CommunicationsService } from '../src/communications/service.mjs';
 import { CommunicationsWorker } from '../src/communications/worker.mjs';
 import { PostgresCommunicationsRepository } from '../src/communications/repository.mjs';
-import { ensureCommunicationsSchema, finalizeCommunicationsSchema } from '../src/migration/communications-schema.mjs';
+import { ensureCommunicationsSchema } from '../src/migration/communications-schema.mjs';
+import { finalizeCommunicationsPrivacy } from '../src/migration/communications-privacy-compat.mjs';
 import { canAccessCommunications } from '../src/mobile-sync/communications-auth.mjs';
 import { createCollection as createDraftCollection } from '../src/mobile-sync/collections/communications-campaign-drafts.collection.mjs';
 
@@ -45,11 +46,12 @@ test('worker delays retry and dead-letters every unprocessed member when batch e
  const result=await new CommunicationsWorker({queue,service}).runOnce();assert.equal(result.deadLettered,true);assert.equal(retryCount,1);assert.equal(delays[0],'2026-09-11T12:00:00.000Z');assert.deepEqual(dead,['d1','d2','d3']);
 });
 
-test('communications schema installs safe change-feed triggers and idempotent privacy finalizer',async()=>{
+test('communications schema installs safe change-feed triggers and one-shot 0052 compatibility rebuild',async()=>{
  const sql=[];const db={query:async(text)=>{sql.push(text);return{rows:[]}},transaction:async(fn)=>fn({query:async(text)=>{sql.push(text);return{rows:[]}}})};
- await ensureCommunicationsSchema(db);await finalizeCommunicationsSchema(db);
+ await ensureCommunicationsSchema(db);await finalizeCommunicationsPrivacy(db);
  assert.match(sql[0],/ledgerly_emit_communication_sync/);assert.match(sql[0],/communication_sync_deliveries_update/);assert.doesNotMatch(sql[0],/'providerMessageId'/);assert.doesNotMatch(sql[0],/'lastError'/);
- assert.match(sql[1],/400 days/);assert.match(sql[1],/mobile_sync_tombstones/);assert.match(sql[1],/jsonb_strip_nulls/);
+ assert.match(sql[1],/compatibility_migrations/);assert.match(sql[1],/communications-mobile-privacy-v2/);assert.match(sql[1],/DELETE FROM mobile_sync_changes/);assert.match(sql[1],/jsonb_object_keys/);assert.match(sql[1],/400 days/);assert.match(sql[1],/mobile_sync_tombstones/);
+ assert.doesNotMatch(sql[1],/jsonb_strip_nulls/);
 });
 
 test('communications access honors core scopes and fails closed without school tables',async()=>{

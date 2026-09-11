@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { D1MigrationRunner } from '../src/migration/runner.mjs';
 import communicationsPhase from '../src/migration/phases/communications.phase.mjs';
-import { finalizeCommunicationsSchema } from '../src/migration/communications-schema.mjs';
+import { finalizeCommunicationsPrivacy } from '../src/migration/communications-privacy-compat.mjs';
 
 test('communications phase finalizes privacy/tombstone compatibility after copy',()=>{
-  assert.equal(communicationsPhase.finalizeSchema,finalizeCommunicationsSchema);
+  assert.equal(communicationsPhase.finalizeSchema,finalizeCommunicationsPrivacy);
   assert.deepEqual(communicationsPhase.prerequisites,['auth-core','mobile-sync-core','contacts']);
   assert.deepEqual(communicationsPhase.tables.map((table)=>table.name),[
     'communication_message_types','communication_campaigns','communication_recipients',
