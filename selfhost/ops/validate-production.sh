@@ -89,7 +89,8 @@ if [[ "${LEDGERLY_ENVIRONMENT:-development}" == "production" ]]; then
   [[ -n "${LEDGERLY_DATABASE_APP_PASSWORD:-}" && "${LEDGERLY_DATABASE_APP_PASSWORD:-}" != *CHANGE_ME* && "${LEDGERLY_DATABASE_APP_PASSWORD:-}" != "${POSTGRES_PASSWORD:-}" ]] || { echo "  production requires a distinct LEDGERLY_DATABASE_APP_PASSWORD"; secret_bad=1; }
   [[ -n "${MINIO_APP_ACCESS_KEY:-}" && "${MINIO_APP_ACCESS_KEY:-}" != "${MINIO_ROOT_USER:-}" ]] || { echo "  production requires a distinct bucket-scoped MINIO_APP_ACCESS_KEY"; secret_bad=1; }
   [[ -n "${MINIO_APP_SECRET_KEY:-}" && "${MINIO_APP_SECRET_KEY:-}" != *CHANGE_ME* && "${MINIO_APP_SECRET_KEY:-}" != "${MINIO_ROOT_PASSWORD:-}" ]] || { echo "  production requires a distinct MINIO_APP_SECRET_KEY"; secret_bad=1; }
-  (( ${#LEDGERLY_JWT_SECRET} >= 32 )) || { echo "  production JWT secret must be at least 32 characters"; secret_bad=1; }
+  jwt_secret="${LEDGERLY_JWT_SECRET:-}"
+  (( ${#jwt_secret} >= 32 )) || { echo "  production JWT secret must be at least 32 characters"; secret_bad=1; }
   pool_max="${LEDGERLY_DATABASE_POOL_MAX:-20}"
   [[ "$pool_max" =~ ^[0-9]+$ ]] && (( pool_max >= 1 && pool_max <= 50 )) || { echo "  LEDGERLY_DATABASE_POOL_MAX must be between 1 and 50"; secret_bad=1; }
   [[ "${LEDGERLY_SITE_ADDRESS:-}" != http://* && "${LEDGERLY_SITE_ADDRESS:-}" != *localhost* && -n "${LEDGERLY_SITE_ADDRESS:-}" ]] || { echo "  production requires a non-localhost Caddy site address using automatic HTTPS or explicit https://"; secret_bad=1; }
