@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,10 @@ function samplePhase() {
     tables: [{ name: "sample_rows" }],
     relationshipChecks: [["sample.parent", "SELECT 0"]],
   };
+}
+
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 test("cutover evidence requires a strict run and every latest validation to pass", () => {
@@ -66,25 +71,57 @@ test("self-host readiness probe only passes a ready response", async () => {
   assert.equal(degraded.ok, false);
 });
 
-test("backup freshness requires fresh PostgreSQL/object backups and checksum manifests", async () => {
+test("backup freshness verifies PostgreSQL and object backup checksums", async () => {
   const root = await mkdtemp(join(tmpdir(), "ledgerly-readiness-"));
   try {
     const postgres = join(root, "postgres");
     const objects = join(root, "objects", "20260911T000000Z");
     await mkdir(postgres, { recursive: true });
     await mkdir(objects, { recursive: true });
+
     const dump = join(postgres, "ledgerly-20260911T000000Z.dump");
-    await writeFile(dump, "test-dump");
-    await writeFile(`${dump}.sha256`, "placeholder\n");
-    await writeFile(join(objects, "SHA256SUMS"), "placeholder\n");
+    const dumpBody = "test-dump";
+    await writeFile(dump, dumpBody);
+    await writeFile(`${dump}.sha256`, `${sha256(dumpBody)}  ${dump}\n`);
+
+    const object = join(objects, "receipts", "receipt-1.pdf");
+    const objectBody = "receipt-body";
+    await mkdir(join(objects, "receipts"), { recursive: true });
+    await writeFile(object, objectBody);
+    await writeFile(join(objects, "SHA256SUMS"), `${sha256(objectBody)}  ${object}\n`);
 
     const healthy = await assessBackupFreshness({ root, maxAgeHours: 24, now: Date.now() });
     assert.equal(healthy.ok, true);
+    assert.equal(healthy.checks.find((check) => check.name === "postgres-checksum")?.filesVerified, 1);
+    assert.equal(healthy.checks.find((check) => check.name === "objects-checksum")?.filesVerified, 1);
 
-    await rm(`${dump}.sha256`);
+    await writeFile(dump, "corrupted-dump");
     const broken = await assessBackupFreshness({ root, maxAgeHours: 24, now: Date.now() });
     assert.equal(broken.ok, false);
-    assert(broken.checks.some((check) => check.name === "postgres-checksum" && !check.ok));
+    assert.match(broken.checks.find((check) => check.name === "postgres-checksum")?.error ?? "", /checksum mismatch/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("object checksum verification rejects unlisted files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ledgerly-readiness-unlisted-"));
+  try {
+    const postgres = join(root, "postgres");
+    const objects = join(root, "objects", "20260911T000000Z");
+    await mkdir(postgres, { recursive: true });
+    await mkdir(objects, { recursive: true });
+    const dump = join(postgres, "ledgerly-20260911T000000Z.dump");
+    await writeFile(dump, "dump");
+    await writeFile(`${dump}.sha256`, `${sha256("dump")}  ${dump}\n`);
+    const listed = join(objects, "listed.bin");
+    await writeFile(listed, "listed");
+    await writeFile(join(objects, "unlisted.bin"), "unlisted");
+    await writeFile(join(objects, "SHA256SUMS"), `${sha256("listed")}  ${listed}\n`);
+
+    const result = await assessBackupFreshness({ root, maxAgeHours: 24, now: Date.now() });
+    assert.equal(result.ok, false);
+    assert.match(result.checks.find((check) => check.name === "objects-checksum")?.error ?? "", /manifest count mismatch/i);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
