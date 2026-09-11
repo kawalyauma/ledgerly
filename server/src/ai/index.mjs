@@ -25,7 +25,7 @@ export async function createAiWorkforce({services,config={},authorization,tenant
  const memory=new AiMemoryService({database:services.database,audit:services.audit});
  const knowledge=new AiKnowledgeService({database:services.database,audit:services.audit,embedder,embeddingDimensions,vectorEnabled:storeCapabilities.vectorSearch});
  const ingestion=new AiKnowledgeIngestionService({knowledge,storageForOrganization:(organizationId)=>tenantStorage.forOrganization(organizationId),audit:services.audit,maxBytes:Number(config.maxKnowledgeBytes??25*1024*1024),chunkChars:Number(config.chunkChars??3200),overlapChars:Number(config.chunkOverlapChars??400)});
- const schedules=new AiScheduleService({scheduler:services.scheduler,audit:services.audit});
+ const schedules=new AiScheduleService({scheduler:services.scheduler,audit:services.audit,agents});
  const academic=new AiAcademicService({database:services.database,tasks,documents,audit:services.audit});
  const internalTools={
    createLessonPlanDraft:async({input,context,agent,taskId})=>documents.createAiDraft({context,agent,taskId,type:"lesson_plan",title:input.title??"Lesson Plan Draft",content:input.content??input,reason:context.reason}),
