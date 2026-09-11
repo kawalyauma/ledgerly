@@ -10,6 +10,8 @@ import { createTenantStorageFactory } from "./adapters/tenant-storage.mjs";
 import { createNotificationBridge } from "./adapters/notification-bridge.mjs";
 import { KindRoutingQueue } from "./adapters/kind-routing-queue.mjs";
 import { SchedulerRunner } from "./scheduler-runner.mjs";
+import { DurableJobWorker } from "./jobs/durable-job-worker.mjs";
+import { QueueRecoveryRunner } from "./jobs/queue-recovery-runner.mjs";
 import { createJwtCodec } from "./auth/jwt.mjs";
 import { AuthCompatibilityService } from "./auth/service.mjs";
 import { intersectPermissions, resolveCurrentActorAccess } from "./auth/access-resolver.mjs";
@@ -17,42 +19,56 @@ import { createRuntimeExtensions, listRuntimeExtensionDescriptors } from "./exte
 
 export async function createRuntime(config) {
   if (config.runtimeMode === "production") {
-    throw new Error(
-      "Self-hosted production mode is intentionally blocked until migrated business routes/data and cutover validation are complete",
-    );
+    throw new Error("Self-hosted production mode is intentionally blocked until migrated business routes/data and cutover validation are complete");
   }
 
   const database = await createPostgresDatabase(config.database);
   let redisClient;
   let events;
   let schedulerRunner;
+  let queueRecoveryRunner;
   let runtimeExtensions;
+  const managedQueues = new Set();
+  const managedWorkers = new Set();
+
   try {
     redisClient = await createRedisClient(config.redis);
     const storage = await createMinioStorage(config.objectStorage);
     const tenantStorage = createTenantStorageFactory(storage);
     const scheduler = await createPostgresScheduler({ database });
     const audit = await createPostgresAudit({ database });
-    events = await createRedisEventBus({
-      client: redisClient,
-      namespace: config.redis.namespace,
-    });
+    events = await createRedisEventBus({ client: redisClient, namespace: config.redis.namespace });
     const notifications = createNotificationBridge(config.notifications);
 
-    const createQueue = ({ name, maxAttempts = config.queue.maxAttempts, namespace = `${config.redis.namespace}:jobs` }) => {
+    const createQueue = ({ name, maxAttempts = config.queue.maxAttempts, namespace = `${config.redis.namespace}:jobs`, visibilityTimeoutMs = config.queue.visibilityTimeoutMs }) => {
       if (typeof name !== "string" || name.trim() === "") throw new TypeError("Queue name is required");
       if (!Number.isInteger(maxAttempts) || maxAttempts < 1) throw new TypeError("Queue maxAttempts must be positive");
-      return new RedisQueue({ client: redisClient, name: name.trim(), namespace, maxAttempts });
+      const queue = new RedisQueue({ client: redisClient, name: name.trim(), namespace, maxAttempts, visibilityTimeoutMs });
+      managedQueues.add(queue);
+      return queue;
+    };
+
+    const createWorker = ({ queue: workerQueue, handlers, ...options }) => {
+      if (!workerQueue || !managedQueues.has(workerQueue)) throw new Error("Workers must use a queue created by this Ledgerly runtime");
+      const worker = new DurableJobWorker({
+        queue: workerQueue,
+        handlers,
+        pollIntervalMs: options.pollIntervalMs ?? config.queue.workerPollIntervalMs,
+        concurrency: options.concurrency ?? config.queue.workerConcurrency,
+        retryBaseMs: options.retryBaseMs ?? config.queue.retryBaseMs,
+        retryMaxMs: options.retryMaxMs ?? config.queue.retryMaxMs,
+        leaseRenewIntervalMs: options.leaseRenewIntervalMs,
+        logger: options.logger ?? console,
+        name: options.name ?? workerQueue.name,
+      });
+      managedWorkers.add(worker);
+      return worker;
     };
 
     const queue = createQueue({ name: config.queue.name });
-
     const services = assertServiceContracts({
       database,
-      cache: new RedisCache({
-        client: redisClient,
-        namespace: `${config.redis.namespace}:cache`,
-      }),
+      cache: new RedisCache({ client: redisClient, namespace: `${config.redis.namespace}:cache` }),
       storage,
       queue,
       scheduler,
@@ -77,14 +93,16 @@ export async function createRuntime(config) {
       intersectPermissions,
     });
 
-    runtimeExtensions = await createRuntimeExtensions({
-      config,
-      services,
-      auth,
-      authorization,
-      tenantStorage,
-      createQueue,
-    });
+    runtimeExtensions = await createRuntimeExtensions({ config, services, auth, authorization, tenantStorage, createQueue, createWorker });
+
+    if (config.queue.recoveryEnabled) {
+      queueRecoveryRunner = new QueueRecoveryRunner({
+        queues: managedQueues,
+        intervalMs: config.queue.recoveryIntervalMs,
+        batchSize: config.queue.recoveryBatchSize,
+      });
+      queueRecoveryRunner.start();
+    }
 
     if (config.scheduler.enabled) {
       const schedulerQueue = Object.keys(runtimeExtensions.schedulerQueues).length > 0
@@ -101,39 +119,33 @@ export async function createRuntime(config) {
       schedulerRunner.start();
     }
 
+    async function managedQueueHealth() {
+      const items = {};
+      let ok = true;
+      for (const item of managedQueues) {
+        const health = await item.health();
+        items[item.name] = health;
+        if (health.ok !== true) ok = false;
+      }
+      return { ok, items };
+    }
+
     async function readiness() {
-      const [databaseHealth, cacheHealth, queueHealth, storageHealth, schedulerHealth, auditHealth, eventsHealth, notificationsHealth, extensionHealth] = await Promise.all([
-        services.database.health(),
-        services.cache.health(),
-        services.queue.health(),
-        services.storage.health(),
-        services.scheduler.health(),
-        services.audit.health(),
-        services.events.health(),
-        services.notifications.health(),
-        runtimeExtensions.readiness(),
+      const [databaseHealth, cacheHealth, queueHealth, storageHealth, schedulerHealth, auditHealth, eventsHealth, notificationsHealth, extensionHealth, queueFleetHealth] = await Promise.all([
+        services.database.health(), services.cache.health(), services.queue.health(), services.storage.health(), services.scheduler.health(), services.audit.health(), services.events.health(), services.notifications.health(), runtimeExtensions.readiness(), managedQueueHealth(),
       ]);
-      const dependencies = {
-        database: databaseHealth,
-        cache: cacheHealth,
-        queue: queueHealth,
-        objectStorage: storageHealth,
-        scheduler: schedulerHealth,
-        audit: auditHealth,
-        events: eventsHealth,
-        notifications: notificationsHealth,
-      };
-      const authMigration = await auth.health().catch((error) => ({
-        ok: false,
-        provider: auth.provider,
-        schemaReady: false,
-        error: error instanceof Error ? error.message : String(error),
-      }));
+      const dependencies = { database: databaseHealth, cache: cacheHealth, queue: queueHealth, objectStorage: storageHealth, scheduler: schedulerHealth, audit: auditHealth, events: eventsHealth, notifications: notificationsHealth };
+      const authMigration = await auth.health().catch((error) => ({ ok: false, provider: auth.provider, schemaReady: false, error: error instanceof Error ? error.message : String(error) }));
+      const queueRecovery = queueRecoveryRunner?.status() ?? { running: false, disabled: true };
+      const queueRecoveryHealthy = queueRecovery.disabled === true || queueRecovery.lastErrors?.length === 0;
       return {
-        ok: Object.values(dependencies).every((item) => item.ok === true) && extensionHealth.ok,
+        ok: Object.values(dependencies).every((item) => item.ok === true) && extensionHealth.ok && queueFleetHealth.ok && queueRecoveryHealthy,
         dependencies,
         extensions: extensionHealth.items,
         migration: { auth: authMigration },
+        queues: queueFleetHealth.items,
+        queueRecovery,
+        workers: [...managedWorkers].map((worker) => worker.status()),
         schedulerRunner: schedulerRunner?.status() ?? { running: false, disabled: true },
       };
     }
@@ -142,10 +154,9 @@ export async function createRuntime(config) {
       return {
         version: SERVICE_CONTRACT_VERSION,
         runtimeMode: config.runtimeMode,
-        providers: Object.fromEntries(
-          Object.entries(services).map(([name, service]) => [name, service.provider ?? "custom"]),
-        ),
+        providers: Object.fromEntries(Object.entries(services).map(([name, service]) => [name, service.provider ?? "custom"])),
         durableCoreReady: true,
+        durableJobRecoveryReady: true,
         durableSchedulerReady: true,
         durableAuditReady: true,
         distributedEventsReady: true,
@@ -157,6 +168,11 @@ export async function createRuntime(config) {
         runtimeExtensionDescriptors: listRuntimeExtensionDescriptors(),
         extensions: runtimeExtensions.describe(),
         auth: auth.describe(),
+        queueRuntime: {
+          managedQueues: [...managedQueues].map((item) => item.name),
+          recovery: queueRecoveryRunner?.status() ?? { running: false, disabled: true },
+          workers: [...managedWorkers].map((worker) => worker.status()),
+        },
         schedulerRunner: schedulerRunner?.status() ?? { running: false, disabled: true },
         businessRoutesEnabled: false,
         authoritativeDataStore: "cloudflare-d1-until-migration",
@@ -165,13 +181,12 @@ export async function createRuntime(config) {
     }
 
     async function close() {
-      await runtimeExtensions?.close();
       await schedulerRunner?.stop();
+      await Promise.allSettled([...managedWorkers].map((worker) => worker.stop()));
+      await queueRecoveryRunner?.stop();
+      await runtimeExtensions?.close();
       await events?.close();
-      await Promise.allSettled([
-        database.close(),
-        redisClient?.isOpen ? redisClient.quit() : undefined,
-      ]);
+      await Promise.allSettled([database.close(), redisClient?.isOpen ? redisClient.quit() : undefined]);
     }
 
     return Object.freeze({
@@ -179,19 +194,24 @@ export async function createRuntime(config) {
       auth,
       authorization,
       tenantStorage,
+      jobs: Object.freeze({
+        createQueue,
+        createWorker,
+        listQueues: () => [...managedQueues].map((item) => item.name),
+        recoveryStatus: () => queueRecoveryRunner?.status() ?? { running: false, disabled: true },
+      }),
       extensions: runtimeExtensions.values,
       readiness,
       describeContracts,
       close,
     });
   } catch (error) {
-    await runtimeExtensions?.close().catch(() => undefined);
     await schedulerRunner?.stop().catch(() => undefined);
+    await Promise.allSettled([...managedWorkers].map((worker) => worker.stop()));
+    await queueRecoveryRunner?.stop().catch(() => undefined);
+    await runtimeExtensions?.close().catch(() => undefined);
     await events?.close().catch(() => undefined);
-    await Promise.allSettled([
-      database.close(),
-      redisClient?.isOpen ? redisClient.quit() : undefined,
-    ]);
+    await Promise.allSettled([database.close(), redisClient?.isOpen ? redisClient.quit() : undefined]);
     throw error;
   }
 }
