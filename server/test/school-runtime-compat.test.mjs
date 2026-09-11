@@ -58,6 +58,7 @@ test("reference API applies year/class context instead of returning unrelated te
   assert.deepEqual(classes.values, ["org-1", "ay-2026"]);
   assert.deepEqual(subjects.values, ["org-1", "class-p3"]);
   assert.match(subjects.sql, /school_class_subjects/);
+  assert.match(subjects.sql, /cs\.academic_year_id IS NULL OR cs\.academic_year_id=c\.academic_year_id/);
 });
 
 test("HTTP route authenticates, requires school read scope, and rejects writes before cutover", async () => {

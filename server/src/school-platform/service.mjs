@@ -105,6 +105,7 @@ export class SchoolPlatformService {
             JOIN school_classes c ON c.id=$2 AND c.organization_id=s.organization_id
             JOIN school_class_subjects cs ON cs.organization_id=s.organization_id AND cs.subject_id=s.id AND cs.class_level_id=c.class_level_id
             WHERE s.organization_id=$1 AND s.active=true AND cs.active=true
+              AND (cs.academic_year_id IS NULL OR cs.academic_year_id=c.academic_year_id)
             ORDER BY s.name`, [organizationId, classId])
         : this.database.query("SELECT id,code,name,short_name,subject_type,active FROM school_subjects WHERE organization_id=$1 ORDER BY name", [organizationId]),
     ]);
