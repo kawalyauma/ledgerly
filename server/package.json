@@ -11,7 +11,8 @@
     "migration:phases": "node src/migration/cli.mjs phases",
     "migration:plan": "node src/migration/cli.mjs plan",
     "migration:run": "node src/migration/cli.mjs run",
-    "migration:validate": "node src/migration/cli.mjs validate"
+    "migration:validate": "node src/migration/cli.mjs validate",
+    "migration:rehearsal": "node src/migration/rehearsal-cli.mjs"
   },
   "dependencies": {
     "cron-parser": "5.10.0",
