@@ -3,7 +3,10 @@ export const ALL_SCOPES = Object.freeze([
   "contacts:read", "contacts:write", "products:read", "products:write", "documents:read", "documents:write",
   "payments:read", "payments:write", "payroll:read", "payroll:write", "periods:read", "periods:write",
   "admin:read", "admin:write", "communications:read", "communications:write", "school:read", "school:write",
-  "ai:read", "ai:write", "ai:approve",
+  "students:read", "students:write", "staff:read", "staff:write", "academics:read", "academics:write",
+  "fees:read", "fees:write", "finance:read", "finance:write", "inventory:read", "inventory:write",
+  "tasks:read", "tasks:write", "approvals:read", "approvals:write", "notifications:send", "support:read", "support:write",
+  "ai:read", "ai:write", "ai:approve", "ai:knowledge:read", "ai:knowledge:write",
 ]);
 
 export function parseScopes(value) {
