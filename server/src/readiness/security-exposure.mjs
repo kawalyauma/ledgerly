@@ -25,6 +25,19 @@ function indentation(line) {
   return line.match(/^ */)?.[0].length ?? 0;
 }
 
+function parseInlineList(value) {
+  const text = value.trim();
+  if (!text.startsWith("[") || !text.endsWith("]")) throw new Error(`Invalid inline list: ${value}`);
+  const body = text.slice(1, -1).trim();
+  if (!body) return [];
+  const quoted = [];
+  const pattern = /(["'])(.*?)\1/g;
+  let match;
+  while ((match = pattern.exec(body)) !== null) quoted.push(match[2]);
+  if (quoted.length > 0) return quoted;
+  return body.split(",").map((item) => stripQuotes(item)).filter(Boolean);
+}
+
 export function parseComposeSurface(source, { filename = "compose.yml" } = {}) {
   const services = new Map();
   const networks = new Map();
@@ -56,9 +69,21 @@ export function parseComposeSurface(source, { filename = "compose.yml" } = {}) {
         continue;
       }
       if (!service) continue;
-      if (indent === 4 && trimmed === "ports:") {
-        inPorts = true;
-        continue;
+      if (indent === 4) {
+        const inlinePorts = trimmed.match(/^ports:\s*(\[.*\])\s*$/);
+        if (inlinePorts) {
+          try {
+            services.get(service).ports.push(...parseInlineList(inlinePorts[1]));
+          } catch {
+            services.get(service).ports.push(`__UNPARSEABLE_INLINE_PORTS__:${inlinePorts[1]}`);
+          }
+          inPorts = false;
+          continue;
+        }
+        if (trimmed === "ports:") {
+          inPorts = true;
+          continue;
+        }
       }
       if (indent <= 4 && trimmed !== "ports:") inPorts = false;
       if (inPorts && indent >= 6 && trimmed.startsWith("- ")) {
@@ -85,6 +110,7 @@ export function parseComposeSurface(source, { filename = "compose.yml" } = {}) {
 
 export function parsePortBinding(binding) {
   const raw = String(binding).trim();
+  if (raw.startsWith("__UNPARSEABLE_INLINE_PORTS__:")) throw new Error(`Unsupported inline ports declaration: ${raw}`);
   const slash = raw.lastIndexOf("/");
   const withoutProtocol = slash >= 0 ? raw.slice(0, slash) : raw;
   const protocol = (slash >= 0 ? raw.slice(slash + 1) : "tcp").toLowerCase();
@@ -143,7 +169,7 @@ export function evaluateComposeExposure({ base, overlays = [] }) {
         let binding;
         try {
           binding = parsePortBinding(rawBinding);
-        } catch (error) {
+        } catch {
           failures.push(`${surface.filename}:${service.name}:UNPARSEABLE_PORT:${rawBinding}`);
           continue;
         }
