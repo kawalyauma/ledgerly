@@ -1,5 +1,5 @@
 import {
-  checkpointTable, createMigrationRun, ensureMigrationMetadata, ensureTableState, failTable,
+  assertMigrationPrerequisites, checkpointTable, createMigrationRun, ensureMigrationMetadata, ensureTableState, failTable,
   finishRun, finishTableCopy, markTableCopying, recordValidation, resumeLatestRun,
 } from "./bookkeeping.mjs";
 import { getMigrationPhase } from "./phases.mjs";
@@ -31,12 +31,7 @@ export class D1MigrationRunner {
   }
   async prepare(){await ensureMigrationMetadata(this.database);await this.phase.ensureSchema(this.database);}
   async sourceSnapshot(table){return typeof this.source.snapshot==="function"?this.source.snapshot(table.name,{columns:table.columns}):{count:await this.source.count(table.name)};}
-  async assertPrerequisites(){
-    for(const prerequisite of this.phase.prerequisites??[]){
-      const result=await this.database.query(`SELECT id FROM ledgerly_meta.migration_runs WHERE source_kind='cloudflare-d1' AND source_identity=$1 AND phase=$2 AND status='completed' ORDER BY completed_at DESC LIMIT 1`,[this.sourceIdentity,prerequisite]);
-      if(!result.rows[0])throw new Error(`Migration prerequisite not completed for ${this.phase.name}: ${prerequisite}`);
-    }
-  }
+  async assertPrerequisites(){return assertMigrationPrerequisites(this.database,{sourceIdentity:this.sourceIdentity,prerequisites:this.phase.prerequisites??[]});}
   async plan(tables=this.phase.tables){const items=[];for(const table of tables){const exists=await this.source.tableExists(table.name);items.push({table:table.name,exists,sourceCount:exists?await this.source.count(table.name):null,dependencies:table.dependencies});}return{phase:this.phase.name,description:this.phase.description,prerequisites:this.phase.prerequisites??[],sourceIdentity:this.sourceIdentity,tables:items};}
   async run({ resume=true, tables=this.phase.tables, requireStableSource=false }={}){
     await this.prepare();await this.assertPrerequisites();const phaseName=this.phase.name;
