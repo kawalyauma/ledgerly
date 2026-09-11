@@ -7,7 +7,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; SOURCE_SERVER="$(cd 
 [[ -n "$REPO_ROOT" ]] || { echo "Run installer from a Ledgerly Git checkout so safe fast-forward updates remain possible." >&2; exit 3; }
 INSTALL_ROOT="${LEDGERLY_CAMERA_INSTALL_ROOT:-/opt/ledgerly-camera}"; REPO_INSTALL="$INSTALL_ROOT/source"; SERVER_DIR="$REPO_INSTALL/camera-server"; DATA_ROOT="${LEDGERLY_CAMERA_DATA_ROOT:-/var/lib/ledgerly-camera}"; AUTO_UPDATE="${LEDGERLY_CAMERA_AUTO_UPDATE:-0}"
 if ! id ledgerly-camera >/dev/null 2>&1; then useradd --system --home "$DATA_ROOT" --shell /usr/sbin/nologin ledgerly-camera; fi
-getent group docker >/dev/null && usermod -aG docker ledgerly-camera || true
+# The Node daemon must not retain Docker-socket-equivalent privileges. The
+# systemd ExecStartPre uses the '+' prefix for the one privileged compose call.
+if getent group docker >/dev/null 2>&1 && command -v gpasswd >/dev/null 2>&1; then gpasswd -d ledgerly-camera docker >/dev/null 2>&1 || true; fi
 mkdir -p "$INSTALL_ROOT" "$DATA_ROOT" /etc/ledgerly-camera
 if [[ ! -d "$REPO_INSTALL/.git" ]]; then git clone --no-hardlinks "$REPO_ROOT" "$REPO_INSTALL"; REMOTE="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)"; [[ -z "$REMOTE" ]] || git -C "$REPO_INSTALL" remote set-url origin "$REMOTE"; else git -C "$REPO_INSTALL" fetch origin main && git -C "$REPO_INSTALL" pull --ff-only origin main; fi
 cd "$SERVER_DIR"; npm install --omit=dev --ignore-scripts
@@ -35,4 +37,5 @@ Ledgerly Camera Server installed.
 
 Automatic code updates: $([[ "$AUTO_UPDATE" == "1" ]] && echo enabled || echo disabled)
 Crash restart + one-minute control/media health recovery: enabled
+The Node daemon is intentionally not a member of the docker group.
 EOF

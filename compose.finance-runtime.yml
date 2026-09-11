@@ -1,18 +1,7 @@
+# Finance/runtime overlay intentionally does not own the NVR media service.
+# Run camera-server/docker-compose.yml + ledgerly-camera.service independently so
+# PostgreSQL, API, Printerly, finance, or Redis failure cannot interrupt recording.
 services:
-  nvr-mediamtx:
-    image: bluenviron/mediamtx:1.21.0
-    restart: unless-stopped
-    volumes:
-      - ./camera-server/mediamtx.yml:/mediamtx.yml:ro
-      - ${CAMERA_STORAGE_ROOT:-./camera-storage}:/recordings
-    command: ["/mediamtx.yml"]
-    ports:
-      - "127.0.0.1:${CAMERA_RTSP_HOST_PORT:-8554}:8554"
-      - "127.0.0.1:${CAMERA_HLS_HOST_PORT:-8888}:8888"
-      - "127.0.0.1:${CAMERA_WEBRTC_HTTP_HOST_PORT:-8889}:8889"
-      - "${CAMERA_WEBRTC_UDP_PORT:-8189}:8189/udp"
-    networks: [ledgerly_backend]
-
   backup:
     image: postgres:17-alpine
     profiles: ["backup"]

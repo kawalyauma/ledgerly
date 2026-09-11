@@ -1,5 +1,5 @@
 [Unit]
-Description=Ledgerly Camera Server NVR control daemon
+Description=Ledgerly Security Camera NVR Control Plane
 After=network-online.target docker.service
 Wants=network-online.target docker.service
 
@@ -7,20 +7,30 @@ Wants=network-online.target docker.service
 Type=simple
 User=ledgerly-camera
 Group=ledgerly-camera
-SupplementaryGroups=docker
 WorkingDirectory=__SERVER_DIR__
 EnvironmentFile=/etc/ledgerly-camera/camera.env
-ExecStartPre=/usr/bin/docker compose up -d
+# Start only the independent media service as root; the long-running Node daemon
+# never receives Docker socket membership or root privileges.
+ExecStartPre=+/usr/bin/docker compose up -d mediamtx
 ExecStart=/usr/bin/node src/index.mjs
 Restart=always
-RestartSec=5
+RestartSec=3
 TimeoutStopSec=20
+KillSignal=SIGTERM
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectHome=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
+ProtectSystem=full
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+MemoryMax=1G
+TasksMax=512
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target

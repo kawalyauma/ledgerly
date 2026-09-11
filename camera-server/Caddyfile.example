@@ -1,0 +1,38 @@
+{
+  admin off
+}
+
+{$CAMERA_PUBLIC_HOST:camera.example.com} {
+  encode zstd gzip
+
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options "nosniff"
+    Referrer-Policy "no-referrer"
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    -Server
+  }
+
+  # Short-lived Ledgerly access grants only. The control daemon's health,
+  # assignment, storage, backup, ingest, detector, and media-auth routes remain
+  # private even if this edge is reachable from the Internet.
+  handle /v1/access/* {
+    reverse_proxy 127.0.0.1:8789
+  }
+
+  # Set CAMERA_WEBRTC_PUBLIC_BASE_URL=https://camera.example.com/media.
+  # handle_path removes /media before forwarding the WHEP/WHIP camera path.
+  handle_path /media/* {
+    reverse_proxy 127.0.0.1:8889
+  }
+
+  # Optional HLS fallback for authenticated clients. MediaMTX still performs
+  # its normal external auth; do not disable auth merely to make HLS public.
+  handle_path /hls/* {
+    reverse_proxy 127.0.0.1:8888
+  }
+
+  # Never proxy MediaMTX :9997, /v1/media/auth, raw RTSP :8554, or the camera
+  # daemon's administrative API to the public Internet.
+  respond 404
+}
