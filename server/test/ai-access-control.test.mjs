@@ -72,6 +72,25 @@ test("document APIs require document permissions in addition to AI permissions",
   );
 });
 
+test("approval APIs use ai:approve directly without requiring generic ai:write",async()=>{
+  const runtime={
+    ...authRuntime(["ai:approve"]),
+    extensions:{ai:{}},
+    services:{database:{query:async(sql)=>{assert.match(sql,/ledgerly_ai\.approvals/);return{rows:[],rowCount:0};}}},
+  };
+  const response=await aiRoute.handle({request:{method:"GET",headers:{}},url:new URL("http://localhost/selfhost/ai/approvals"),runtime});
+  assert.equal(response.status,200);
+  assert.deepEqual(response.body.items,[]);
+});
+
+test("recurring AI schedule visibility requires approver authority",async()=>{
+  const runtime={...authRuntime(["ai:read"]),extensions:{ai:{}}};
+  await assert.rejects(
+    aiRoute.handle({request:{method:"GET",headers:{}},url:new URL("http://localhost/selfhost/ai/schedules"),runtime}),
+    (error)=>error?.code==="FORBIDDEN"&&String(error.message).includes("ai:approve"),
+  );
+});
+
 test("recurring schedules reject disabled employee targets before registration",async()=>{
   let registered=false;
   const schedules=new AiScheduleService({
