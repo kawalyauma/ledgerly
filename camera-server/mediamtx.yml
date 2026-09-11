@@ -1,31 +1,50 @@
 logLevel: info
+logDestinations: [stdout]
+
+# Keep the administrative API available only on loopback for the local watchdog.
+# It must never be reverse-proxied or exposed to the public Internet.
+api: yes
+apiAddress: 127.0.0.1:9997
+metrics: no
+pprof: no
+playback: no
 
 authMethod: http
 authHTTPAddress: http://127.0.0.1:8789/v1/media/auth
 authHTTPExclude:
   - action: api
-  - action: metrics
-  - action: pprof
 
-webrtc: true
+rtsp: yes
+rtspAddress: :8554
+rtmp: no
+
+hls: yes
+hlsAddress: :8888
+hlsAllowOrigins: ["*"]
+
+webrtc: yes
 webrtcAddress: :8889
-webrtcEncryption: false
+webrtcEncryption: no
 webrtcAllowOrigins: ["*"]
 webrtcLocalUDPAddress: :8189
 webrtcLocalTCPAddress: :8189
-webrtcIPsFromInterfaces: true
+webrtcIPsFromInterfaces: yes
 webrtcICEServers2:
   - url: stun:stun.l.google.com:19302
 
 pathDefaults:
   source: publisher
-  overridePublisher: true
-  record: true
+  # Existing Ledgerly camera appliances publish to the stable camera-id path.
+  # Keep replacement enabled so a reconnect can immediately evict a stale session.
+  overridePublisher: yes
+  record: yes
   recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S
   recordFormat: fmp4
   recordPartDuration: 1s
   recordMaxPartSize: 50M
   recordSegmentDuration: 5m
+  # Retention is enforced by the Ledgerly NVR catalog so protected/held evidence
+  # is never deleted by a blind media-server timer.
   recordDeleteAfter: 0s
 
 paths:

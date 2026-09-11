@@ -11,10 +11,12 @@ getent group docker >/dev/null && usermod -aG docker ledgerly-camera || true
 mkdir -p "$INSTALL_ROOT" "$DATA_ROOT" /etc/ledgerly-camera
 if [[ ! -d "$REPO_INSTALL/.git" ]]; then git clone --no-hardlinks "$REPO_ROOT" "$REPO_INSTALL"; REMOTE="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)"; [[ -z "$REMOTE" ]] || git -C "$REPO_INSTALL" remote set-url origin "$REMOTE"; else git -C "$REPO_INSTALL" fetch origin main && git -C "$REPO_INSTALL" pull --ff-only origin main; fi
 cd "$SERVER_DIR"; npm install --omit=dev --ignore-scripts
+chmod 0755 scripts/healthcheck.sh
 if [[ ! -f /etc/ledgerly-camera/camera.env ]]; then cp install/camera.env.example /etc/ledgerly-camera/camera.env; chmod 600 /etc/ledgerly-camera/camera.env; echo "Created /etc/ledgerly-camera/camera.env — edit it with your Ledgerly URL, NVR pairing token and LAN IP before production use."; fi
 mkdir -p "$DATA_ROOT/recordings" "$DATA_ROOT/evidence" "$DATA_ROOT/snapshots" "$DATA_ROOT/exports"; chown -R ledgerly-camera:ledgerly-camera "$DATA_ROOT"; chown -R root:root "$REPO_INSTALL"
 sed "s|__SERVER_DIR__|$SERVER_DIR|g" install/ledgerly-camera.service > /etc/systemd/system/ledgerly-camera.service
-cp install/ledgerly-camera-health.service /etc/systemd/system/; cp install/ledgerly-camera-health.timer /etc/systemd/system/
+sed "s|__SERVER_DIR__|$SERVER_DIR|g" install/ledgerly-camera-health.service > /etc/systemd/system/ledgerly-camera-health.service
+cp install/ledgerly-camera-health.timer /etc/systemd/system/
 sed -e "s|__SERVER_DIR__|$SERVER_DIR|g" -e "s|__REPO_DIR__|$REPO_INSTALL|g" install/ledgerly-camera-update.service > /etc/systemd/system/ledgerly-camera-update.service
 cp install/ledgerly-camera-update.timer /etc/systemd/system/
 systemctl daemon-reload
@@ -28,8 +30,9 @@ Ledgerly Camera Server installed.
 2. Put the one-time NVR pairing token in CAMERA_SERVER_PAIRING_TOKEN.
 3. Restart: systemctl restart ledgerly-camera
 4. Verify:  curl http://127.0.0.1:8789/health
-5. Logs:    journalctl -u ledgerly-camera -f
+5. Verify MediaMTX: curl http://127.0.0.1:9997/v3/config/global/get
+6. Logs:    journalctl -u ledgerly-camera -f
 
 Automatic code updates: $([[ "$AUTO_UPDATE" == "1" ]] && echo enabled || echo disabled)
-Crash restart + one-minute health recovery: enabled
+Crash restart + one-minute control/media health recovery: enabled
 EOF

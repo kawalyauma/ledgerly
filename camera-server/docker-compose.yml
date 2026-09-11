@@ -1,9 +1,37 @@
+name: ledgerly-camera-nvr
+
 services:
   mediamtx:
     image: bluenviron/mediamtx:1.21.0
     restart: unless-stopped
+    # The camera control daemon runs as the hardened systemd service on the host.
+    # Host networking keeps the MediaMTX auth callback on 127.0.0.1 and prevents
+    # any video path from depending on the main Ledgerly API container.
     network_mode: host
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - ./mediamtx.yml:/mediamtx.yml:ro
-      - ${CAMERA_STORAGE_ROOT:-./camera-storage}:/recordings
+      - ${CAMERA_STORAGE_ROOT:-/var/lib/ledgerly-camera/recordings}:/recordings
     command: ["/mediamtx.yml"]
+    stop_grace_period: 15s
+    mem_limit: ${CAMERA_MEDIAMTX_MEMORY_LIMIT:-2g}
+    cpus: ${CAMERA_MEDIAMTX_CPU_LIMIT:-2.0}
+    logging:
+      driver: local
+      options:
+        max-size: ${CAMERA_MEDIAMTX_LOG_MAX_SIZE:-20m}
+        max-file: ${CAMERA_MEDIAMTX_LOG_MAX_FILES:-5}
+    healthcheck:
+      # Process-level check; the systemd watchdog additionally checks the
+      # loopback MediaMTX API and performs targeted recovery.
+      test: ["CMD", "/mediamtx", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
