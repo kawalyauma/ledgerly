@@ -8,6 +8,10 @@ const PERMANENT_AUTH_CODES = new Set([
   "AI_TOOL_NOT_ALLOWED",
   "AI_PERMISSION_DENIED",
   "AI_ACTION_PROHIBITED",
+  "AI_TENANT_SCOPE_DENIED",
+  "AI_AUTH_REQUIRED",
+  "AI_PROHIBITED_DIRECT_ACTION",
+  "AI_KNOWLEDGE_PERMISSION_DENIED",
   "BACKGROUND_ACTOR_REVOKED",
   "BACKGROUND_ACTOR_BLOCKED",
 ]);
@@ -104,9 +108,11 @@ export class AiWorker {
 
     const context={organizationId:org,userId:task.requested_by,permissions:effectivePermissions,reason:task.instruction};
     const memories=this.memory ? await this.memory.list({context:{organizationId:org},agentId:agent.agentId,type:"durable"}) : [];
-    const sources=this.knowledge && (agent.knowledgeSources?.length) ? await this.knowledge.retrieve({context:{organizationId:org},query:task.instruction,sourceIds:agent.knowledgeSources,limit:8}) : [];
+    const sources=this.knowledge && (agent.knowledgeSources?.length) && effectivePermissions.includes("ai:knowledge:read")
+      ? await this.knowledge.retrieve({context,query:task.instruction,sourceIds:agent.knowledgeSources,limit:8})
+      : [];
     const messages=[
-      {role:"system",content:truncate(`${agent.systemInstructions||defaultInstructions(agent)}\n\nSecurity: never request database credentials or unrestricted SQL. Use only provided Ledgerly tools. Your effective tool authority is the intersection of the requester's current permissions and your own assigned permissions. AI review is not official approval.`,this.limits.maxPromptChars)},
+      {role:"system",content:truncate(`${agent.systemInstructions||defaultInstructions(agent)}\n\nSecurity: never request database credentials or unrestricted SQL. Use only provided Ledgerly tools. Your effective tool and knowledge authority is the intersection of the requester's current permissions and your own assigned permissions. AI review is not official approval.`,this.limits.maxPromptChars)},
       {role:"system",content:truncate(`Durable structured memory: ${safeJson(memories.map((m)=>({key:m.key,value:m.value})))}`,8000)},
       {role:"system",content:truncate(`Permitted knowledge excerpts with source references: ${safeJson(sources.map((s)=>({source_id:s.source_id,chunk_id:s.chunk_id,content:s.content})))}`,16000)},
       {role:"user",content:truncate(task.instruction,this.limits.maxPromptChars)},
