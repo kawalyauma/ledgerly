@@ -1,0 +1,19 @@
+const bool=v=>v==null?v:Boolean(Number(v));function t(name,columns,{conflict=["id"],booleans=[],dependencies=[]}={}){return Object.freeze({name,columns:Object.freeze(columns),conflict:Object.freeze(conflict),dependencies:Object.freeze(dependencies),transform(r){const n={};for(const c of columns)n[c]=r[c]??null;for(const c of booleans)if(n[c]!=null)n[c]=bool(n[c]);return n;}})}
+export const TASKS_WORK_TABLES=Object.freeze([
+t("work_teams",["id","organization_id","name","description","lead_user_id","status","created_by","created_at","updated_at"]),
+t("work_team_members",["team_id","user_id","role","created_at"],{conflict:["team_id","user_id"]}),
+t("work_contacts",["id","organization_id","ledger_contact_id","kind","name","email","phone","company_name","notes","tags_json","custom_fields_json","created_by","created_at","updated_at","archived_at"]),
+t("work_projects",["id","organization_id","finance_project_id","team_id","contact_id","code","name","description","status","priority","owner_user_id","start_date","due_date","progress","created_by","created_at","updated_at","archived_at","ledger_contact_id"]),
+t("work_project_members",["project_id","user_id","role","created_at"],{conflict:["project_id","user_id"]}),
+t("work_sequences",["organization_id","sequence_name","current_value"],{conflict:["organization_id","sequence_name"]}),
+t("work_tasks",["id","organization_id","project_id","parent_task_id","task_number","title","description","status","priority","start_at","due_at","completed_at","estimated_minutes","actual_minutes","progress","recurrence_json","custom_fields_json","created_by","updated_by","created_at","updated_at","archived_at"]),
+t("work_task_assignees",["task_id","user_id","assigned_by","assigned_at"],{conflict:["task_id","user_id"]}),t("work_task_followers",["task_id","user_id","created_at"],{conflict:["task_id","user_id"]}),
+t("work_task_checklist_items",["id","task_id","title","is_completed","position","completed_by","completed_at","created_at","updated_at"],{booleans:["is_completed"]}),
+t("work_comments",["id","organization_id","task_id","author_user_id","body","mentions_json","created_at","updated_at","deleted_at"]),
+t("work_time_entries",["id","organization_id","task_id","user_id","description","started_at","ended_at","minutes","billable","created_at","updated_at"],{booleans:["billable"]}),
+t("work_notifications",["id","organization_id","user_id","event_type","title","body","entity_type","entity_id","data_json","read_at","created_at"]),
+t("work_notification_preferences",["organization_id","user_id","event_type","in_app","email","sms","whatsapp","quiet_hours_json"],{conflict:["organization_id","user_id","event_type"],booleans:["in_app","email","sms","whatsapp"]}),
+t("work_notification_deliveries",["id","organization_id","notification_id","channel","recipient","provider","status","provider_message_id","attempts","last_error","sent_at","delivered_at","created_at","provider_conversation_id"]),
+t("work_webhook_receipts",["id","source","event_type","payload_hash","received_at","processed_at"]),t("work_task_reminders",["id","organization_id","task_id","user_id","reminder_type","reminder_key","sent_at"]),
+t("work_chat_threads",["id","organization_id","kind","title","status","task_id","notification_id","whatsapp_conversation_id","external_phone","external_name","created_by","closed_by","closed_at","last_message_at","created_at","updated_at"]),t("work_chat_participants",["thread_id","user_id","unread_count","last_read_at","joined_at"],{conflict:["thread_id","user_id"]}),t("work_chat_messages",["id","organization_id","thread_id","sender_user_id","direction","message_type","body","file_key","file_name","mime_type","size_bytes","external_message_id","delivery_status","created_at"])
+]);
