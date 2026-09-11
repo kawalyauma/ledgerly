@@ -35,6 +35,20 @@ function storageDomainPermission(storageRef){
   return STORAGE_DOMAIN_PERMISSIONS[first]??"admin:read";
 }
 
+function assertIngestionAuthority(context,{domainPermission,requiredPermissions=[]}={}){
+  const granted=new Set(Array.isArray(context?.permissions)?context.permissions.filter((item)=>typeof item==="string"):[]);
+  if(granted.has("*"))return;
+  const required=["ai:knowledge:write","ai:knowledge:read",...(domainPermission?[domainPermission]:[]),...(Array.isArray(requiredPermissions)?requiredPermissions:[])];
+  const missing=[...new Set(required.filter((permission)=>typeof permission==="string"&&permission.trim()&&!granted.has(permission.trim())))];
+  if(missing.length){
+    const error=new Error("AI knowledge ingestion exceeds current authority");
+    error.status=403;
+    error.code="AI_KNOWLEDGE_PERMISSION_DENIED";
+    error.details={missingPermissions:missing};
+    throw error;
+  }
+}
+
 export class AiKnowledgeIngestionService{
   constructor({knowledge,storageForOrganization,audit,pdfExtractor=extractPdfLocally,maxBytes=25*1024*1024,chunkChars=3200,overlapChars=400}){
     if(typeof storageForOrganization!=="function")throw new TypeError("AI knowledge ingestion requires tenant-scoped storage");
@@ -46,6 +60,7 @@ export class AiKnowledgeIngestionService{
     if(!context?.userId)throw new Error("knowledge ingestion requires an attributable requester");
     if(!storageRef)throw new Error("storageRef is required");
     const domainPermission=storageDomainPermission(storageRef);
+    assertIngestionAuthority(context,{domainPermission,requiredPermissions});
     const classification=[...(Array.isArray(requiredPermissions)?requiredPermissions:[]),...(domainPermission?[domainPermission]:[])];
     const storage=this.storageForOrganization(context.organizationId);
     const head=await storage.head(storageRef);if(!head)throw new Error("knowledge source object not found");
