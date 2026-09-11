@@ -15,6 +15,7 @@ TEST_DB="${LEDGERLY_TEST_RESTORE_DATABASE:-ledgerly_restore_test_$(date -u +%Y%m
 SOURCE_DB="${PGDATABASE:-ledgerly}"
 MAINTENANCE_DB="${PGMAINTENANCE_DB:-postgres}"
 KEEP_DB="${LEDGERLY_TEST_RESTORE_KEEP_DATABASE:-0}"
+CHECKS_FILE="$(mktemp)"
 
 case "$TEST_DB" in
   ledgerly_restore_test_*) ;;
@@ -32,6 +33,7 @@ BACKUP_NAME="$(basename "$BACKUP")"
 pg_restore --list "$BACKUP" >/dev/null
 
 cleanup() {
+  rm -f "$CHECKS_FILE"
   if [ "$KEEP_DB" != "1" ]; then
     dropdb --if-exists --maintenance-db="$MAINTENANCE_DB" "$TEST_DB" >/dev/null 2>&1 || true
   fi
@@ -42,15 +44,19 @@ dropdb --if-exists --maintenance-db="$MAINTENANCE_DB" "$TEST_DB" >/dev/null
 createdb --maintenance-db="$MAINTENANCE_DB" "$TEST_DB"
 pg_restore --no-owner --no-acl --exit-on-error --dbname="$TEST_DB" "$BACKUP"
 
-PGDATABASE="$TEST_DB" psql -v ON_ERROR_STOP=1 -At <<'SQL' >/tmp/ledgerly-restore-checks.txt
-SELECT CASE WHEN current_database() LIKE 'ledgerly_restore_test_%' THEN 'database-name-ok' ELSE 1/0::text END;
-SELECT CASE WHEN to_regclass('public.organizations') IS NOT NULL THEN 'organizations-table-ok' ELSE 1/0::text END;
-SELECT CASE WHEN to_regclass('public.users') IS NOT NULL THEN 'users-table-ok' ELSE 1/0::text END;
-SELECT CASE WHEN to_regclass('ledgerly_meta.migration_runs') IS NOT NULL THEN 'migration-metadata-ok' ELSE 1/0::text END;
-SELECT 'organization-count=' || count(*) FROM organizations;
-SELECT 'user-count=' || count(*) FROM users;
-SQL
+ACTUAL_DB="$(PGDATABASE="$TEST_DB" psql -v ON_ERROR_STOP=1 -Atqc 'SELECT current_database()')"
+[ "$ACTUAL_DB" = "$TEST_DB" ] || { echo "restore connected to unexpected database: $ACTUAL_DB" >&2; exit 1; }
+printf '%s\n' "database-name-ok" >> "$CHECKS_FILE"
+
+for TABLE in public.organizations public.users ledgerly_meta.migration_runs; do
+  EXISTS="$(PGDATABASE="$TEST_DB" psql -v ON_ERROR_STOP=1 -Atqc "SELECT to_regclass('$TABLE') IS NOT NULL")"
+  [ "$EXISTS" = "t" ] || { echo "required restored table missing: $TABLE" >&2; exit 1; }
+  printf '%s\n' "table-ok:$TABLE" >> "$CHECKS_FILE"
+done
+
+ORG_COUNT="$(PGDATABASE="$TEST_DB" psql -v ON_ERROR_STOP=1 -Atqc 'SELECT count(*) FROM organizations')"
+USER_COUNT="$(PGDATABASE="$TEST_DB" psql -v ON_ERROR_STOP=1 -Atqc 'SELECT count(*) FROM users')"
+printf '%s\n' "organization-count=$ORG_COUNT" "user-count=$USER_COUNT" >> "$CHECKS_FILE"
 
 printf '{"ok":true,"backup":"%s","testDatabase":"%s","kept":%s,"checks":[' "$BACKUP" "$TEST_DB" "$( [ "$KEEP_DB" = "1" ] && echo true || echo false )"
-awk 'BEGIN{first=1}{gsub(/\\/,"\\\\");gsub(/\"/,"\\\"");if(!first)printf ",";printf "\"%s\"",$0;first=0}END{print "]}"}' /tmp/ledgerly-restore-checks.txt
-rm -f /tmp/ledgerly-restore-checks.txt
+awk 'BEGIN{first=1}{gsub(/\\/,"\\\\");gsub(/\"/,"\\\"");if(!first)printf ",";printf "\"%s\"",$0;first=0}END{print "]}"}' "$CHECKS_FILE"
