@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { D1HttpSource } from "../src/migration/d1-source.mjs";
 import { AUTH_CORE_TABLES } from "../src/migration/auth-core-manifest.mjs";
+import { assertMigrationPrerequisites } from "../src/migration/bookkeeping.mjs";
+import { getMigrationPhase, listMigrationPhases } from "../src/migration/phases.mjs";
 import { D1MigrationRunner } from "../src/migration/runner.mjs";
+import { SCHOOL_REFERENCE_TABLES } from "../src/migration/school-reference-manifest.mjs";
+import { ensureSchoolReferenceSchema, finalizeSchoolReferenceSchema } from "../src/migration/school-reference-schema.mjs";
 import { validateTableCounts } from "../src/migration/validators.mjs";
 
 class CopyDatabase {
@@ -58,6 +62,65 @@ test("auth-core manifest converts SQLite security flags to booleans", () => {
   assert.equal(transformedAccount.active, false);
   const mfa = AUTH_CORE_TABLES.find((item) => item.name === "school_user_mfa");
   assert.equal(mfa.transform({ organization_id: "o", user_id: "u", method: "totp", enabled: 1 }).enabled, true);
+});
+
+test("school-reference phase preserves dependency order and SQLite flags", async () => {
+  const phase = getMigrationPhase("school-reference");
+  assert.deepEqual(phase.prerequisites, ["auth-core"]);
+  assert.deepEqual(phase.tables.map((item) => item.name), [
+    "school_profiles", "school_branches", "school_academic_years", "school_terms", "school_departments",
+    "school_class_levels", "school_classes", "school_streams", "school_subjects", "school_class_subjects", "school_lesson_periods",
+  ]);
+  const currentYear = SCHOOL_REFERENCE_TABLES.find((item) => item.name === "school_academic_years")
+    .transform({ id: "y", organization_id: "o", is_current: 1 });
+  assert.equal(currentYear.is_current, true);
+  const classSubject = SCHOOL_REFERENCE_TABLES.find((item) => item.name === "school_class_subjects")
+    .transform({ id: "cs", organization_id: "o", compulsory: 0, active: 1 });
+  assert.equal(classSubject.compulsory, false);
+  assert.equal(classSubject.active, true);
+
+  const source = { async tableExists() { return true; }, async count() { return 1; } };
+  const runner = new D1MigrationRunner({ database: {}, source, sourceIdentity: "test", phase: "school-reference" });
+  const plan = await runner.plan();
+  assert.equal(plan.phase, "school-reference");
+  assert.deepEqual(plan.prerequisites, ["auth-core"]);
+  assert.equal(plan.tables.length, 11);
+  assert.equal(listMigrationPhases().some((item) => item.name === "school-reference"), true);
+});
+
+test("migration phase prerequisites fail closed until the same D1 source completed them", async () => {
+  const missingDatabase = {
+    async query(sql, values) {
+      assert.match(sql, /status='completed'/);
+      assert.equal(values[0], "d1:acct:db");
+      assert.deepEqual(values[1], ["auth-core"]);
+      return { rows: [] };
+    },
+  };
+  await assert.rejects(
+    () => assertMigrationPrerequisites(missingDatabase, { sourceIdentity: "d1:acct:db", prerequisites: ["auth-core"] }),
+    /auth-core/,
+  );
+
+  const completedDatabase = {
+    async query() { return { rows: [{ phase: "auth-core" }] }; },
+  };
+  const result = await assertMigrationPrerequisites(completedDatabase, {
+    sourceIdentity: "d1:acct:db",
+    prerequisites: ["auth-core", "auth-core"],
+  });
+  assert.deepEqual(result, { ok: true, completed: ["auth-core"], missing: [] });
+});
+
+test("school self-references are finalized only after reference rows can be copied", async () => {
+  const sql = [];
+  const database = { async query(text) { sql.push(text); return { rows: [] }; } };
+  await ensureSchoolReferenceSchema(database);
+  assert.equal(sql.some((text) => text.includes("school_departments_parent_fk")), false);
+  assert.equal(sql.some((text) => text.includes("school_class_levels_promotion_fk")), false);
+  await finalizeSchoolReferenceSchema(database);
+  assert.equal(sql.at(-1).includes("school_departments_parent_fk"), true);
+  assert.equal(sql.at(-1).includes("school_class_levels_promotion_fk"), true);
 });
 
 test("copy resumes from the last committed rowid after a failed batch", async () => {
