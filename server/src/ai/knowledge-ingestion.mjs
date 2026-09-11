@@ -1,26 +1,29 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
 
 const TEXT_TYPES=new Set(["text/plain","text/markdown","text/csv","application/json","application/xml","text/xml"]);
 const TEXT_EXTENSIONS=new Set(["txt","md","markdown","csv","json","xml","html","htm"]);
 
 export class AiKnowledgeIngestionService{
-  constructor({knowledge,storage,audit,pdfExtractor=extractPdfLocally,maxBytes=25*1024*1024,chunkChars=3200,overlapChars=400}){
-    this.knowledge=knowledge;this.storage=storage;this.audit=audit;this.pdfExtractor=pdfExtractor;this.maxBytes=maxBytes;this.chunkChars=chunkChars;this.overlapChars=overlapChars;
+  constructor({knowledge,storageForOrganization,audit,pdfExtractor=extractPdfLocally,maxBytes=25*1024*1024,chunkChars=3200,overlapChars=400}){
+    if(typeof storageForOrganization!=="function")throw new TypeError("AI knowledge ingestion requires tenant-scoped storage");
+    this.knowledge=knowledge;this.storageForOrganization=storageForOrganization;this.audit=audit;this.pdfExtractor=pdfExtractor;this.maxBytes=maxBytes;this.chunkChars=chunkChars;this.overlapChars=overlapChars;
   }
 
   async ingestStored({context,name,sourceType="uploaded_document",storageRef,contentType=null,metadata={}}){
+    if(!context?.organizationId)throw new Error("organization context required");
+    if(!context?.userId)throw new Error("knowledge ingestion requires an attributable requester");
     if(!storageRef)throw new Error("storageRef is required");
-    const head=await this.storage.head(storageRef);if(!head)throw new Error("knowledge source object not found");
+    const storage=this.storageForOrganization(context.organizationId);
+    const head=await storage.head(storageRef);if(!head)throw new Error("knowledge source object not found");
     if(Number(head.size)>this.maxBytes){const error=new Error(`Knowledge source exceeds ${this.maxBytes} byte limit`);error.code="AI_KNOWLEDGE_FILE_TOO_LARGE";throw error;}
-    const bytes=await this.storage.get(storageRef);
+    const bytes=await storage.get(storageRef);
     const detected=contentType||head.metadata?.["content-type"]||head.metadata?.contentType||inferContentType(storageRef);
     const text=await extractText({bytes,contentType:detected,storageRef,pdfExtractor:this.pdfExtractor});
     const normalized=normalizeText(text);if(!normalized){const error=new Error("No extractable text found in knowledge source");error.code="AI_KNOWLEDGE_EMPTY";throw error;}
     const chunks=chunkText(normalized,{chunkChars:this.chunkChars,overlapChars:this.overlapChars}).map((content,index)=>({content,tokenCount:estimateTokens(content),metadata:{source_name:name,storage_ref:storageRef,content_type:detected,chunk:index}}));
-    const source=await this.knowledge.createSource({context,name,sourceType,storageRef,metadata:{...metadata,contentType:detected,size:Number(head.size),extraction:"local"}});
+    const source=await this.knowledge.createSource({context,name,sourceType,storageRef,metadata:{...metadata,contentType:detected,size:Number(head.size),extraction:"local",tenantScoped:true}});
     const indexed=await this.knowledge.indexChunks({context,sourceId:source.source_id,chunks});
-    await this.audit?.write?.({organization_id:context.organizationId,actor_type:"human",actor_id:context.userId,action:"ai.knowledge.ingested",entity_type:"ai_knowledge_source",entity_id:source.source_id,metadata:{storage_ref:storageRef,chunks:chunks.length,bytes:Number(head.size),content_type:detected}});
+    await this.audit?.write?.({organization_id:context.organizationId,actor_type:"human",actor_id:context.userId,action:"ai.knowledge.ingested",entity_type:"ai_knowledge_source",entity_id:source.source_id,metadata:{storage_ref:storageRef,chunks:chunks.length,bytes:Number(head.size),content_type:detected,tenant_scoped:true}});
     return {source:{...source,status:"indexed"},chunks:chunks.length,indexed};
   }
 }
@@ -51,9 +54,12 @@ export async function extractText({bytes,contentType,storageRef,pdfExtractor=ext
 export function extractPdfLocally(bytes){
   return new Promise((resolve,reject)=>{
     const child=spawn("pdftotext",["-","-"],{stdio:["pipe","pipe","pipe"]});const out=[],err=[];
+    let settled=false;
+    const finishError=(error)=>{if(settled)return;settled=true;reject(error);};
     child.stdout.on("data",(chunk)=>out.push(chunk));child.stderr.on("data",(chunk)=>err.push(chunk));
-    child.once("error",(cause)=>{const error=new Error("Local PDF extraction is unavailable. Install poppler-utils/pdftotext on the Ledgerly server.");error.code="AI_PDF_EXTRACTOR_UNAVAILABLE";error.cause=cause;reject(error);});
-    child.once("close",(code)=>{if(code!==0){const error=new Error(`PDF extraction failed: ${Buffer.concat(err).toString("utf8").trim()||`exit ${code}`}`);error.code="AI_PDF_EXTRACTION_FAILED";reject(error);return;}resolve(Buffer.concat(out).toString("utf8"));});
+    child.once("error",(cause)=>{const error=new Error("Local PDF extraction is unavailable. Install poppler-utils/pdftotext on the Ledgerly server.");error.code="AI_PDF_EXTRACTOR_UNAVAILABLE";error.cause=cause;finishError(error);});
+    child.once("close",(code)=>{if(settled)return;if(code!==0){const error=new Error(`PDF extraction failed: ${Buffer.concat(err).toString("utf8").trim()||`exit ${code}`}`);error.code="AI_PDF_EXTRACTION_FAILED";finishError(error);return;}settled=true;resolve(Buffer.concat(out).toString("utf8"));});
+    child.stdin.on("error",()=>undefined);
     child.stdin.end(Buffer.from(bytes));
   });
 }
