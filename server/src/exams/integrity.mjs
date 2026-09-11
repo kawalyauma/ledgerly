@@ -17,7 +17,7 @@ export function examMarkRecordId({ examId, studentId, subjectId }) {
 
 export async function assertMarkContext(tx, { organizationId, examId, examSubjectId, studentId, classId, subjectId, streamId = null }) {
   const result = await tx.query(`
-    SELECT e.status,e.academic_year_id,es.class_id,es.subject_id,es.max_mark,es.grading_scale_id,
+    SELECT e.status,e.academic_year_id,e.grading_scale_id,es.class_id,es.subject_id,es.max_mark,
            s.current_class_id,s.current_stream_id,
            EXISTS(
              SELECT 1 FROM exm_exam_classes ec
@@ -30,6 +30,7 @@ export async function assertMarkContext(tx, { organizationId, examId, examSubjec
                   WHERE se.organization_id=e.organization_id AND se.student_id=s.id
                     AND se.academic_year_id=e.academic_year_id AND se.class_id=es.class_id
                     AND ($7::text IS NULL OR se.stream_id IS NULL OR se.stream_id=$7)
+                    AND se.status IN ('active','completed','promoted','transferred')
                 ) END AS student_in_roster
     FROM exm_exams e
     JOIN exm_exam_subjects es ON es.organization_id=e.organization_id AND es.exam_id=e.id AND es.id=$3
@@ -73,10 +74,8 @@ export async function upsertMark(database, input, { emitChange = null } = {}) {
     const percentage = mark == null || absent || exempt ? null : (mark / Number(context.max_mark)) * 100;
     const bands = await tx.query(`
       SELECT b.* FROM exm_grade_bands b
-      JOIN exm_exams e ON e.organization_id=b.organization_id
-      WHERE e.id=$1 AND e.organization_id=$2
-        AND b.grading_scale_id=COALESCE(e.grading_scale_id,$3)
-      ORDER BY b.sort_order,b.max_mark DESC`, [input.examId, input.organizationId, context.grading_scale_id ?? null]);
+      WHERE b.organization_id=$2 AND b.grading_scale_id=$3
+      ORDER BY b.sort_order,b.max_mark DESC`, [input.examId, input.organizationId, context.grading_scale_id]);
     const band = selectGradeBand(percentage, bands.rows);
     const id = existing.rows[0]?.id ?? input.id ?? `mark_${randomUUID()}`;
     const result = await tx.query(`
