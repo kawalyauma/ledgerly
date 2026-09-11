@@ -19,6 +19,7 @@ function safeName(value) {
   const cleaned=String(value||"document").replace(/[^a-zA-Z0-9._-]+/g,"-").replace(/^-+|-+$/g,"").slice(0,120);
   return cleaned||"document";
 }
+function aiError(code,message,status=409){const error=new Error(message);error.code=code;error.status=status;return error;}
 
 export async function createAiWorkforce({services,config={},businessTools={},authorization=null,tenantStorage=null,logger=console}){
   const providerRegistry=new AiProviderRegistry();
@@ -39,15 +40,23 @@ export async function createAiWorkforce({services,config={},businessTools={},aut
   const agents=new AiAgentService({database:services.database,audit:services.audit});
   const memory=new AiMemoryService({database:services.database,audit:services.audit});
   const knowledge=new AiKnowledgeService({database:services.database,audit:services.audit,embedder,embeddingDimensions,vectorEnabled:storeCapabilities.vectorSearch});
-  const ingestion=new AiKnowledgeIngestionService({knowledge,storageForContext:(context)=>tenantStorage?.forOrganization(context.organizationId),audit:services.audit,maxBytes:Number(config.maxKnowledgeBytes??25*1024*1024),chunkChars:Number(config.chunkChars??3200),overlapChars:Number(config.chunkOverlapChars??400)});
+  const ingestion=new AiKnowledgeIngestionService({knowledge,storageForContext:(context)=>tenantStorage?.forOrganization(context.organizationId),audit:services.audit,maxBytes:Number(config.maxKnowledgeBytes??25*1024*1024),chunkChars:Number(config.chunkChars??3200),overlapChars:Number(config.chunkOverlapChars??400),maxChunks:Number(config.maxKnowledgeChunks??1000)});
   const schedules=new AiScheduleService({scheduler:services.scheduler,audit:services.audit});
   const academic=new AiAcademicService({database:services.database,tasks,documents,audit:services.audit});
 
   const internalTools={
     createLessonPlanDraft:async({input,context,agent,taskId})=>documents.createAiDraft({context,agent,taskId,type:"lesson_plan",title:input.title??"Lesson Plan Draft",content:input.content??input,reason:context.reason}),
     updateDocumentDraft:async({input,context,agent,taskId})=>documents.reviseAi({context,agent,taskId,documentId:input.documentId,content:input.content,reason:context.reason}),
-    createTask:async({input,context,agent})=>tasks.create({context:{...context,userId:context.userId},assignedAgent:input.assignedAgent,instruction:input.instruction,priority:input.priority,inputReferences:input.inputReferences,idempotencyKey:input.idempotencyKey,actor:{actor_type:"ai_agent",actor_id:agent.agentId,agent_id:agent.agentId,agent_name:agent.name,agent_role:agent.role}}),
-    requestApproval:async({input,context,agent,taskId})=>approvals.request({organizationId:context.organizationId,agent,taskId,action:input.action??"document_approval",reason:input.reason??context.reason,payload:input.payload??{},riskLevel:input.riskLevel??"medium",requestedApprover:input.requestedApprover??null}),
+    createTask:async({input,context,agent,taskId})=>{
+      if(!taskId)throw aiError("AI_HANDOFF_PARENT_REQUIRED","AI-to-AI delegation requires a parent task",422);
+      if(input.assignedAgent===agent.agentId)throw aiError("AI_HANDOFF_SELF_DENIED","An AI employee cannot delegate a task to itself",422);
+      const parent=(await services.database.query(`SELECT * FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[taskId,context.organizationId])).rows[0];
+      if(!parent)throw aiError("AI_TASK_NOT_FOUND","Parent AI task was not found",404);
+      const target=await agents.get({organizationId:context.organizationId},input.assignedAgent);
+      if(!target)throw aiError("AI_AGENT_NOT_FOUND","Target AI employee was not found",404);
+      if(target.status!=="active")throw aiError("AI_AGENT_NOT_ACTIVE",`Target AI employee is ${target.status}`);
+      return tasks.handoff({context:{...context,userId:parent.requested_by||context.userId},task:parent,fromAgent:agent,toAgent:target.agentId,instruction:input.instruction});
+    },
     recordAcademicReview:async({input,context,agent,taskId})=>academic.recordReview({context,agent,taskId,documentId:input.documentId,recommendation:input.recommendation,findings:input.findings??[],sourceReferences:input.sourceReferences??[]}),
     sendNotification:async({input,context,taskId})=>services.notifications.send({...input,organizationId:context.organizationId,deliveryId:input.deliveryId??`ai:${taskId??randomUUID()}`}),
   };
