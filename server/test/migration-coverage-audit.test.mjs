@@ -6,6 +6,7 @@ import {
   extractCreatedTables,
   phaseOwnership,
   stripSqlComments,
+  validateMigrationCoverageAllowlist,
 } from "../src/migration/coverage-audit.mjs";
 
 test("extractCreatedTables ignores comments and normalizes quoted/schema identifiers", () => {
@@ -54,13 +55,66 @@ test("coverage fails closed for an unmapped source table", () => {
 });
 
 test("explicit allowlist records rather than hides intentional exceptions", () => {
+  const exception = {
+    table: "cloudflare_transient",
+    disposition: "transient-derived",
+    reason: "Rebuilt from authoritative events after cutover.",
+  };
   const result = evaluateMigrationCoverage({
     createdTables: ["users", "cloudflare_transient"],
     phases: [{ name: "auth-core", tables: ["users"] }],
-    allowlist: ["cloudflare_transient"],
+    allowlist: [exception],
   });
   assert.equal(result.ok, true);
   assert.deepEqual(result.intentionallyUnmigrated, ["cloudflare_transient"]);
+  assert.deepEqual(result.intentionallyUnmigratedDetails, [exception]);
+  assert.deepEqual(result.unusedAllowlistEntries, []);
+});
+
+test("reviewed allowlist requires valid disposition, specific reason and unique tables", () => {
+  assert.deepEqual(validateMigrationCoverageAllowlist({
+    version: 1,
+    tables: [{
+      table: "cloudflare_transient",
+      disposition: "cloudflare-only",
+      reason: "Cloudflare delivery receipt staging remains fallback-only.",
+    }],
+  }), [{
+    table: "cloudflare_transient",
+    disposition: "cloudflare-only",
+    reason: "Cloudflare delivery receipt staging remains fallback-only.",
+  }]);
+
+  assert.throws(() => validateMigrationCoverageAllowlist({
+    version: 1,
+    tables: [{ table: "x", disposition: "temporary", reason: "This reason is long enough." }],
+  }), /invalid disposition/);
+  assert.throws(() => validateMigrationCoverageAllowlist({
+    version: 1,
+    tables: [{ table: "x", disposition: "obsolete-empty", reason: "short" }],
+  }), /minimum 12 characters/);
+  assert.throws(() => validateMigrationCoverageAllowlist({
+    version: 1,
+    tables: [
+      { table: "x", disposition: "obsolete-empty", reason: "No production rows exist." },
+      { table: "x", disposition: "obsolete-empty", reason: "Duplicate exception entry." },
+    ],
+  }), /duplicate table/);
+});
+
+test("stale allowlist entries are surfaced for cleanup", () => {
+  const result = evaluateMigrationCoverage({
+    createdTables: ["users"],
+    phases: [{ name: "auth-core", tables: ["users"] }],
+    allowlist: [{
+      table: "old_transient",
+      disposition: "obsolete-empty",
+      reason: "Legacy table no longer exists in source migrations.",
+    }],
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.counts.unusedAllowlistEntries, 1);
+  assert.equal(result.unusedAllowlistEntries[0].table, "old_transient");
 });
 
 test("duplicate phase ownership fails because one D1 table must have one copy authority", () => {
