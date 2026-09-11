@@ -6,7 +6,8 @@ const defaults=Object.freeze({
   'school-fees.read':'cloudflare','school-fees.write':'cloudflare','school-fees.reversal':'cloudflare',
   'payroll.read':'cloudflare','payroll.write':'cloudflare','payroll.reversal':'cloudflare',
   'inventory.read':'cloudflare','inventory.write':'cloudflare',
-  'printerly.nodes':'cloudflare','printerly.jobs':'cloudflare','nvr.metadata':'cloudflare'
+  'printerly.nodes':'cloudflare','printerly.jobs':'cloudflare','printerly.scanner':'cloudflare','printerly.core':'cloudflare','printerly.governance':'cloudflare','printerly.batch':'cloudflare','printerly.routing':'cloudflare','printerly.release':'cloudflare','printerly.retention':'cloudflare','printerly.supplies':'cloudflare','printerly.procurement':'cloudflare','printerly.service-desk':'cloudflare','printerly.audit':'cloudflare','printerly.alerts':'cloudflare',
+  'nvr.metadata':'cloudflare'
 });
 export const CUTOVER_CAPABILITIES=defaults;
 export function createCutoverCapabilities(overrides={}){
