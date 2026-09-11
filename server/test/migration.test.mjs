@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { D1HttpSource } from "../src/migration/d1-source.mjs";
 import { AUTH_CORE_TABLES } from "../src/migration/auth-core-manifest.mjs";
+import { assertMigrationPrerequisites } from "../src/migration/bookkeeping.mjs";
 import { getMigrationPhase, listMigrationPhases } from "../src/migration/phases.mjs";
 import { D1MigrationRunner } from "../src/migration/runner.mjs";
 import { SCHOOL_REFERENCE_TABLES } from "../src/migration/school-reference-manifest.mjs";
@@ -85,6 +86,30 @@ test("school-reference phase preserves dependency order and SQLite flags", async
   assert.deepEqual(plan.prerequisites, ["auth-core"]);
   assert.equal(plan.tables.length, 11);
   assert.equal(listMigrationPhases().some((item) => item.name === "school-reference"), true);
+});
+
+test("migration phase prerequisites fail closed until the same D1 source completed them", async () => {
+  const missingDatabase = {
+    async query(sql, values) {
+      assert.match(sql, /status='completed'/);
+      assert.equal(values[0], "d1:acct:db");
+      assert.deepEqual(values[1], ["auth-core"]);
+      return { rows: [] };
+    },
+  };
+  await assert.rejects(
+    () => assertMigrationPrerequisites(missingDatabase, { sourceIdentity: "d1:acct:db", prerequisites: ["auth-core"] }),
+    /auth-core/,
+  );
+
+  const completedDatabase = {
+    async query() { return { rows: [{ phase: "auth-core" }] }; },
+  };
+  const result = await assertMigrationPrerequisites(completedDatabase, {
+    sourceIdentity: "d1:acct:db",
+    prerequisites: ["auth-core", "auth-core"],
+  });
+  assert.deepEqual(result, { ok: true, completed: ["auth-core"], missing: [] });
 });
 
 test("school self-references are finalized only after reference rows can be copied", async () => {
