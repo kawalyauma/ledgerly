@@ -19,9 +19,20 @@ test('salary reversal restores payroll balance only after accounting payment rev
   assert.match(database.calls[2].sql,/paid_minor=GREATEST/);
 });
 
-test('payroll run reversal is blocked while any salary amount remains paid',async()=>{
-  const database=db([{rows:[{id:'r1',status:'posted',journal_entry_id:'j1'}],rowCount:1},{rows:[{paid_minor:'1'}],rowCount:1}]);
+test('payroll run reversal locks detail rows and is blocked while any salary amount remains paid',async()=>{
+  const database=db([{rows:[{id:'r1',status:'posted',journal_entry_id:'j1'}],rowCount:1},{rows:[{id:'l1',paid_minor:'1'}],rowCount:1}]);
   const service=new PayrollTransactions({database});
   await assert.rejects(service.assertRunReversible({organizationId:'o1',payrollRunId:'r1'}),e=>e.code==='PAYROLL_HAS_SALARY_PAYMENTS');
   assert.equal(database.rolledBack,true);
+  assert.match(database.calls[1].sql,/SELECT id,paid_minor/);
+  assert.match(database.calls[1].sql,/FOR UPDATE/);
+  assert.doesNotMatch(database.calls[1].sql,/SUM\(/);
+});
+
+test('payroll run is reversible when all locked payroll lines are unpaid',async()=>{
+  const database=db([{rows:[{id:'r1',status:'posted',journal_entry_id:'j1'}],rowCount:1},{rows:[{id:'l1',paid_minor:'0'},{id:'l2',paid_minor:'0'}],rowCount:2}]);
+  const service=new PayrollTransactions({database});
+  const result=await service.assertRunReversible({organizationId:'o1',payrollRunId:'r1'});
+  assert.equal(result.id,'r1');
+  assert.equal(database.rolledBack,false);
 });

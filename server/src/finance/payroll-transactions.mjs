@@ -41,8 +41,9 @@ export class PayrollTransactions {
     return this.database.transaction(async tx=>{
       const run=(await tx.query(`SELECT id,status,journal_entry_id FROM payroll_runs WHERE id=$1 AND organization_id=$2 FOR UPDATE`,[payrollRunId,organizationId])).rows[0];
       if(!run||run.status!=='posted'||!run.journal_entry_id) throw new FinanceIntegrityError('INVALID_PAYROLL_RUN_STATE','Posted payroll run not found');
-      const paid=(await tx.query(`SELECT COALESCE(SUM(paid_minor),0)::bigint AS paid_minor FROM payroll_lines WHERE payroll_run_id=$1 AND organization_id=$2 FOR UPDATE`,[payrollRunId,organizationId])).rows[0];
-      if(BigInt(paid?.paid_minor??0)>0n) throw new FinanceIntegrityError('PAYROLL_HAS_SALARY_PAYMENTS','Reverse all salary payments before reversing payroll');
+      const lines=await tx.query(`SELECT id,paid_minor FROM payroll_lines WHERE payroll_run_id=$1 AND organization_id=$2 FOR UPDATE`,[payrollRunId,organizationId]);
+      const paidMinor=lines.rows.reduce((sum,line)=>sum+BigInt(line.paid_minor??0),0n);
+      if(paidMinor>0n) throw new FinanceIntegrityError('PAYROLL_HAS_SALARY_PAYMENTS','Reverse all salary payments before reversing payroll');
       return run;
     });
   }
