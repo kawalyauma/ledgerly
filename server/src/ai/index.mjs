@@ -6,6 +6,7 @@ import { AiDocumentEngine } from "./document-engine.mjs";
 import { AiAcademicService } from "./academic-service.mjs";
 import { AiAgentService } from "./agents.mjs";
 import { AiMemoryService, AiKnowledgeService } from "./knowledge-memory.mjs";
+import { AiKnowledgeIngestionService } from "./knowledge-ingestion.mjs";
 import { AiScheduleService } from "./schedules.mjs";
 import { AiToolGateway, registerCoreTools } from "./tool-gateway.mjs";
 import { AiWorker } from "./worker.mjs";
@@ -21,6 +22,7 @@ export async function createAiWorkforce({services,config={},businessTools={},emb
  const agents=new AiAgentService({database:services.database,audit:services.audit});
  const memory=new AiMemoryService({database:services.database,audit:services.audit});
  const knowledge=new AiKnowledgeService({database:services.database,storage:services.storage,audit:services.audit,embedder,embeddingDimensions,vectorEnabled:storeCapabilities.vectorSearch});
+ const ingestion=new AiKnowledgeIngestionService({knowledge,storage:services.storage,audit:services.audit,maxBytes:Number(config.maxKnowledgeBytes??25*1024*1024),chunkChars:Number(config.chunkChars??3200),overlapChars:Number(config.chunkOverlapChars??400)});
  const schedules=new AiScheduleService({scheduler:services.scheduler,audit:services.audit});
  const academic=new AiAcademicService({database:services.database,tasks,documents,audit:services.audit});
  const internalTools={
@@ -28,6 +30,7 @@ export async function createAiWorkforce({services,config={},businessTools={},emb
    updateDocumentDraft:async({input,context,agent,taskId})=>documents.reviseAi({context,agent,taskId,documentId:input.documentId,content:input.content,reason:context.reason}),
    createTask:async({input,context})=>tasks.create({context:{...context,userId:context.userId??"ai-agent"},assignedAgent:input.assignedAgent,instruction:input.instruction,priority:input.priority,inputReferences:input.inputReferences,idempotencyKey:input.idempotencyKey}),
    requestApproval:async({input,context,agent,taskId})=>approvals.request({organizationId:context.organizationId,agent,taskId,action:input.action??"document_approval",reason:input.reason??context.reason,payload:input.payload??{},riskLevel:input.riskLevel??"medium",requestedApprover:input.requestedApprover??null}),
+   recordAcademicReview:async({input,context,agent,taskId})=>academic.recordReview({context,agent,taskId,documentId:input.documentId,recommendation:input.recommendation,findings:input.findings??[],sourceReferences:input.sourceReferences??[]}),
  };
  const gateway=registerCoreTools(new AiToolGateway({audit:services.audit,approvalService:approvals}),{...internalTools,...businessTools});
  const providerConfig={endpoint:config.endpoint??process.env.LEDGERLY_AI_ENDPOINT??"http://127.0.0.1:11434",model:config.model??process.env.LEDGERLY_AI_MODEL??null,timeoutMs:Number(config.timeoutMs??process.env.LEDGERLY_AI_TIMEOUT_MS??60000),contextLimit:Number(config.contextLimit??process.env.LEDGERLY_AI_CONTEXT_LIMIT??8192),temperature:Number(config.temperature??process.env.LEDGERLY_AI_TEMPERATURE??0.2),toolSupport:config.toolSupport??String(process.env.LEDGERLY_AI_TOOL_SUPPORT??"true")!=="false"};
@@ -36,5 +39,5 @@ export async function createAiWorkforce({services,config={},businessTools={},emb
  if(config.workerEnabled!==false&&String(process.env.LEDGERLY_AI_WORKER_ENABLED??"true")!=="false")worker.start(Number(config.pollIntervalMs??process.env.LEDGERLY_AI_POLL_INTERVAL_MS??500));
  async function health(){const providerId=config.provider??process.env.LEDGERLY_AI_PROVIDER??"ollama";let runtime;try{runtime=await providerRegistry.create(providerId,providerConfig).health();}catch(error){runtime={ok:false,provider:providerId,state:"error",error:error instanceof Error?error.message:String(error)};}const[queueLength,failedTasks]=await Promise.all([services.queue.size().catch(()=>null),services.database.query(`SELECT count(*)::int AS count FROM ledgerly_ai.tasks WHERE status='failed'`).then((r)=>Number(r.rows[0]?.count??0)).catch(()=>null)]);return{ok:runtime.ok===true,provider:providerId,runtime,queueLength,failedTasks,worker:worker.status(),knowledge:storeCapabilities,limits};}
  async function close(){await worker.stop();}
- return Object.freeze({providerRegistry,store,storeCapabilities,agents,tasks,approvals,documents,academic,memory,knowledge,schedules,gateway,worker,health,close,config:{providerConfig,limits}});
+ return Object.freeze({providerRegistry,store,storeCapabilities,agents,tasks,approvals,documents,academic,memory,knowledge,ingestion,schedules,gateway,worker,health,close,config:{providerConfig,limits}});
 }
