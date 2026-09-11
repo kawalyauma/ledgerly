@@ -42,7 +42,18 @@ export async function handleAiRequest({request,url,runtime}){
   if(parts[0]==="approvals"){
     if(method==="GET"&&parts.length===1){const result=await db.query(`SELECT * FROM ledgerly_ai.approvals WHERE organization_id=$1 ORDER BY requested_at DESC LIMIT 200`,[ctx.organizationId]);return json(200,{items:result.rows});}
     if(method==="POST"&&parts[2]==="decision"){runtime.auth.requireScope(principal,"ai:approve");const input=await body(request);return json(200,await runtime.ai.approvals.decide({context:ctx,approvalId:parts[1],approve:Boolean(input.approve),reason:input.reason??null}));}
-    if(method==="POST"&&parts[2]==="execute"){runtime.auth.requireScope(principal,"ai:approve");const approval=await runtime.ai.approvals.get({context:ctx,approvalId:parts[1]});if(!approval)return json(404,{error:{code:"AI_APPROVAL_NOT_FOUND",message:"Approval not found"}});const agent=await runtime.ai.agents.get(ctx,approval.agent_id);if(!agent)return json(404,{error:{code:"AI_AGENT_NOT_FOUND",message:"AI employee not found"}});const executionContext=await approvalExecutionContext(runtime,principal,approval,agent);const result=await runtime.ai.gateway.executeApproved({approval,agent:{...agent,permissions:executionContext.permissions},context:executionContext});await runtime.ai.approvals.markExecuted({context:ctx,approvalId:parts[1],result});return json(200,result);}
+    if(method==="POST"&&parts[2]==="execute"){
+      runtime.auth.requireScope(principal,"ai:approve");
+      const approval=await runtime.ai.approvals.get({context:ctx,approvalId:parts[1]});if(!approval)return json(404,{error:{code:"AI_APPROVAL_NOT_FOUND",message:"Approval not found"}});
+      if(approval.status==="executed"){const resumed=approval.task_id?await runtime.ai.tasks.resumeAfterApproval({context:ctx,taskId:approval.task_id,approvalId:approval.approval_id,result:approval.executed_result}):{resumed:false,reason:"approval_has_no_task"};return json(200,{status:"executed",output:approval.executed_result,resumed,recovered:true});}
+      if(approval.status!=="approved")return json(409,{error:{code:"AI_APPROVAL_NOT_EXECUTABLE",message:`Approval is ${approval.status}, not approved`}});
+      const agent=await runtime.ai.agents.get(ctx,approval.agent_id);if(!agent)return json(404,{error:{code:"AI_AGENT_NOT_FOUND",message:"AI employee not found"}});
+      const executionContext=await approvalExecutionContext(runtime,principal,approval,agent);
+      const result=await runtime.ai.gateway.executeApproved({approval,agent:{...agent,permissions:executionContext.permissions},context:executionContext});
+      const executed=await runtime.ai.approvals.markExecuted({context:ctx,approvalId:parts[1],result});
+      const resumed=approval.task_id?await runtime.ai.tasks.resumeAfterApproval({context:ctx,taskId:approval.task_id,approvalId:approval.approval_id,result}):{resumed:false,reason:"approval_has_no_task"};
+      return json(200,{...result,approval:executed,resumed});
+    }
   }
 
   if(parts[0]==="documents"){
