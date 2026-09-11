@@ -1,11 +1,18 @@
 import { INITIAL_AGENT_TEMPLATES } from "./constants.mjs";
 
 export class AiWorkforceStore {
-  constructor({ database }) { if (!database?.query) throw new TypeError("AiWorkforceStore requires database"); this.database=database; }
+  constructor({ database, embeddingDimensions = 768, logger = console }) {
+    if (!database?.query) throw new TypeError("AiWorkforceStore requires database");
+    this.database=database;
+    this.embeddingDimensions=Math.max(1,Number(embeddingDimensions)||768);
+    this.logger=logger;
+    this.vectorEnabled=false;
+  }
 
   async ensureSchema() {
     await this.database.query(`CREATE SCHEMA IF NOT EXISTS ledgerly_ai`);
-    await this.database.query(`CREATE EXTENSION IF NOT EXISTS vector`);
+    this.vectorEnabled=await this.#ensureVector();
+
     await this.database.query(`
       CREATE TABLE IF NOT EXISTS ledgerly_ai.agents (
         agent_id text PRIMARY KEY, organization_id text NOT NULL, name text NOT NULL, avatar text,
@@ -65,14 +72,9 @@ export class AiWorkforceStore {
         storage_ref text, status text NOT NULL DEFAULT 'pending', metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
         created_by text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), indexed_at timestamptz
       )`);
-    await this.database.query(`
-      CREATE TABLE IF NOT EXISTS ledgerly_ai.knowledge_chunks (
-        chunk_id uuid PRIMARY KEY, organization_id text NOT NULL, source_id uuid NOT NULL,
-        chunk_index integer NOT NULL, content text NOT NULL, token_count integer,
-        embedding vector(768), metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-        created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(source_id, chunk_index)
-      )`);
+    await this.#ensureKnowledgeChunks();
     await this.database.query(`CREATE INDEX IF NOT EXISTS ai_knowledge_org_source_idx ON ledgerly_ai.knowledge_chunks (organization_id, source_id)`);
+    await this.database.query(`CREATE INDEX IF NOT EXISTS ai_knowledge_text_idx ON ledgerly_ai.knowledge_chunks USING gin (to_tsvector('simple', content))`);
 
     await this.database.query(`
       CREATE TABLE IF NOT EXISTS ledgerly_ai.memories (
@@ -90,16 +92,63 @@ export class AiWorkforceStore {
         occurred_at timestamptz NOT NULL DEFAULT now()
       )`);
     await this.database.query(`CREATE INDEX IF NOT EXISTS ai_activity_org_time_idx ON ledgerly_ai.activity (organization_id, occurred_at DESC)`);
+
+    await this.database.query(`
+      CREATE TABLE IF NOT EXISTS ledgerly_ai.academic_reviews (
+        review_id uuid PRIMARY KEY, organization_id text NOT NULL, document_id uuid NOT NULL, task_id uuid,
+        agent_id text NOT NULL, review_label text NOT NULL DEFAULT 'AI REVIEWED',
+        recommendation text NOT NULL CHECK (recommendation IN ('recommended_for_approval','changes_requested')),
+        findings jsonb NOT NULL DEFAULT '[]'::jsonb, source_references jsonb NOT NULL DEFAULT '[]'::jsonb,
+        created_at timestamptz NOT NULL DEFAULT now()
+      )`);
+    await this.database.query(`CREATE INDEX IF NOT EXISTS ai_academic_reviews_org_doc_idx ON ledgerly_ai.academic_reviews (organization_id, document_id, created_at DESC)`);
+
+    return this.capabilities();
+  }
+
+  capabilities() {
+    return Object.freeze({ vectorSearch:this.vectorEnabled, embeddingDimensions:this.embeddingDimensions, fullTextSearch:true });
+  }
+
+  async #ensureVector() {
+    try {
+      await this.database.query(`CREATE EXTENSION IF NOT EXISTS vector`);
+      await this.database.query(`SELECT '[0]'::vector`);
+      return true;
+    } catch (error) {
+      this.logger.warn?.(JSON.stringify({level:"warn",component:"ai-store",message:"pgvector unavailable; using PostgreSQL full-text retrieval",error:error instanceof Error?error.message:String(error)}));
+      return false;
+    }
+  }
+
+  async #ensureKnowledgeChunks() {
+    if (this.vectorEnabled) {
+      await this.database.query(`
+        CREATE TABLE IF NOT EXISTS ledgerly_ai.knowledge_chunks (
+          chunk_id uuid PRIMARY KEY, organization_id text NOT NULL, source_id uuid NOT NULL,
+          chunk_index integer NOT NULL, content text NOT NULL, token_count integer,
+          embedding vector(${this.embeddingDimensions}), metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+          created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(source_id, chunk_index)
+        )`);
+      return;
+    }
+    await this.database.query(`
+      CREATE TABLE IF NOT EXISTS ledgerly_ai.knowledge_chunks (
+        chunk_id uuid PRIMARY KEY, organization_id text NOT NULL, source_id uuid NOT NULL,
+        chunk_index integer NOT NULL, content text NOT NULL, token_count integer,
+        embedding_json jsonb, metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+        created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(source_id, chunk_index)
+      )`);
   }
 
   async seedTemplates(organizationId, makeId) {
     for (const template of INITIAL_AGENT_TEMPLATES) {
       await this.database.query(`INSERT INTO ledgerly_ai.agents
-        (agent_id, organization_id, name, role, department, description, autonomy_level, template_key, allowed_tools, permissions)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb)
+        (agent_id, organization_id, name, role, department, description, system_instructions, autonomy_level, template_key, allowed_tools, permissions)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb)
         ON CONFLICT (organization_id, name) DO NOTHING`, [
         makeId(template.key), organizationId, template.name, template.role, template.department, template.description,
-        template.autonomy, template.key, JSON.stringify(defaultTools(template.key)), JSON.stringify(defaultPermissions(template.key))
+        template.systemInstructions??"", template.autonomy, template.key, JSON.stringify(defaultTools(template.key)), JSON.stringify(defaultPermissions(template.key))
       ]);
     }
   }

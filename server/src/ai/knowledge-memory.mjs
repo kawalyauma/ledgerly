@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { assertTenant } from "./policy.mjs";
 
 export class AiMemoryService {
   constructor({ database, audit }) { this.database=database; this.audit=audit; }
@@ -48,8 +47,9 @@ export class AiMemoryService {
 }
 
 export class AiKnowledgeService {
-  constructor({ database, storage, audit, embedder=null, embeddingDimensions=768 }) {
-    this.database=database; this.storage=storage; this.audit=audit; this.embedder=embedder; this.embeddingDimensions=embeddingDimensions;
+  constructor({ database, storage, audit, embedder=null, embeddingDimensions=768, vectorEnabled=false }) {
+    this.database=database; this.storage=storage; this.audit=audit; this.embedder=embedder;
+    this.embeddingDimensions=embeddingDimensions; this.vectorEnabled=Boolean(vectorEnabled && embedder);
   }
 
   async createSource({ context, name, sourceType, storageRef=null, metadata={} }) {
@@ -68,25 +68,33 @@ export class AiKnowledgeService {
     let indexed=0;
     for (let i=0;i<chunks.length;i++) {
       const chunk=typeof chunks[i]==="string" ? {content:chunks[i]} : chunks[i];
-      const embedding=this.embedder ? await this.embedder.embed(chunk.content) : null;
+      const embedding=this.vectorEnabled ? await this.embedder.embed(chunk.content) : null;
       if (embedding && embedding.length!==this.embeddingDimensions) throw new Error("embedding dimension mismatch");
-      await this.database.query(`INSERT INTO ledgerly_ai.knowledge_chunks
-        (chunk_id,organization_id,source_id,chunk_index,content,token_count,embedding,metadata)
-        VALUES ($1,$2,$3,$4,$5,$6,$7::vector,$8::jsonb)
-        ON CONFLICT (source_id,chunk_index) DO UPDATE SET content=EXCLUDED.content,token_count=EXCLUDED.token_count,embedding=EXCLUDED.embedding,metadata=EXCLUDED.metadata`,
-        [randomUUID(),org,sourceId,i,chunk.content,chunk.tokenCount??null,embedding?`[${embedding.join(",")}]`:null,JSON.stringify(chunk.metadata??{})]);
+      if (this.vectorEnabled) {
+        await this.database.query(`INSERT INTO ledgerly_ai.knowledge_chunks
+          (chunk_id,organization_id,source_id,chunk_index,content,token_count,embedding,metadata)
+          VALUES ($1,$2,$3,$4,$5,$6,$7::vector,$8::jsonb)
+          ON CONFLICT (source_id,chunk_index) DO UPDATE SET content=EXCLUDED.content,token_count=EXCLUDED.token_count,embedding=EXCLUDED.embedding,metadata=EXCLUDED.metadata`,
+          [randomUUID(),org,sourceId,i,chunk.content,chunk.tokenCount??null,`[${embedding.join(",")}]`,JSON.stringify(chunk.metadata??{})]);
+      } else {
+        await this.database.query(`INSERT INTO ledgerly_ai.knowledge_chunks
+          (chunk_id,organization_id,source_id,chunk_index,content,token_count,embedding_json,metadata)
+          VALUES ($1,$2,$3,$4,$5,$6,NULL,$7::jsonb)
+          ON CONFLICT (source_id,chunk_index) DO UPDATE SET content=EXCLUDED.content,token_count=EXCLUDED.token_count,metadata=EXCLUDED.metadata`,
+          [randomUUID(),org,sourceId,i,chunk.content,chunk.tokenCount??null,JSON.stringify(chunk.metadata??{})]);
+      }
       indexed++;
     }
     await this.database.query(`UPDATE ledgerly_ai.knowledge_sources SET status='indexed',indexed_at=now() WHERE source_id=$1 AND organization_id=$2`,[sourceId,org]);
-    await this.audit?.write?.({ organization_id:org,actor_type:"human",actor_id:context.userId,action:"ai.knowledge.indexed",entity_type:"ai_knowledge_source",entity_id:sourceId,metadata:{chunks:indexed} });
-    return { sourceId,indexed };
+    await this.audit?.write?.({ organization_id:org,actor_type:"human",actor_id:context.userId,action:"ai.knowledge.indexed",entity_type:"ai_knowledge_source",entity_id:sourceId,metadata:{chunks:indexed,vector_search:this.vectorEnabled} });
+    return { sourceId,indexed,vectorSearch:this.vectorEnabled };
   }
 
   async retrieve({ context, query, sourceIds=null, limit=8 }) {
     const org=context.organizationId;
     if (!org) throw new Error("organization context required");
     const bounded=Math.max(1,Math.min(Number(limit)||8,20));
-    if (this.embedder) {
+    if (this.vectorEnabled) {
       const embedding=await this.embedder.embed(query);
       const values=[org,`[${embedding.join(",")}]`,bounded];
       let filter="organization_id=$1";
