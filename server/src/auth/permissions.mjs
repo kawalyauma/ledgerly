@@ -16,8 +16,15 @@ export function parseScopes(value) {
   }
 }
 
+export function effectiveScopes(principal) {
+  if (!principal) return [];
+  if (principal.role === "owner" || principal.role === "admin") return ["*"];
+  return [...new Set(parseScopes(principal.scopes))];
+}
+
 export function hasScope(principal, scope) {
   if (!principal) return false;
   if (principal.role === "owner" || principal.role === "admin") return true;
-  return Array.isArray(principal.scopes) && principal.scopes.includes(scope);
+  const scopes = effectiveScopes(principal);
+  return scopes.includes("*") || scopes.includes(scope);
 }

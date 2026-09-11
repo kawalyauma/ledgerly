@@ -11,6 +11,7 @@ import { KindRoutingQueue } from "./adapters/kind-routing-queue.mjs";
 import { SchedulerRunner } from "./scheduler-runner.mjs";
 import { createJwtCodec } from "./auth/jwt.mjs";
 import { AuthCompatibilityService } from "./auth/service.mjs";
+import { intersectPermissions, resolveCurrentActorAccess } from "./auth/access-resolver.mjs";
 import { createRuntimeExtensions, listRuntimeExtensionDescriptors } from "./extensions.mjs";
 
 export async function createRuntime(config) {
@@ -69,10 +70,16 @@ export async function createRuntime(config) {
       audit,
     });
 
+    const authorization = Object.freeze({
+      resolveCurrentActorAccess: (input) => resolveCurrentActorAccess({ database, ...input }),
+      intersectPermissions,
+    });
+
     runtimeExtensions = await createRuntimeExtensions({
       config,
       services,
       auth,
+      authorization,
       createQueue,
     });
 
@@ -141,6 +148,7 @@ export async function createRuntime(config) {
         distributedEventsReady: true,
         notificationBridgeReady: true,
         authCompatibilityReady: true,
+        backgroundAuthorizationReady: true,
         runtimeExtensionRegistryReady: true,
         runtimeExtensionDescriptors: listRuntimeExtensionDescriptors(),
         extensions: runtimeExtensions.describe(),
@@ -165,6 +173,7 @@ export async function createRuntime(config) {
     return Object.freeze({
       services,
       auth,
+      authorization,
       extensions: runtimeExtensions.values,
       readiness,
       describeContracts,
