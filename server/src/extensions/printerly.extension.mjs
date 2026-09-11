@@ -3,6 +3,7 @@ import {PrinterlyCostingService} from '../printerly/costing-service.mjs';
 import {PrinterlyNodeService} from '../printerly/node-service.mjs';
 import {PrinterlyDispatchWorker} from '../printerly/dispatch-worker.mjs';
 import {PrinterlyMaintenanceService} from '../printerly/maintenance-service.mjs';
+import {PrinterlyBatchService} from '../printerly/batch-service.mjs';
 import {PrinterlyQueueWorker} from '../printerly/queue-worker.mjs';
 import {PrinterlyScheduleRegistry} from '../printerly/schedule-registry.mjs';
 
@@ -20,11 +21,14 @@ export default{
     const node=new PrinterlyNodeService({database:services.database,storage:services.storage,runtime,costing});
     const outbox=new PrinterlyDispatchWorker({database:services.database,queue,maxAttempts:8});
     const maintenance=new PrinterlyMaintenanceService({database:services.database,storage:services.storage,runtime});
+    const batches=new PrinterlyBatchService({database:services.database});
     const schedules=new PrinterlyScheduleRegistry({database:services.database,scheduler:services.scheduler});
     const authoritative=extensionConfig.cutover==='node';
-    const run=method=>async job=>{if(!authoritative)return{skipped:true,reason:'cloudflare-authoritative'};const organizationId=String(job.organizationId||job.payload?.organizationId||'').trim();if(!organizationId)throw new Error(`${method} job is missing organizationId`);return maintenance[method](organizationId);};
+    const organization=job=>{const organizationId=String(job.organizationId||job.payload?.organizationId||'').trim();if(!organizationId)throw new Error('Printerly job is missing organizationId');return organizationId;};
+    const run=method=>async job=>{if(!authoritative)return{skipped:true,reason:'cloudflare-authoritative'};return maintenance[method](organization(job));};
+    const runBatch=async job=>{if(!authoritative)return{skipped:true,reason:'cloudflare-authoritative'};const organizationId=organization(job),result=await batches.dispatch(organizationId);await maintenance.batchStatus(organizationId);return result;};
     const worker=new PrinterlyQueueWorker({queue,handlers:{
-      'printerly.health':run('health'),'printerly.batch-dispatch':run('batchDispatch'),'printerly.batch-status':run('batchStatus'),
+      'printerly.health':run('health'),'printerly.batch-dispatch':runBatch,'printerly.batch-status':run('batchStatus'),
       'printerly.retention':run('retention'),'printerly.consumables':run('consumables'),'printerly.service-sla':run('serviceSla'),
       'printerly.routing':run('routing'),'printerly.release-cleanup':run('releaseCleanup'),'printerly.procurement':run('procurement'),
     }});
@@ -38,7 +42,7 @@ export default{
       void drainOutbox();void drainQueue();
     }
     return{
-      value:Object.freeze({cutover:extensionConfig.cutover,queue,runtime,costing,node,outbox,maintenance,worker,schedules}),
+      value:Object.freeze({cutover:extensionConfig.cutover,queue,runtime,costing,node,outbox,maintenance,batches,worker,schedules}),
       schedulerQueues:Object.fromEntries(['printerly.health','printerly.batch-dispatch','printerly.batch-status','printerly.retention','printerly.consumables','printerly.service-sla','printerly.routing','printerly.release-cleanup','printerly.procurement'].map(kind=>[kind,queue])),
       async readiness(){
         if(extensionConfig.cutover==='cloudflare')return{ok:true,cutover:'cloudflare',authoritative:false,schedules:scheduleState};
