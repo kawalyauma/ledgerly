@@ -5,7 +5,8 @@ const defaults=Object.freeze({
   'finance.reference.read':'cloudflare','finance.documents.write':'cloudflare','finance.payments.write':'cloudflare','finance.journals.write':'cloudflare','finance.reversals.write':'cloudflare',
   'school-fees.read':'cloudflare','school-fees.write':'cloudflare','school-fees.reversal':'cloudflare',
   'payroll.read':'cloudflare','payroll.write':'cloudflare','payroll.reversal':'cloudflare',
-  'inventory.read':'cloudflare','inventory.write':'cloudflare','printerly.jobs':'cloudflare','nvr.metadata':'cloudflare'
+  'inventory.read':'cloudflare','inventory.write':'cloudflare',
+  'printerly.nodes':'cloudflare','printerly.jobs':'cloudflare','nvr.metadata':'cloudflare'
 });
 export const CUTOVER_CAPABILITIES=defaults;
 export function createCutoverCapabilities(overrides={}){
