@@ -22,9 +22,17 @@ export class AiTaskService{
  async resumeAfterApproval({context,taskId,approvalId,result:executedResult}){
    const org=assertOrg(context);if(!taskId)return {resumed:false,reason:"approval_has_no_task"};
    const reference={type:"approval",id:approvalId,status:"executed",result:executedResult??null};
+   const envelope=()=>createJobEnvelope({kind:"ai.task",organizationId:org,jobId:taskId,idempotencyKey:`ai:${taskId}:approval:${approvalId}`,payload:{taskId,resumedFromApproval:approvalId}});
    const update=await this.database.query(`UPDATE ledgerly_ai.tasks SET status='queued',history=history || jsonb_build_array(jsonb_build_object('type','approval_executed','approval_id',$1,'result',$2::jsonb,'at',now())),output_references=output_references || $3::jsonb,updated_at=now() WHERE task_id=$4 AND organization_id=$5 AND status='waiting_for_approval' RETURNING *`,[approvalId,JSON.stringify(executedResult??null),JSON.stringify([reference]),taskId,org]);
-   if(!update.rowCount){const existing=(await this.database.query(`SELECT * FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[taskId,org])).rows[0];if(!existing)throw new Error("AI task not found for approval resume");if(["queued","working","completed"].includes(existing.status))return {resumed:false,task:existing,reason:`already_${existing.status}`};throw new Error(`AI task cannot resume from status ${existing.status}`);}
-   await this.queue.enqueue(createJobEnvelope({kind:"ai.task",organizationId:org,jobId:taskId,idempotencyKey:`ai:${taskId}:approval:${approvalId}`,payload:{taskId,resumedFromApproval:approvalId}}));
+   if(!update.rowCount){
+     const existing=(await this.database.query(`SELECT * FROM ledgerly_ai.tasks WHERE task_id=$1 AND organization_id=$2`,[taskId,org])).rows[0];
+     if(!existing)throw new Error("AI task not found for approval resume");
+     if(existing.status==="queued"){await this.queue.enqueue(envelope());return {resumed:true,recovered:true,task:existing};}
+     if(["working","completed"].includes(existing.status))return {resumed:false,task:existing,reason:`already_${existing.status}`};
+     throw new Error(`AI task cannot resume from status ${existing.status}`);
+   }
+   try{await this.queue.enqueue(envelope());}
+   catch(error){await this.database.query(`UPDATE ledgerly_ai.tasks SET status='waiting_for_approval',updated_at=now() WHERE task_id=$1 AND organization_id=$2 AND status='queued'`,[taskId,org]).catch(()=>undefined);throw error;}
    await this.audit?.write?.({organization_id:org,actor_type:"human",actor_id:context.userId,action:"ai.task.resumed_after_approval",entity_type:"ai_task",entity_id:taskId,metadata:{approval_id:approvalId}});
    return {resumed:true,task:update.rows[0]};
  }
