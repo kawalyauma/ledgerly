@@ -47,4 +47,5 @@ export async function ensureAiIntegrity(database) {
   await addConstraint(database,"ledgerly_ai.approvals","ai_approvals_risk_check","CHECK (risk_level IN ('low','medium','high','prohibited'))");
   await addConstraint(database,"ledgerly_ai.documents","ai_documents_status_check","CHECK (status IN ('draft','in_review','changes_requested','approved','published','archived'))");
   await addConstraint(database,"ledgerly_ai.knowledge_sources","ai_knowledge_sources_status_check","CHECK (status IN ('pending','indexed','failed','disabled'))");
+  await addConstraint(database,"ledgerly_ai.knowledge_sources","ai_knowledge_permissions_array_check","CHECK (jsonb_typeof(required_permissions)='array')");
 }
