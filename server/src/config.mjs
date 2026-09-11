@@ -1,3 +1,5 @@
+import { loadRuntimeExtensionConfig } from "./extensions.mjs";
+
 function readPort(value, fallback, name) {
   const parsed = Number.parseInt(value ?? String(fallback), 10);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
@@ -129,5 +131,6 @@ export function loadConfig(env = process.env) {
     storage: Object.freeze({
       root: env.LEDGERLY_STORAGE_PATH ?? "/var/lib/ledgerly/storage",
     }),
+    extensions: loadRuntimeExtensionConfig(env),
   });
 }
