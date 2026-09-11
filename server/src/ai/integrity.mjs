@@ -28,16 +28,16 @@ export async function ensureAiIntegrity(database) {
   ]) await addConstraint(database,table,name,"FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE");
 
   await addConstraint(database,"ledgerly_ai.tasks","ai_tasks_agent_fk","FOREIGN KEY (organization_id,assigned_agent) REFERENCES ledgerly_ai.agents(organization_id,agent_id) ON DELETE RESTRICT");
-  await addConstraint(database,"ledgerly_ai.tasks","ai_tasks_parent_fk","FOREIGN KEY (organization_id,parent_task_id) REFERENCES ledgerly_ai.tasks(organization_id,task_id) ON DELETE SET NULL");
+  await addConstraint(database,"ledgerly_ai.tasks","ai_tasks_parent_fk","FOREIGN KEY (organization_id,parent_task_id) REFERENCES ledgerly_ai.tasks(organization_id,task_id) ON DELETE RESTRICT");
   await addConstraint(database,"ledgerly_ai.approvals","ai_approvals_agent_fk","FOREIGN KEY (organization_id,agent_id) REFERENCES ledgerly_ai.agents(organization_id,agent_id) ON DELETE RESTRICT");
-  await addConstraint(database,"ledgerly_ai.approvals","ai_approvals_task_fk","FOREIGN KEY (organization_id,task_id) REFERENCES ledgerly_ai.tasks(organization_id,task_id) ON DELETE CASCADE");
-  await addConstraint(database,"ledgerly_ai.document_versions","ai_document_versions_document_fk","FOREIGN KEY (organization_id,document_id) REFERENCES ledgerly_ai.documents(organization_id,document_id) ON DELETE CASCADE");
+  await addConstraint(database,"ledgerly_ai.approvals","ai_approvals_task_fk","FOREIGN KEY (organization_id,task_id) REFERENCES ledgerly_ai.tasks(organization_id,task_id) ON DELETE RESTRICT");
+  await addConstraint(database,"ledgerly_ai.document_versions","ai_document_versions_document_fk","FOREIGN KEY (organization_id,document_id) REFERENCES ledgerly_ai.documents(organization_id,document_id) ON DELETE RESTRICT");
   await addConstraint(database,"ledgerly_ai.knowledge_chunks","ai_knowledge_chunks_source_fk","FOREIGN KEY (organization_id,source_id) REFERENCES ledgerly_ai.knowledge_sources(organization_id,source_id) ON DELETE CASCADE");
-  await addConstraint(database,"ledgerly_ai.memories","ai_memories_agent_fk","FOREIGN KEY (organization_id,agent_id) REFERENCES ledgerly_ai.agents(organization_id,agent_id) ON DELETE CASCADE");
-  await addConstraint(database,"ledgerly_ai.activity","ai_activity_agent_fk","FOREIGN KEY (organization_id,agent_id) REFERENCES ledgerly_ai.agents(organization_id,agent_id) ON DELETE SET NULL");
-  await addConstraint(database,"ledgerly_ai.activity","ai_activity_task_fk","FOREIGN KEY (organization_id,task_id) REFERENCES ledgerly_ai.tasks(organization_id,task_id) ON DELETE SET NULL");
-  await addConstraint(database,"ledgerly_ai.academic_reviews","ai_academic_reviews_document_fk","FOREIGN KEY (organization_id,document_id) REFERENCES ledgerly_ai.documents(organization_id,document_id) ON DELETE CASCADE");
-  await addConstraint(database,"ledgerly_ai.academic_reviews","ai_academic_reviews_task_fk","FOREIGN KEY (organization_id,task_id) REFERENCES ledgerly_ai.tasks(organization_id,task_id) ON DELETE SET NULL");
+  await addConstraint(database,"ledgerly_ai.memories","ai_memories_agent_fk","FOREIGN KEY (organization_id,agent_id) REFERENCES ledgerly_ai.agents(organization_id,agent_id) ON DELETE RESTRICT");
+  await addConstraint(database,"ledgerly_ai.activity","ai_activity_agent_fk","FOREIGN KEY (organization_id,agent_id) REFERENCES ledgerly_ai.agents(organization_id,agent_id) ON DELETE RESTRICT");
+  await addConstraint(database,"ledgerly_ai.activity","ai_activity_task_fk","FOREIGN KEY (organization_id,task_id) REFERENCES ledgerly_ai.tasks(organization_id,task_id) ON DELETE RESTRICT");
+  await addConstraint(database,"ledgerly_ai.academic_reviews","ai_academic_reviews_document_fk","FOREIGN KEY (organization_id,document_id) REFERENCES ledgerly_ai.documents(organization_id,document_id) ON DELETE RESTRICT");
+  await addConstraint(database,"ledgerly_ai.academic_reviews","ai_academic_reviews_task_fk","FOREIGN KEY (organization_id,task_id) REFERENCES ledgerly_ai.tasks(organization_id,task_id) ON DELETE RESTRICT");
   await addConstraint(database,"ledgerly_ai.academic_reviews","ai_academic_reviews_agent_fk","FOREIGN KEY (organization_id,agent_id) REFERENCES ledgerly_ai.agents(organization_id,agent_id) ON DELETE RESTRICT");
 
   await addConstraint(database,"ledgerly_ai.agents","ai_agents_status_check","CHECK (status IN ('active','disabled'))");
