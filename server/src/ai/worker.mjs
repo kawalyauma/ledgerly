@@ -3,6 +3,8 @@ import { aiAttribution } from "./provenance.mjs";
 
 function safeJson(value) { try { return JSON.stringify(value); } catch { return "{}"; } }
 function truncate(value, max) { const text=String(value??""); return text.length>max ? `${text.slice(0,max)}\n[truncated]` : text; }
+function canonical(value){if(Array.isArray(value))return `[${value.map(canonical).join(",")}]`;if(value&&typeof value==="object"){return `{${Object.keys(value).sort().map((key)=>`${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;}return JSON.stringify(value);}
+function replayKey(name,input){return `${String(name)}:${canonical(input??{})}`;}
 
 export class AiWorker {
   #running=0;
@@ -94,10 +96,13 @@ export class AiWorker {
     const context={organizationId:org,userId:task.requested_by,permissions,reason:task.instruction,authority,provenance:attribution};
     const memories=this.memory ? await this.memory.list({context:{organizationId:org},agentId:agent.agentId,type:"durable"}) : [];
     const sources=this.knowledge && (agent.knowledgeSources?.length) ? await this.knowledge.retrieve({context:{organizationId:org},query:task.instruction,sourceIds:agent.knowledgeSources,limit:8}) : [];
+    const executedApprovals=(await this.database.query(`SELECT approval_id,requested_action,payload,executed_result FROM ledgerly_ai.approvals WHERE organization_id=$1 AND task_id=$2 AND status='executed' ORDER BY executed_at`,[org,taskId])).rows;
+    const approvalReplay=new Map(executedApprovals.map((item)=>[replayKey(item.requested_action,item.payload),{approvalId:item.approval_id,result:item.executed_result}]));
     const messages=[
       {role:"system",content:truncate(`${agent.systemInstructions||defaultInstructions(agent)}\n\nSecurity: never request database credentials or unrestricted SQL. Use only provided Ledgerly tools.\nAI review is not official approval.`,this.limits.maxPromptChars)},
       {role:"system",content:truncate(`Durable structured memory: ${safeJson(memories.map((m)=>({key:m.key,value:m.value})))}`,8000)},
       {role:"system",content:truncate(`Permitted knowledge excerpts with source references: ${safeJson(sources.map((s)=>({source_id:s.source_id,chunk_id:s.chunk_id,content:s.content})))}`,16000)},
+      ...(executedApprovals.length?[{role:"system",content:truncate(`These human-approved tool actions have already executed successfully. Do not execute them again; if the same tool and payload is requested, Ledgerly will replay the saved result: ${safeJson(executedApprovals.map((a)=>({approval_id:a.approval_id,tool:a.requested_action,payload:a.payload,result:a.executed_result})))}`,12000)}]:[]),
       {role:"user",content:truncate(task.instruction,this.limits.maxPromptChars)},
     ];
     const tools=this.gateway.describeForAgent({...agent,permissions}).map((tool)=>({type:"function",function:{name:tool.name,description:tool.description??tool.name,parameters:tool.parameters??{type:"object",additionalProperties:true}}}));
@@ -120,7 +125,15 @@ export class AiWorker {
         const name=call.function?.name; let input={};
         try { input=typeof call.function?.arguments==="string"?JSON.parse(call.function.arguments||"{}"):call.function?.arguments??{}; } catch { const error=new Error(`Invalid tool arguments from model for ${name}`); error.code="AI_TOOL_ARGUMENTS_INVALID"; throw error; }
         const effectiveAgent={...agent,permissions};
-        const output=await this.gateway.invoke({agent:effectiveAgent,context,taskId,toolName:name,input});
+        const key=replayKey(name,input);
+        let output;
+        if(approvalReplay.has(key)){
+          const replay=approvalReplay.get(key);
+          output={status:"executed",output:replay.result,policy:{decision:"allow",approved:true,replayed:true},approval:{approval_id:replay.approvalId}};
+          await this.audit?.write?.({organization_id:org,actor_type:"ai_agent",actor_id:agent.agentId,agent_id:agent.agentId,agent_name:agent.name,agent_role:agent.role,action:"ai.tool.replayed_after_approval",entity_type:"ai_tool",entity_id:name,reason:task.instruction,metadata:{task_id:taskId,approval_id:replay.approvalId}});
+        } else {
+          output=await this.gateway.invoke({agent:effectiveAgent,context,taskId,toolName:name,input});
+        }
         messages.push({role:"tool",tool_name:name,content:truncate(safeJson(output),12000)});
         if (output.status==="waiting_for_approval") {
           await this.taskService.setStatus({organizationId:org,taskId,status:"waiting_for_approval",agent,outputReferences:[{type:"approval",id:output.approval?.approval_id??null}]});
