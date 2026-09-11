@@ -33,8 +33,9 @@ export class OllamaProvider extends AiModelProvider {
     const started = Date.now();
     try {
       const models = await this.listModels();
-      const installed = !this.model || models.some((m) => m.name === this.model || m.name?.split(":")[0] === this.model);
-      return { ok:installed, provider:this.id, online:true, model:this.model, modelInstalled:installed, latencyMs:Date.now()-started, models:models.map((m)=>m.name), state:installed?"ready":"model_missing" };
+      if (!this.model) return { ok:false,provider:this.id,online:true,model:null,modelInstalled:null,latencyMs:Date.now()-started,models:models.map((m)=>m.name),state:"model_unconfigured",code:"AI_MODEL_NOT_CONFIGURED",error:"No AI model configured" };
+      const installed = models.some((m) => m.name === this.model || m.name?.split(":")[0] === this.model);
+      return { ok:installed, provider:this.id, online:true, model:this.model, modelInstalled:installed, latencyMs:Date.now()-started, models:models.map((m)=>m.name), state:installed?"ready":"model_missing", ...(installed?{}:{code:"AI_MODEL_NOT_INSTALLED",error:`Configured model ${this.model} is not installed`}) };
     } catch (error) {
       const code=error?.code;
       return { ok:false, provider:this.id, online:code!=="AI_RUNTIME_OFFLINE", model:this.model, modelInstalled:code==="AI_MODEL_NOT_INSTALLED"?false:null, latencyMs:Date.now()-started, state:code==="AI_RUNTIME_OVERLOADED"?"overloaded":code==="AI_RUNTIME_TIMEOUT"?"timeout":"offline", error:error instanceof Error ? error.message : String(error), code };
