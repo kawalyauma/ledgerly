@@ -7,7 +7,7 @@ const expected = Object.freeze({
     "school_profiles","school_branches","school_academic_years","school_terms","school_departments","school_class_levels","school_classes","school_streams","school_subjects","school_class_subjects","school_lesson_periods",
   ],
   "school-configuration": [
-    "school_files","school_grading_scales","school_grade_boundaries","school_divisions","school_assessment_types","school_promotion_rules","school_calendar_events","school_fee_categories","school_payment_methods","school_settings","school_document_templates","school_roles","school_role_permissions","school_user_profiles","school_user_roles","school_user_access","school_temporary_permissions","school_security_policies","school_impersonation_sessions","school_fee_accounting_settings","school_fee_structures","school_fee_structure_lines","school_fee_discount_schemes","app_modules","organization_modules",
+    "school_files","school_grading_scales","school_grade_boundaries","school_divisions","school_assessment_types","school_promotion_rules","school_calendar_events","school_fee_categories","school_payment_methods","school_settings","school_document_templates","school_roles","school_role_permissions","school_user_roles","school_user_access","school_temporary_permissions","school_security_policies","school_impersonation_sessions","school_fee_accounting_settings","school_fee_structures","school_fee_structure_lines","school_fee_discount_schemes","app_modules","organization_modules",
   ],
   "school-people": [
     "school_admission_applications","school_students","school_guardians","school_student_guardians","school_authorized_pickups","school_student_medical","school_enrollments","school_student_status_history","school_student_promotions","school_student_transfers","school_student_documents","school_student_notes","school_student_tags","school_student_tag_links","school_student_siblings","school_student_timeline","school_promotion_runs","school_promotion_run_items","school_discipline_offence_types","school_discipline_incidents","school_discipline_actions","school_discipline_parent_meetings","school_discipline_followups","school_discipline_attachments","school_import_jobs",
@@ -29,6 +29,16 @@ test("owned school domains expose every persistent D1 table in migration descrip
     const actual = new Set(getMigrationPhase(phaseName).tables.map((table) => table.name));
     for (const tableName of tableNames) assert.equal(actual.has(tableName), true, `${phaseName} is missing ${tableName}`);
   }
+});
+
+test("auth-core remains the sole copy owner for school authentication profile data", () => {
+  const auth = getMigrationPhase("auth-core");
+  const config = getMigrationPhase("school-configuration");
+  const profile = auth.tables.find((table) => table.name === "school_user_profiles");
+  assert.ok(profile);
+  assert.ok(profile.columns.includes("profile_photo_file_id"));
+  assert.ok(profile.columns.includes("signature_file_id"));
+  assert.equal(config.tables.some((table) => table.name === "school_user_profiles"), false);
 });
 
 test("finance and payroll transaction ownership does not leak into the school stream", () => {
