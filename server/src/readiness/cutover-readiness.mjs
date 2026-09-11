@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { getMigrationPhase, listMigrationPhases } from "../migration/phases.mjs";
 import { orderMigrationPhases } from "../migration/rehearsal.mjs";
 
@@ -133,6 +135,85 @@ async function newestMatching(directory, predicate) {
   return newest;
 }
 
+async function sha256File(path) {
+  return new Promise((resolveHash, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(path);
+    stream.on("error", reject);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("end", () => resolveHash(hash.digest("hex")));
+  });
+}
+
+function parseSha256Lines(text) {
+  const rows = [];
+  for (const rawLine of String(text).split(/\r?\n/)) {
+    if (!rawLine.trim()) continue;
+    const line = rawLine.startsWith("\\") ? rawLine.slice(1) : rawLine;
+    const hash = line.slice(0, 64).toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error(`Invalid SHA256SUMS line: ${rawLine}`);
+    let file = line.slice(64).trimStart();
+    if (file.startsWith("*")) file = file.slice(1);
+    if (!file) throw new Error(`Missing path in SHA256SUMS line: ${rawLine}`);
+    rows.push({ hash, file });
+  }
+  return rows;
+}
+
+function manifestTarget(baseDir, listedPath) {
+  const target = resolve(isAbsolute(listedPath) ? listedPath : join(baseDir, listedPath));
+  const rel = relative(resolve(baseDir), target);
+  if (rel === "" || rel === ".") throw new Error("Checksum manifest points to the backup directory itself");
+  if (rel.startsWith("..") || isAbsolute(rel)) throw new Error(`Checksum path escapes backup directory: ${listedPath}`);
+  return target;
+}
+
+async function collectBackupFiles(directory, { exclude = new Set() } = {}) {
+  const files = [];
+  async function walk(current) {
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const path = join(current, entry.name);
+      if (entry.isSymbolicLink()) throw new Error(`Symbolic links are not allowed in backup verification: ${path}`);
+      if (entry.isDirectory()) await walk(path);
+      else if (entry.isFile() && !exclude.has(resolve(path))) files.push(resolve(path));
+    }
+  }
+  await walk(directory);
+  return files.sort();
+}
+
+async function verifyPostgresChecksum(dumpPath, checksumPath) {
+  const rows = parseSha256Lines(await readFile(checksumPath, "utf8"));
+  if (rows.length !== 1) throw new Error(`Expected one PostgreSQL checksum entry, found ${rows.length}`);
+  const listed = manifestTarget(resolve(dumpPath, ".."), rows[0].file);
+  if (listed !== resolve(dumpPath)) throw new Error("PostgreSQL checksum manifest does not reference the selected dump");
+  const actual = await sha256File(dumpPath);
+  if (actual !== rows[0].hash) throw new Error("PostgreSQL backup checksum mismatch");
+  return { ok: true, path: checksumPath, filesVerified: 1 };
+}
+
+async function verifyObjectChecksums(directory, checksumPath) {
+  const rows = parseSha256Lines(await readFile(checksumPath, "utf8"));
+  const expected = new Map();
+  for (const row of rows) {
+    const target = manifestTarget(directory, row.file);
+    if (expected.has(target)) throw new Error(`Duplicate checksum entry: ${row.file}`);
+    expected.set(target, row.hash);
+  }
+  const actualFiles = await collectBackupFiles(directory, { exclude: new Set([resolve(checksumPath)]) });
+  if (actualFiles.length !== expected.size) {
+    throw new Error(`Object backup manifest count mismatch: manifest=${expected.size} files=${actualFiles.length}`);
+  }
+  for (const path of actualFiles) {
+    const expectedHash = expected.get(path);
+    if (!expectedHash) throw new Error(`Object backup file missing from checksum manifest: ${relative(directory, path)}`);
+    const actualHash = await sha256File(path);
+    if (actualHash !== expectedHash) throw new Error(`Object backup checksum mismatch: ${relative(directory, path)}`);
+  }
+  return { ok: true, path: checksumPath, filesVerified: actualFiles.length };
+}
+
 export async function assessBackupFreshness({ root, maxAgeHours = 26, now = Date.now() } = {}) {
   if (!root) return { ok: false, error: "BACKUP_ROOT_NOT_CONFIGURED" };
   const maxAgeMs = Math.max(1, Number(maxAgeHours) || 26) * 3600_000;
@@ -147,13 +228,19 @@ export async function assessBackupFreshness({ root, maxAgeHours = 26, now = Date
     }
     if (postgres) {
       const checksumPath = `${postgres.path}.sha256`;
-      try { await readFile(checksumPath, "utf8"); checks.push({ name: "postgres-checksum", ok: true, path: checksumPath }); }
-      catch { checks.push({ name: "postgres-checksum", ok: false, error: "MISSING_CHECKSUM", path: checksumPath }); }
+      try {
+        checks.push({ name: "postgres-checksum", ...(await verifyPostgresChecksum(postgres.path, checksumPath)) });
+      } catch (error) {
+        checks.push({ name: "postgres-checksum", ok: false, error: error instanceof Error ? error.message : String(error), path: checksumPath });
+      }
     }
     if (objects) {
       const checksumPath = join(objects.path, "SHA256SUMS");
-      try { await readFile(checksumPath, "utf8"); checks.push({ name: "objects-checksum", ok: true, path: checksumPath }); }
-      catch { checks.push({ name: "objects-checksum", ok: false, error: "MISSING_CHECKSUM", path: checksumPath }); }
+      try {
+        checks.push({ name: "objects-checksum", ...(await verifyObjectChecksums(objects.path, checksumPath)) });
+      } catch (error) {
+        checks.push({ name: "objects-checksum", ok: false, error: error instanceof Error ? error.message : String(error), path: checksumPath });
+      }
     }
     return { ok: checks.every((check) => check.ok), root, maxAgeHours, checks };
   } catch (error) {
