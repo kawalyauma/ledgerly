@@ -111,10 +111,11 @@ export function registerCoreTools(gateway, services = {}) {
   read("get_staff", ["staff:read"], services.getStaff ?? unavailable("get_staff"));
   read("get_school_profile", ["school:read"], services.getSchoolProfile ?? unavailable("get_school_profile"));
   read("get_academic_context", ["academics:read"], services.getAcademicContext ?? unavailable("get_academic_context"));
-  read("get_lesson_plan", ["academics:read"], services.getLessonPlan ?? unavailable("get_lesson_plan"));
-  draft("create_lesson_plan_draft", ["academics:write"], services.createLessonPlanDraft ?? unavailable("create_lesson_plan_draft"));
-  draft("update_document_draft", ["documents:write"], services.updateDocumentDraft ?? unavailable("update_document_draft"));
-  draft("record_academic_review", ["academics:read"], services.recordAcademicReview ?? unavailable("record_academic_review"));
+  read("get_lesson_plan", ["academics:read", "documents:read"], services.getLessonPlan ?? unavailable("get_lesson_plan"));
+  draft("create_document_draft", ["documents:read", "documents:write"], services.createDocumentDraft ?? unavailable("create_document_draft"));
+  draft("create_lesson_plan_draft", ["academics:read", "academics:write", "documents:read", "documents:write"], services.createLessonPlanDraft ?? unavailable("create_lesson_plan_draft"));
+  draft("update_document_draft", ["documents:read", "documents:write"], services.updateDocumentDraft ?? unavailable("update_document_draft"));
+  draft("record_academic_review", ["academics:read", "documents:read"], services.recordAcademicReview ?? unavailable("record_academic_review"));
   read("get_student_balance", ["fees:read"], services.getStudentBalance ?? unavailable("get_student_balance"));
   read("get_finance_summary", ["finance:read"], services.getFinanceSummary ?? unavailable("get_finance_summary"));
   draft("prepare_fee_reminder", ["fees:read"], services.prepareFeeReminder ?? unavailable("prepare_fee_reminder"));
