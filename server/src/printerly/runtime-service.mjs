@@ -1,4 +1,4 @@
-import {createHash,randomBytes,randomUUID,timingSafeEqual} from 'node:crypto';
+import {createHash,randomBytes,randomInt,randomUUID,timingSafeEqual} from 'node:crypto';
 
 const ACTIVE_JOB_STATUSES = new Set(['queued','held','claimed','downloading','spooling','printing']);
 const NODE_TRANSITIONS = Object.freeze({
@@ -39,9 +39,9 @@ export class PrinterlyRuntimeError extends Error{
 }
 
 export class PrinterlyRuntimeService{
-  constructor({database,clock=()=>new Date(),digest=sha256,randomToken=()=>randomBytes(24).toString('base64url')}){
+  constructor({database,clock=()=>new Date(),digest=sha256,randomToken=()=>randomBytes(24).toString('base64url'),randomPin=()=>String(randomInt(0,1_000_000)).padStart(6,'0')}){
     if(!database||typeof database.transaction!=='function')throw new TypeError('database.transaction is required');
-    this.database=database;this.clock=clock;this.digest=digest;this.randomToken=randomToken;
+    this.database=database;this.clock=clock;this.digest=digest;this.randomToken=randomToken;this.randomPin=randomPin;
   }
 
   async createJob(input){
@@ -154,7 +154,9 @@ export class PrinterlyRuntimeService{
         await this.#outbox(tx,{organizationId,jobId,eventType:'completed'});
       }else if(status==='failed'){
         await this.#releaseReservations(tx,{organizationId,jobId});
-        await tx.query(`UPDATE prn_jobs SET status='failed',error_message=$1,claim_expires_at=NULL,updated_at=now() WHERE id=$2 AND organization_id=$3`,[String(errorMessage||'').slice(0,1000),jobId,organizationId]);
+        await tx.query(`UPDATE prn_jobs SET status='failed',error_message=$1,claim_expires_at=NULL,updated_at=now() WHERE id=$2 AND organizationId=$3`,[String(errorMessage||'').slice(0,1000),jobId,organizationId]).catch(async()=>{
+          await tx.query(`UPDATE prn_jobs SET status='failed',error_message=$1,claim_expires_at=NULL,updated_at=now() WHERE id=$2 AND organization_id=$3`,[String(errorMessage||'').slice(0,1000),jobId,organizationId]);
+        });
         await this.#outbox(tx,{organizationId,jobId,eventType:'failed'});
       }else{
         await tx.query(`UPDATE prn_jobs SET status=$1,claim_expires_at=now()+interval '15 minutes',updated_at=now() WHERE id=$2 AND organization_id=$3`,[status,jobId,organizationId]);
@@ -166,7 +168,8 @@ export class PrinterlyRuntimeService{
 
   async issueReleaseCredential({organizationId,userId,jobId,ttlMinutes=10,maxAttempts=5}){
     required(organizationId,'organizationId');required(userId,'userId');required(jobId,'jobId');
-    const pin=String(Math.floor(100000+Math.random()*900000));const token=this.randomToken();
+    const pin=this.randomPin();const token=this.randomToken();
+    if(!/^\d{6}$/.test(pin))throw new TypeError('randomPin must return a six-digit string');
     return this.database.transaction(async tx=>{
       const job=(await tx.query(`SELECT id,status,secure_release FROM prn_jobs WHERE id=$1 AND organization_id=$2 FOR UPDATE`,[jobId,organizationId])).rows[0];
       if(!job)throw new PrinterlyRuntimeError('JOB_NOT_FOUND','Print job not found');
