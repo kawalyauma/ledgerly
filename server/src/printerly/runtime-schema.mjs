@@ -14,10 +14,14 @@ export async function ensurePrinterlyRuntimeSchema(database) {
       updated_at timestamptz NOT NULL DEFAULT now(),
       UNIQUE(organization_id,job_id,event_type)
     );
+    ALTER TABLE prn_jobs ADD COLUMN IF NOT EXISTS idempotency_key text;
     CREATE INDEX IF NOT EXISTS prn_dispatch_outbox_pending_idx
       ON prn_dispatch_outbox(status,available_at,created_at);
     CREATE INDEX IF NOT EXISTS prn_dispatch_outbox_org_idx
       ON prn_dispatch_outbox(organization_id,status,created_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS prn_jobs_selfhost_idempotency_idx
+      ON prn_jobs(organization_id,idempotency_key)
+      WHERE idempotency_key IS NOT NULL;
     CREATE UNIQUE INDEX IF NOT EXISTS prn_jobs_selfhost_request_idx
       ON prn_jobs(organization_id,source_reference)
       WHERE source_module='selfhost-api' AND source_reference IS NOT NULL;
