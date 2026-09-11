@@ -111,7 +111,7 @@ export class AiWorkforceStore {
   }
 
   capabilities() {
-    return Object.freeze({ vectorSearch:this.vectorEnabled, embeddingDimensions:this.embeddingDimensions, fullTextSearch:true, permissionScopedKnowledge:true });
+    return Object.freeze({ vectorSearch:this.vectorEnabled, embeddingDimensions:this.embeddingDimensions, fullTextSearch:true, permissionScopedKnowledge:true, permissionScopedDocuments:true, permissionScopedMemory:true });
   }
 
   async #ensureVector() {
@@ -160,11 +160,11 @@ export class AiWorkforceStore {
 
 function defaultTools(key) {
   const map = {
-    secretary:["get_school_profile","update_document_draft","create_task","send_notification","generate_report","request_approval"],
+    secretary:["get_school_profile","create_document_draft","update_document_draft","create_task","send_notification","generate_report","request_approval"],
     academic_assistant:["get_school_profile","get_staff","get_academic_context","get_lesson_plan","create_lesson_plan_draft","update_document_draft","create_task","generate_report","request_approval"],
     academic_reviewer:["get_school_profile","get_academic_context","get_lesson_plan","record_academic_review","update_document_draft","create_task","generate_report","request_approval"],
     finance_assistant:["get_student","get_student_balance","get_finance_summary","prepare_fee_reminder","generate_report","request_approval"],
-    hr_assistant:["get_staff","get_school_profile","update_document_draft","create_task","generate_report","request_approval"],
+    hr_assistant:["get_staff","get_school_profile","create_document_draft","update_document_draft","create_task","generate_report","request_approval"],
     reception_assistant:["search_students","get_student","get_staff","get_school_profile","create_task","send_notification"],
     inventory_assistant:["generate_report","create_task","request_approval"],
     support_assistant:["generate_report","create_task","request_approval"]
@@ -173,12 +173,13 @@ function defaultTools(key) {
 }
 function defaultPermissions(key) {
   const knowledge=["ai:knowledge:read"];
+  const documents=["documents:read","documents:write"];
   const map = {
-    secretary:["school:read","documents:write","tasks:write","reports:read","approvals:write","notifications:send",...knowledge],
-    academic_assistant:["school:read","staff:read","academics:read","academics:write","documents:write","tasks:write","reports:read","approvals:write",...knowledge],
-    academic_reviewer:["school:read","academics:read","documents:write","tasks:write","reports:read","approvals:write",...knowledge],
+    secretary:["school:read",...documents,"tasks:write","reports:read","approvals:write","notifications:send",...knowledge],
+    academic_assistant:["school:read","staff:read","academics:read","academics:write",...documents,"tasks:write","reports:read","approvals:write",...knowledge],
+    academic_reviewer:["school:read","academics:read",...documents,"tasks:write","reports:read","approvals:write",...knowledge],
     finance_assistant:["students:read","fees:read","finance:read","reports:read","approvals:write",...knowledge],
-    hr_assistant:["staff:read","school:read","documents:write","tasks:write","reports:read","approvals:write",...knowledge],
+    hr_assistant:["staff:read","school:read",...documents,"tasks:write","reports:read","approvals:write",...knowledge],
     reception_assistant:["students:read","staff:read","school:read","tasks:write","notifications:send",...knowledge],
     inventory_assistant:["inventory:read","reports:read","tasks:write","approvals:write",...knowledge],
     support_assistant:["support:read","reports:read","tasks:write","approvals:write",...knowledge]
