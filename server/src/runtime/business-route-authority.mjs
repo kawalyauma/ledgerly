@@ -5,15 +5,53 @@ export const BUSINESS_ROUTE_AUTHORITY_POLICY=Object.freeze({
   'printerly-jobs':Object.freeze({capability:'printerly.jobs'}),
   'printerly-documents':Object.freeze({capability:'printerly.jobs'}),
   'printerly-approvals':Object.freeze({capability:'printerly.jobs'}),
+  'printerly-scannerly':Object.freeze({capability:'printerly.scanner'}),
+  'printerly-scanners':Object.freeze({capability:'printerly.scanner'}),
+  'printerly-scans':Object.freeze({capability:'printerly.scanner'}),
+  'printerly-core':Object.freeze({capability:'printerly.core'}),
+  'printerly-costing':Object.freeze({capability:'printerly.core'}),
+  'printerly-nodes-admin':Object.freeze({capability:'printerly.core'}),
+  'printerly-overview':Object.freeze({capability:'printerly.core'}),
+  'printerly-printers-admin':Object.freeze({capability:'printerly.core'}),
+  'printerly-reports':Object.freeze({capability:'printerly.core'}),
+  'printerly-alerts':Object.freeze({capability:'printerly.alerts'}),
+  'printerly-quotas':Object.freeze({capability:'printerly.governance'}),
+  'printerly-rules':Object.freeze({capability:'printerly.governance'}),
+  'printerly-batches-admin':Object.freeze({capability:'printerly.batch'}),
+  'printerly-pools':Object.freeze({capability:'printerly.routing'}),
+  'printerly-release-admin':Object.freeze({capability:'printerly.release'}),
+  'printerly-retention':Object.freeze({capability:'printerly.retention'}),
+  'printerly-supplies':Object.freeze({capability:'printerly.supplies'}),
+  'printerly-procurement':Object.freeze({capability:'printerly.procurement'}),
+  'printerly-service-desk':Object.freeze({capability:'printerly.service-desk'}),
+  'printerly-audit':Object.freeze({capability:'printerly.audit'}),
+  'printerly-audit-csv':Object.freeze({capability:'printerly.audit'}),
 });
 
 function normalizeMode(value){return String(value??'cloudflare').trim().toLowerCase();}
+function combineModes(...values){const modes=values.map(normalizeMode);if(modes.includes('node'))return'node';if(modes.includes('shadow'))return'shadow';return'cloudflare';}
 
 export function createHttpCutoverCapabilities(config,overrides={}){
   const printerly=config?.extensions?.printerly??{};
+  const fallback=normalizeMode(printerly.cutover);
+  const surface=(value)=>normalizeMode(value??fallback);
+  const core=surface(printerly.coreCutover);
+  const governance=surface(printerly.governanceCutover);
   return createCutoverCapabilities({
-    'printerly.nodes':normalizeMode(printerly.cutover),
+    'printerly.nodes':surface(printerly.nodeCutover),
     'printerly.jobs':normalizeMode(printerly.jobCutover),
+    'printerly.scanner':surface(printerly.scannerCutover),
+    'printerly.core':core,
+    'printerly.governance':governance,
+    'printerly.batch':surface(printerly.batchCutover),
+    'printerly.routing':surface(printerly.routingCutover),
+    'printerly.release':surface(printerly.releaseCutover),
+    'printerly.retention':surface(printerly.retentionCutover),
+    'printerly.supplies':surface(printerly.suppliesCutover),
+    'printerly.procurement':surface(printerly.procurementCutover),
+    'printerly.service-desk':surface(printerly.serviceDeskCutover),
+    'printerly.audit':surface(printerly.auditCutover),
+    'printerly.alerts':combineModes(core,governance),
     ...overrides,
   });
 }
