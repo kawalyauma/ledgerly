@@ -6,9 +6,9 @@ export class AiScheduleService {
     const record=await this.scheduler.register({
       id,name,organizationId:context.organizationId,kind:"ai.task",
       cron,timezone,enabled,
-      payload:{ aiScheduled:true, assignedAgent:agentId, instruction, priority },
+      payload:{ aiScheduled:true, assignedAgent:agentId, instruction, priority, requestedBy:context.userId, scheduleId:id },
     });
-    await this.audit?.write?.({ organization_id:context.organizationId,actor_type:"human",actor_id:context.userId,action:"ai.schedule.registered",entity_type:"ai_schedule",entity_id:id,reason:instruction,metadata:{agent_id:agentId,cron,timezone} });
+    await this.audit?.write?.({ organization_id:context.organizationId,actor_type:"human",actor_id:context.userId,action:"ai.schedule.registered",entity_type:"ai_schedule",entity_id:id,reason:instruction,metadata:{agent_id:agentId,cron,timezone,requested_by:context.userId} });
     return record;
   }
 

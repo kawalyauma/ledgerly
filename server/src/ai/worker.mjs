@@ -1,4 +1,5 @@
 import { DEFAULT_LIMITS } from "./constants.mjs";
+import { aiAttribution } from "./provenance.mjs";
 
 function safeJson(value) { try { return JSON.stringify(value); } catch { return "{}"; } }
 function truncate(value, max) { const text=String(value??""); return text.length>max ? `${text.slice(0,max)}\n[truncated]` : text; }
@@ -7,10 +8,10 @@ export class AiWorker {
   #running=0;
   #lastSuccessAt=null;
   #durations=[];
-  constructor({ database, queue, agents, taskService, gateway, providerRegistry, providerConfig, knowledge=null, memory=null, audit, limits=DEFAULT_LIMITS, logger=console }) {
+  constructor({ database, queue, agents, taskService, gateway, providerRegistry, providerConfig, knowledge=null, memory=null, audit, authorization=null, limits=DEFAULT_LIMITS, logger=console }) {
     this.database=database; this.queue=queue; this.agents=agents; this.taskService=taskService; this.gateway=gateway;
     this.providerRegistry=providerRegistry; this.providerConfig=providerConfig; this.knowledge=knowledge; this.memory=memory; this.audit=audit;
-    this.limits={...DEFAULT_LIMITS,...limits}; this.logger=logger; this.stopped=true; this.timer=null;
+    this.authorization=authorization; this.limits={...DEFAULT_LIMITS,...limits}; this.logger=logger; this.stopped=true; this.timer=null;
   }
 
   status() {
@@ -37,14 +38,14 @@ export class AiWorker {
       return {completed:true,jobId:item.job.jobId};
     } catch (error) {
       const taskId=item.job.payload?.taskId??item.job.jobId;
-      const retryable=!(["AI_AGENT_DISABLED","AI_TOOL_NOT_ALLOWED","AI_PERMISSION_DENIED","AI_ACTION_PROHIBITED"].includes(error?.code));
+      const nonRetryable=["AI_AGENT_DISABLED","AI_TOOL_NOT_ALLOWED","AI_PERMISSION_DENIED","AI_ACTION_PROHIBITED","BACKGROUND_ACTOR_REVOKED","BACKGROUND_ACTOR_BLOCKED"].includes(error?.code);
       if (!item.job.payload?.aiScheduled) {
-        await this.taskService.setStatus({organizationId:item.job.organizationId,taskId,status:retryable?"queued":"failed",error:error instanceof Error?error.message:String(error)}).catch(()=>undefined);
+        await this.taskService.setStatus({organizationId:item.job.organizationId,taskId,status:nonRetryable?"failed":"queued",error:error instanceof Error?error.message:String(error)}).catch(()=>undefined);
       }
-      if (retryable) await this.queue.retry(item.receipt,{reason:error instanceof Error?error.message:String(error)});
-      else await this.queue.deadLetter(item.receipt,{reason:error?.code??"policy_failure"});
+      if (nonRetryable) await this.queue.deadLetter(item.receipt,{reason:error?.code??"policy_failure"});
+      else await this.queue.retry(item.receipt,{reason:error instanceof Error?error.message:String(error)});
       this.logger.error(JSON.stringify({level:"error",component:"ai-worker",taskId,message:error instanceof Error?error.message:String(error),code:error?.code}));
-      return {failed:true,retryable,error:error instanceof Error?error.message:String(error)};
+      return {failed:true,retryable:!nonRetryable,error:error instanceof Error?error.message:String(error)};
     } finally {
       const duration=Date.now()-started; this.#durations.push(duration); if (this.#durations.length>100) this.#durations.shift(); this.#running--;
     }
@@ -52,7 +53,9 @@ export class AiWorker {
 
   async materializeScheduledTask(job) {
     const payload=job.payload;
-    const context={organizationId:job.organizationId,userId:"scheduler",userName:"Ledgerly Scheduler"};
+    if (!payload.requestedBy) { const error=new Error("Scheduled AI task has no authorizing actor"); error.code="BACKGROUND_ACTOR_REVOKED"; throw error; }
+    await this.#resolveAuthority(job.organizationId,payload.requestedBy);
+    const context={organizationId:job.organizationId,userId:payload.requestedBy,userName:payload.requestedBy};
     return this.taskService.create({
       context,
       assignedAgent:payload.assignedAgent,
@@ -63,6 +66,11 @@ export class AiWorker {
     });
   }
 
+  async #resolveAuthority(organizationId, actorId) {
+    if (!this.authorization?.resolveCurrentActorAccess) return { userId:actorId, organizationId, effectiveScopes:["*"] };
+    return this.authorization.resolveCurrentActorAccess({organizationId,actorId});
+  }
+
   async execute(job) {
     const org=job.organizationId;
     const taskId=job.payload?.taskId??job.jobId;
@@ -71,13 +79,19 @@ export class AiWorker {
     const agent=await this.agents.get({organizationId:org},task.assigned_agent);
     if (!agent) throw new Error("Assigned AI agent not found");
     if (agent.status==="disabled") { const error=new Error("AI agent is disabled"); error.code="AI_AGENT_DISABLED"; throw error; }
+    const authority=await this.#resolveAuthority(org,task.requested_by);
+    const authorityScopes=authority.effectiveScopes??authority.scopes??[];
+    const permissions=this.authorization?.intersectPermissions
+      ? this.authorization.intersectPermissions(authorityScopes,agent.permissions??[])
+      : agent.permissions??[];
     await this.taskService.setStatus({organizationId:org,taskId,status:"working",agent});
 
-    const provider=this.providerRegistry.create(agent.provider??"ollama",{...this.providerConfig,model:agent.model??this.providerConfig.model});
+    const provider=this.providerRegistry.create(agent.provider??this.providerConfig.provider??"ollama",{...this.providerConfig,model:agent.model??this.providerConfig.model});
     const health=await provider.health();
     if (!health.ok) { const error=new Error(health.error??`AI runtime unavailable: ${health.state}`); error.code=health.code??(health.modelInstalled===false?"AI_MODEL_NOT_INSTALLED":"AI_RUNTIME_OFFLINE"); throw error; }
 
-    const context={organizationId:org,permissions:agent.permissions??[],reason:task.instruction};
+    const attribution=aiAttribution({agent,taskId,reason:task.instruction});
+    const context={organizationId:org,userId:task.requested_by,permissions,reason:task.instruction,authority,provenance:attribution};
     const memories=this.memory ? await this.memory.list({context:{organizationId:org},agentId:agent.agentId,type:"durable"}) : [];
     const sources=this.knowledge && (agent.knowledgeSources?.length) ? await this.knowledge.retrieve({context:{organizationId:org},query:task.instruction,sourceIds:agent.knowledgeSources,limit:8}) : [];
     const messages=[
@@ -86,7 +100,7 @@ export class AiWorker {
       {role:"system",content:truncate(`Permitted knowledge excerpts with source references: ${safeJson(sources.map((s)=>({source_id:s.source_id,chunk_id:s.chunk_id,content:s.content})))}`,16000)},
       {role:"user",content:truncate(task.instruction,this.limits.maxPromptChars)},
     ];
-    const tools=this.gateway.describeForAgent(agent).map((tool)=>({type:"function",function:{name:tool.name,description:tool.description??tool.name,parameters:tool.parameters??{type:"object",additionalProperties:true}}}));
+    const tools=this.gateway.describeForAgent({...agent,permissions}).map((tool)=>({type:"function",function:{name:tool.name,description:tool.description??tool.name,parameters:tool.parameters??{type:"object",additionalProperties:true}}}));
     let toolCalls=0;
     for (;;) {
       const result=await withDeadline(()=>provider.generate({messages,tools,maxTokens:Math.ceil(this.limits.maxOutputChars/4)}),this.limits.taskTimeoutMs);
@@ -96,7 +110,7 @@ export class AiWorker {
         const text=truncate(message.content??"",this.limits.maxOutputChars);
         const refs=sources.map((s)=>({type:"knowledge",sourceId:s.source_id,chunkId:s.chunk_id}));
         await this.taskService.setStatus({organizationId:org,taskId,status:"completed",agent,outputReferences:[...refs,{type:"text",content:text,provider:result.provider,model:result.model}]});
-        await this.audit?.write?.({organization_id:org,actor_type:"ai_agent",actor_id:agent.agentId,agent_id:agent.agentId,agent_name:agent.name,agent_role:agent.role,action:"ai.task.inference_completed",entity_type:"ai_task",entity_id:taskId,reason:task.instruction,metadata:{provider:result.provider,model:result.model,tool_calls:toolCalls,source_refs:refs}});
+        await this.audit?.write?.({organization_id:org,actor_type:"ai_agent",actor_id:agent.agentId,agent_id:agent.agentId,agent_name:agent.name,agent_role:agent.role,action:"ai.task.inference_completed",entity_type:"ai_task",entity_id:taskId,reason:task.instruction,metadata:{provider:result.provider,model:result.model,tool_calls:toolCalls,source_refs:refs,authorized_by:task.requested_by}});
         return {text,refs};
       }
       toolCalls+=calls.length;
@@ -104,8 +118,9 @@ export class AiWorker {
       messages.push({role:"assistant",content:message.content??"",tool_calls:calls});
       for (const call of calls) {
         const name=call.function?.name; let input={};
-        try { input=typeof call.function?.arguments==="string"?JSON.parse(call.function.arguments||"{}"):call.function?.arguments??{}; } catch { throw new Error(`Invalid tool arguments from model for ${name}`); }
-        const output=await this.gateway.invoke({agent,context,taskId,toolName:name,input});
+        try { input=typeof call.function?.arguments==="string"?JSON.parse(call.function.arguments||"{}"):call.function?.arguments??{}; } catch { const error=new Error(`Invalid tool arguments from model for ${name}`); error.code="AI_TOOL_ARGUMENTS_INVALID"; throw error; }
+        const effectiveAgent={...agent,permissions};
+        const output=await this.gateway.invoke({agent:effectiveAgent,context,taskId,toolName:name,input});
         messages.push({role:"tool",tool_name:name,content:truncate(safeJson(output),12000)});
         if (output.status==="waiting_for_approval") {
           await this.taskService.setStatus({organizationId:org,taskId,status:"waiting_for_approval",agent,outputReferences:[{type:"approval",id:output.approval?.approval_id??null}]});

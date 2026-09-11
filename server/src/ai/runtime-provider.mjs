@@ -15,6 +15,7 @@ export class AiModelProvider {
   async health() { throw new Error("health() not implemented"); }
   async listModels() { throw new Error("listModels() not implemented"); }
   async generate() { throw new Error("generate() not implemented"); }
+  async embed() { throw new AiRuntimeError("AI_EMBEDDINGS_UNSUPPORTED", `Provider ${this.id} does not support embeddings`); }
   describe() { return { id:this.id, endpoint:this.endpoint, model:this.model, timeoutMs:this.timeoutMs, contextLimit:this.contextLimit, temperature:this.temperature, toolSupport:this.toolSupport }; }
 }
 

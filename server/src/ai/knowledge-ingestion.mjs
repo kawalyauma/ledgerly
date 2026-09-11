@@ -1,26 +1,29 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
 
-const TEXT_TYPES=new Set(["text/plain","text/markdown","text/csv","application/json","application/xml","text/xml"]);
+const TEXT_TYPES=new Set(["text/plain","text/markdown","text/csv","application/json","application/xml","text/xml","text/html"]);
 const TEXT_EXTENSIONS=new Set(["txt","md","markdown","csv","json","xml","html","htm"]);
 
 export class AiKnowledgeIngestionService{
-  constructor({knowledge,storage,audit,pdfExtractor=extractPdfLocally,maxBytes=25*1024*1024,chunkChars=3200,overlapChars=400}){
-    this.knowledge=knowledge;this.storage=storage;this.audit=audit;this.pdfExtractor=pdfExtractor;this.maxBytes=maxBytes;this.chunkChars=chunkChars;this.overlapChars=overlapChars;
+  constructor({knowledge,storage=null,storageForContext=null,audit,pdfExtractor=extractPdfLocally,maxBytes=25*1024*1024,chunkChars=3200,overlapChars=400}){
+    this.knowledge=knowledge;this.storage=storage;this.storageForContext=storageForContext;this.audit=audit;this.pdfExtractor=pdfExtractor;this.maxBytes=maxBytes;this.chunkChars=chunkChars;this.overlapChars=overlapChars;
   }
 
+  #storage(context){const resolved=this.storageForContext?.(context)??this.storage;if(!resolved)throw new Error("Tenant-scoped knowledge storage is unavailable");return resolved;}
+
   async ingestStored({context,name,sourceType="uploaded_document",storageRef,contentType=null,metadata={}}){
+    if(!context?.organizationId)throw new Error("organization context required");
     if(!storageRef)throw new Error("storageRef is required");
-    const head=await this.storage.head(storageRef);if(!head)throw new Error("knowledge source object not found");
+    const storage=this.#storage(context);
+    const head=await storage.head(storageRef);if(!head)throw new Error("knowledge source object not found");
     if(Number(head.size)>this.maxBytes){const error=new Error(`Knowledge source exceeds ${this.maxBytes} byte limit`);error.code="AI_KNOWLEDGE_FILE_TOO_LARGE";throw error;}
-    const bytes=await this.storage.get(storageRef);
+    const bytes=await storage.get(storageRef);
     const detected=contentType||head.metadata?.["content-type"]||head.metadata?.contentType||inferContentType(storageRef);
     const text=await extractText({bytes,contentType:detected,storageRef,pdfExtractor:this.pdfExtractor});
     const normalized=normalizeText(text);if(!normalized){const error=new Error("No extractable text found in knowledge source");error.code="AI_KNOWLEDGE_EMPTY";throw error;}
     const chunks=chunkText(normalized,{chunkChars:this.chunkChars,overlapChars:this.overlapChars}).map((content,index)=>({content,tokenCount:estimateTokens(content),metadata:{source_name:name,storage_ref:storageRef,content_type:detected,chunk:index}}));
     const source=await this.knowledge.createSource({context,name,sourceType,storageRef,metadata:{...metadata,contentType:detected,size:Number(head.size),extraction:"local"}});
     const indexed=await this.knowledge.indexChunks({context,sourceId:source.source_id,chunks});
-    await this.audit?.write?.({organization_id:context.organizationId,actor_type:"human",actor_id:context.userId,action:"ai.knowledge.ingested",entity_type:"ai_knowledge_source",entity_id:source.source_id,metadata:{storage_ref:storageRef,chunks:chunks.length,bytes:Number(head.size),content_type:detected}});
+    await this.audit?.write?.({organization_id:context.organizationId,actor_type:"human",actor_id:context.userId,action:"ai.knowledge.ingested",entity_type:"ai_knowledge_source",entity_id:source.source_id,metadata:{storage_ref:storageRef,chunks:chunks.length,bytes:Number(head.size),content_type:detected,tenant_scoped:true}});
     return {source:{...source,status:"indexed"},chunks:chunks.length,indexed};
   }
 }
@@ -59,4 +62,4 @@ export function extractPdfLocally(bytes){
 }
 function normalizeText(value){return String(value??"").replace(/\r\n?/g,"\n").replace(/[ \t]+\n/g,"\n").replace(/\n{3,}/g,"\n\n").trim();}
 function estimateTokens(value){return Math.ceil(String(value).length/4);}
-function inferContentType(key){const ext=String(key).split(".").pop()?.toLowerCase();if(ext==="pdf")return"application/pdf";if(ext==="json")return"application/json";if(ext==="csv")return"text/csv";if(ext==="md"||ext==="markdown")return"text/markdown";if(ext==="xml")return"application/xml";return"text/plain";}
+function inferContentType(key){const ext=String(key).split(".").pop()?.toLowerCase();if(ext==="pdf")return"application/pdf";if(ext==="json")return"application/json";if(ext==="csv")return"text/csv";if(ext==="md"||ext==="markdown")return"text/markdown";if(ext==="xml")return"application/xml";if(ext==="html"||ext==="htm")return"text/html";return"text/plain";}
