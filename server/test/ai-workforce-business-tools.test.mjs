@@ -15,6 +15,23 @@ test("student search is parameterized and tenant scoped",async()=>{
  assert.equal(query.values[2],"%A\\%\\_%");
 });
 
+test("academic context restricts subjects through migrated class mappings and tenant scope",async()=>{
+ const calls=[];
+ const database={query:async(sql,values=[])=>{const q=String(sql);calls.push({sql:q,values});if(q.startsWith("SELECT to_regclass"))return {rows:[{relation:values[0]}]};if(q.includes("JOIN school_class_subjects"))return {rows:[{id:"sub-math",name:"Mathematics"}]};if(q.includes("FROM school_classes")&&!q.includes("JOIN"))return {rows:[{id:"class-p3",class_level_id:"level-p3",academic_year_id:"year-2026"}]};return {rows:[]};}};
+ const tools=createLedgerlyBusinessTools({database});
+ const out=await tools.getAcademicContext({input:{academicYearId:"year-2026",termId:"term-2",classId:"class-p3",subjectId:"sub-math",weekNo:6},context:{organizationId:"org-school"}});
+ assert.equal(out.filters.classId,"class-p3");
+ assert.equal(out.filters.weekNo,6);
+ assert.equal(out.subjects[0].id,"sub-math");
+ const mapped=calls.find((call)=>call.sql.includes("JOIN school_class_subjects"));
+ assert.ok(mapped);
+ assert.equal(mapped.values[0],"org-school");
+ assert.equal(mapped.values[1],"class-p3");
+ assert.equal(mapped.values[2],"sub-math");
+ assert.match(mapped.sql,/cs\.organization_id=c\.organization_id/);
+ assert.match(mapped.sql,/c\.organization_id=\$1/);
+});
+
 test("finance summary reads posted journals only and remains tenant scoped",async()=>{
  const calls=[];
  const database={query:async(sql,values)=>{calls.push({sql,values});if(String(sql).startsWith("SELECT to_regclass"))return {rows:[{relation:"journal_entries"}]};return {rows:[{debit_minor:100,credit_minor:100,posted_journals:1}]};}};
