@@ -122,16 +122,6 @@ export class AiWorkforceStore {
   }
 
   async #ensureKnowledgeChunks() {
-    if (this.vectorEnabled) {
-      await this.database.query(`
-        CREATE TABLE IF NOT EXISTS ledgerly_ai.knowledge_chunks (
-          chunk_id uuid PRIMARY KEY, organization_id text NOT NULL, source_id uuid NOT NULL,
-          chunk_index integer NOT NULL, content text NOT NULL, token_count integer,
-          embedding vector(${this.embeddingDimensions}), metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-          created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(source_id, chunk_index)
-        )`);
-      return;
-    }
     await this.database.query(`
       CREATE TABLE IF NOT EXISTS ledgerly_ai.knowledge_chunks (
         chunk_id uuid PRIMARY KEY, organization_id text NOT NULL, source_id uuid NOT NULL,
@@ -139,6 +129,10 @@ export class AiWorkforceStore {
         embedding_json jsonb, metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
         created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(source_id, chunk_index)
       )`);
+    await this.database.query(`ALTER TABLE ledgerly_ai.knowledge_chunks ADD COLUMN IF NOT EXISTS embedding_json jsonb`);
+    if (this.vectorEnabled) {
+      await this.database.query(`ALTER TABLE ledgerly_ai.knowledge_chunks ADD COLUMN IF NOT EXISTS embedding vector(${this.embeddingDimensions})`);
+    }
   }
 
   async seedTemplates(organizationId, makeId) {
