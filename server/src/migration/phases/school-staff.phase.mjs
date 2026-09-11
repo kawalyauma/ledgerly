@@ -6,7 +6,7 @@ import { SCHOOL_STAFF_RELATIONSHIP_CHECKS } from "../school-data-validators.mjs"
 export default {
   name: "school-staff",
   description: "Staff and teacher identity, positions, qualifications, files and teaching assignments without payroll postings",
-  prerequisites: ["auth-core", "school-reference", "school-configuration"],
+  prerequisites: ["auth-core", "school-reference", "school-configuration", "contacts"],
   tables: SCHOOL_STAFF_TABLES,
   ensureSchema: async (database) => {
     await configuration.ensureSchema(database);

@@ -6,7 +6,7 @@ import { BOOKS_RELATIONSHIP_CHECKS } from "../books-validators.mjs";
 export default {
   name: "books",
   description: "School exercise-book stock, learner distribution and offline operation intents",
-  prerequisites: ["auth-core", "school-reference", "school-configuration", "school-people"],
+  prerequisites: ["auth-core", "school-reference", "school-configuration", "contacts", "mobile-sync-core", "school-people"],
   tables: BOOKS_TABLES,
   ensureSchema: async (database) => {
     await people.ensureSchema(database);

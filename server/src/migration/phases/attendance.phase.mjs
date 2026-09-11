@@ -7,7 +7,7 @@ import { ATTENDANCE_RELATIONSHIP_CHECKS } from "../attendance-validators.mjs";
 export default {
   name: "attendance",
   description: "Legacy and canonical school attendance, devices, offline batches, QR identifiers and biometric metadata",
-  prerequisites: ["auth-core", "school-reference", "school-configuration", "school-people", "school-staff"],
+  prerequisites: ["auth-core", "school-reference", "school-configuration", "contacts", "mobile-sync-core", "school-people", "school-staff"],
   tables: ATTENDANCE_TABLES,
   ensureSchema: async (database) => {
     await people.ensureSchema(database);
