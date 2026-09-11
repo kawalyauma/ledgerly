@@ -6,6 +6,14 @@ async function addConstraint(database, table, name, definition) {
 }
 
 export async function ensureAiIntegrity(database) {
+  // Permission classifications are added idempotently so existing AI preview databases are hardened in place.
+  await database.query(`
+    ALTER TABLE ledgerly_ai.documents
+      ADD COLUMN IF NOT EXISTS required_permissions jsonb NOT NULL DEFAULT '["documents:read"]'::jsonb;
+    ALTER TABLE ledgerly_ai.memories
+      ADD COLUMN IF NOT EXISTS required_permissions jsonb NOT NULL DEFAULT '[]'::jsonb;
+  `);
+
   // Composite unique keys let every child relation include organization_id in its foreign key.
   await database.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS ai_agents_org_agent_uq ON ledgerly_ai.agents (organization_id, agent_id);
@@ -46,6 +54,8 @@ export async function ensureAiIntegrity(database) {
   await addConstraint(database,"ledgerly_ai.approvals","ai_approvals_status_check","CHECK (status IN ('pending','approved','rejected','executing','executed','execution_failed','cancelled'))");
   await addConstraint(database,"ledgerly_ai.approvals","ai_approvals_risk_check","CHECK (risk_level IN ('low','medium','high','prohibited'))");
   await addConstraint(database,"ledgerly_ai.documents","ai_documents_status_check","CHECK (status IN ('draft','in_review','changes_requested','approved','published','archived'))");
+  await addConstraint(database,"ledgerly_ai.documents","ai_documents_permissions_array_check","CHECK (jsonb_typeof(required_permissions)='array')");
   await addConstraint(database,"ledgerly_ai.knowledge_sources","ai_knowledge_sources_status_check","CHECK (status IN ('pending','indexed','failed','disabled'))");
   await addConstraint(database,"ledgerly_ai.knowledge_sources","ai_knowledge_permissions_array_check","CHECK (jsonb_typeof(required_permissions)='array')");
+  await addConstraint(database,"ledgerly_ai.memories","ai_memory_permissions_array_check","CHECK (jsonb_typeof(required_permissions)='array')");
 }
