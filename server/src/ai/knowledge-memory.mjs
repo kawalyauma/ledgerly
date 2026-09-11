@@ -10,6 +10,13 @@ function permissionError(message,details={}){
   error.details=details;
   return error;
 }
+function memoryPermissionError(message,details={}){
+  const error=new Error(message);
+  error.status=403;
+  error.code="AI_MEMORY_PERMISSION_DENIED";
+  error.details=details;
+  return error;
+}
 function contextPermissions(context){return Array.isArray(context?.permissions)?context.permissions.filter((item)=>typeof item==="string"):[];}
 function hasPermission(context,permission){const granted=new Set(contextPermissions(context));return granted.has("*")||granted.has(permission);}
 function requirePermission(context,permission){if(!hasPermission(context,permission))throw permissionError(`Missing AI knowledge permission: ${permission}`,{permission});}
@@ -18,46 +25,56 @@ function parsePermissionArray(value){
   if(typeof value==="string")try{const parsed=JSON.parse(value);return Array.isArray(parsed)?parsed:[];}catch{return[];}
   return [];
 }
-function normalizeRequiredPermissions(value){
-  const raw=parsePermissionArray(value);
-  if(raw.length>32)throw new TypeError("knowledge source requiredPermissions may contain at most 32 scopes");
-  const normalized=[KNOWLEDGE_READ_SCOPE];
+function normalizePermissionList(value,{name,max=32}={}){
+  const raw=parsePermissionArray(value);if(raw.length>max)throw new TypeError(`${name} may contain at most ${max} scopes`);
+  const normalized=[];
   for(const item of raw){
-    if(typeof item!=="string"||!item.trim())throw new TypeError("knowledge source permissions must be non-empty strings");
+    if(typeof item!=="string"||!item.trim())throw new TypeError(`${name} permissions must be non-empty strings`);
     const permission=item.trim();
-    if(!/^[a-z0-9][a-z0-9:_*-]*$/.test(permission))throw new TypeError(`invalid knowledge source permission: ${permission}`);
+    if(!/^[a-z0-9][a-z0-9:_*-]*$/.test(permission))throw new TypeError(`invalid ${name} permission: ${permission}`);
     if(!normalized.includes(permission))normalized.push(permission);
   }
   return normalized;
 }
+function normalizeRequiredPermissions(value){return [...new Set([KNOWLEDGE_READ_SCOPE,...normalizePermissionList(value,{name:"knowledge source"})])];}
 function assertRequiredPermissions(context,required){
   const granted=new Set(contextPermissions(context));
   if(granted.has("*"))return;
   const missing=normalizeRequiredPermissions(required).filter((permission)=>!granted.has(permission));
   if(missing.length)throw permissionError("AI knowledge source exceeds current authority",{missingPermissions:missing});
 }
+function assertMemoryPermissions(context,required){
+  const granted=new Set(contextPermissions(context));if(granted.has("*"))return;
+  const normalized=normalizePermissionList(required,{name:"AI memory"});
+  const missing=normalized.filter((permission)=>!granted.has(permission));
+  if(missing.length)throw memoryPermissionError("AI memory classification exceeds current authority",{missingPermissions:missing});
+}
 
 export class AiMemoryService {
   constructor({ database, audit }) { this.database=database; this.audit=audit; }
 
-  async put({ context, agentId, type="durable", key, value, expiresAt=null }) {
+  async put({ context, agentId, type="durable", key, value, expiresAt=null, requiredPermissions=[] }) {
     const org=context.organizationId;
     if (!org) throw new Error("organization context required");
+    if (!context?.userId) throw new Error("AI memory update requires an attributable requester");
+    const required=normalizePermissionList(requiredPermissions,{name:"AI memory"});
+    assertMemoryPermissions(context,required);
     const memoryId=randomUUID();
     const result=await this.database.query(`INSERT INTO ledgerly_ai.memories
-      (memory_id,organization_id,agent_id,memory_type,key,value,expires_at)
-      VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)
-      ON CONFLICT (organization_id,agent_id,memory_type,key) DO UPDATE SET value=EXCLUDED.value,expires_at=EXCLUDED.expires_at,disabled=false,updated_at=now()
-      RETURNING *`, [memoryId,org,agentId,type,key,JSON.stringify(value),expiresAt]);
-    await this.audit?.write?.({ organization_id:org,actor_type:"human",actor_id:context.userId,action:"ai.memory.updated",entity_type:"ai_memory",entity_id:result.rows[0]?.memory_id,metadata:{agent_id:agentId,type,key} });
+      (memory_id,organization_id,agent_id,memory_type,key,value,expires_at,required_permissions)
+      VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb)
+      ON CONFLICT (organization_id,agent_id,memory_type,key) DO UPDATE SET value=EXCLUDED.value,expires_at=EXCLUDED.expires_at,required_permissions=EXCLUDED.required_permissions,disabled=false,updated_at=now()
+      RETURNING *`, [memoryId,org,agentId,type,key,JSON.stringify(value),expiresAt,JSON.stringify(required)]);
+    await this.audit?.write?.({ organization_id:org,actor_type:"human",actor_id:context.userId,action:"ai.memory.updated",entity_type:"ai_memory",entity_id:result.rows[0]?.memory_id,metadata:{agent_id:agentId,type,key,required_permissions:required} });
     return result.rows[0];
   }
 
   async list({ context, agentId, type=null, includeDisabled=false }) {
     const org=context.organizationId;
     if (!org) throw new Error("organization context required");
-    const values=[org,agentId];
-    const filters=["organization_id=$1","agent_id=$2"];
+    const permissions=contextPermissions(context),wildcard=permissions.includes("*");
+    const values=[org,agentId,wildcard,JSON.stringify(permissions)];
+    const filters=["organization_id=$1","agent_id=$2","($3::boolean OR required_permissions <@ $4::jsonb)"];
     if (type) { values.push(type); filters.push(`memory_type=$${values.length}`); }
     if (!includeDisabled) filters.push("disabled=false");
     filters.push("(expires_at IS NULL OR expires_at>now())");
@@ -66,19 +83,20 @@ export class AiMemoryService {
   }
 
   async disable({ context, memoryId, disabled=true }) {
-    const org=context.organizationId;
-    const result=await this.database.query(`UPDATE ledgerly_ai.memories SET disabled=$1,updated_at=now() WHERE memory_id=$2 AND organization_id=$3 RETURNING *`,[Boolean(disabled),memoryId,org]);
-    if (!result.rowCount) throw new Error("memory not found");
+    const org=context.organizationId,permissions=contextPermissions(context),wildcard=permissions.includes("*");
+    const result=await this.database.query(`UPDATE ledgerly_ai.memories SET disabled=$1,updated_at=now() WHERE memory_id=$2 AND organization_id=$3 AND ($4::boolean OR required_permissions <@ $5::jsonb) RETURNING *`,[Boolean(disabled),memoryId,org,wildcard,JSON.stringify(permissions)]);
+    if (!result.rowCount) throw memoryPermissionError("memory not found or outside current authority");
+    await this.audit?.write?.({organization_id:org,actor_type:"human",actor_id:context.userId,action:disabled?"ai.memory.disabled":"ai.memory.enabled",entity_type:"ai_memory",entity_id:memoryId});
     return result.rows[0];
   }
 
   async clear({ context, agentId, type=null }) {
-    const org=context.organizationId;
-    const values=[org,agentId];
-    const filter=type ? ` AND memory_type=$3` : "";
-    if (type) values.push(type);
-    const result=await this.database.query(`DELETE FROM ledgerly_ai.memories WHERE organization_id=$1 AND agent_id=$2${filter}`,values);
-    await this.audit?.write?.({ organization_id:org,actor_type:"human",actor_id:context.userId,action:"ai.memory.cleared",entity_type:"ai_agent",entity_id:agentId,metadata:{type} });
+    const org=context.organizationId,permissions=contextPermissions(context),wildcard=permissions.includes("*");
+    const values=[org,agentId,wildcard,JSON.stringify(permissions)];
+    let filter="";
+    if (type){values.push(type);filter=` AND memory_type=$${values.length}`;}
+    const result=await this.database.query(`DELETE FROM ledgerly_ai.memories WHERE organization_id=$1 AND agent_id=$2 AND ($3::boolean OR required_permissions <@ $4::jsonb)${filter}`,values);
+    await this.audit?.write?.({ organization_id:org,actor_type:"human",actor_id:context.userId,action:"ai.memory.cleared",entity_type:"ai_agent",entity_id:agentId,metadata:{type,cleared:result.rowCount} });
     return { cleared:result.rowCount };
   }
 }
