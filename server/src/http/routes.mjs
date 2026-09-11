@@ -1,4 +1,9 @@
 import { readdir } from "node:fs/promises";
+import {
+  assertBusinessRouteAuthorityCoverage,
+  createHttpCutoverCapabilities,
+  resolveBusinessRouteAuthority,
+} from "../runtime/business-route-authority.mjs";
 
 const ROUTE_DIRECTORY = new URL("./routes/", import.meta.url);
 const ROUTE_SUFFIX = ".route.mjs";
@@ -30,7 +35,24 @@ async function discoverDescriptors() {
   return descriptors.sort((a,b)=>b.priority-a.priority||b.prefix.length-a.prefix.length||a.name.localeCompare(b.name));
 }
 const DESCRIPTORS=await discoverDescriptors();
+const AUTHORITY_AUDIT=assertBusinessRouteAuthorityCoverage(DESCRIPTORS);
 function pathMatches(prefix,pathname){return pathname===prefix||pathname.startsWith(`${prefix}/`);}
 function normalizeResult(result,routeName){if(!result||typeof result!=='object')throw new TypeError(`HTTP route ${routeName} must return a response object`);const status=Number(result.status??200);if(!Number.isInteger(status)||status<100||status>599)throw new TypeError(`HTTP route ${routeName} returned an invalid status`);if(result.headers!=null&&(typeof result.headers!=='object'||Array.isArray(result.headers)))throw new TypeError(`HTTP route ${routeName} headers must be an object`);if(result.rawBody!=null&&!Buffer.isBuffer(result.rawBody)&&!(result.rawBody instanceof Uint8Array))throw new TypeError(`HTTP route ${routeName} rawBody must be bytes`);return{status,body:result.body??null,rawBody:result.rawBody??null,headers:result.headers??{}};}
 export function listHttpRouteDescriptors(){return DESCRIPTORS.map(({name,prefix,business,priority,sourceFile})=>({name,prefix,business,priority,sourceFile}));}
-export async function createHttpRouteRegistry({runtime,config}){const active=[];for(const descriptor of DESCRIPTORS)if(await descriptor.enabled(config))active.push(descriptor);return Object.freeze({describe(){return active.map(({name,prefix,business,priority,sourceFile})=>({name,prefix,business,priority,sourceFile}));},async dispatch({request,url,requestId}){const route=active.find(descriptor=>pathMatches(descriptor.prefix,url.pathname));if(!route)return null;const result=await route.handle({request,url,requestId,runtime,config});return normalizeResult(result,route.name);}});}
+export function getBusinessRouteAuthorityAudit(){return AUTHORITY_AUDIT;}
+export async function createHttpRouteRegistry({runtime,config,cutoverCapabilities=createHttpCutoverCapabilities(config)}){
+  const active=[];
+  const blocked=[];
+  for(const descriptor of DESCRIPTORS){
+    const featureEnabled=await descriptor.enabled(config);
+    const authority=resolveBusinessRouteAuthority(descriptor,cutoverCapabilities);
+    if(!featureEnabled){blocked.push({name:descriptor.name,prefix:descriptor.prefix,business:descriptor.business,reason:'feature-disabled',authority});continue;}
+    if(authority&&!authority.nodeAuthoritative){blocked.push({name:descriptor.name,prefix:descriptor.prefix,business:true,reason:'not-node-authoritative',authority});continue;}
+    active.push(Object.freeze({...descriptor,authority}));
+  }
+  return Object.freeze({
+    describe(){return active.map(({name,prefix,business,priority,sourceFile,authority})=>({name,prefix,business,priority,sourceFile,authority}));},
+    describeAuthority(){return{audit:AUTHORITY_AUDIT,capabilities:cutoverCapabilities.all,blocked:[...blocked]};},
+    async dispatch({request,url,requestId}){const route=active.find(descriptor=>pathMatches(descriptor.prefix,url.pathname));if(!route)return null;const result=await route.handle({request,url,requestId,runtime,config});return normalizeResult(result,route.name);}
+  });
+}
