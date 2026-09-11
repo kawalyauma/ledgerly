@@ -3,7 +3,8 @@ import { evaluateToolPolicy } from "./policy.mjs";
 export class AiToolGateway {
   constructor({ audit, approvalService = null }) { this.audit=audit; this.approvalService=approvalService; this.tools=new Map(); }
   register(definition,handler){if(!definition?.name||typeof handler!=="function")throw new TypeError("tool definition and handler are required");this.tools.set(definition.name,Object.freeze({...definition,handler}));return this;}
-  describeForAgent(agent){return [...this.tools.values()].filter((tool)=>(agent.allowedTools??[]).includes(tool.name)).map(({handler,...tool})=>tool);}
+  describeAll(){return [...this.tools.values()].map(({handler,...tool})=>tool).sort((a,b)=>a.name.localeCompare(b.name));}
+  describeForAgent(agent){return this.describeAll().filter((tool)=>(agent.allowedTools??[]).includes(tool.name));}
 
   async invoke({agent,context,taskId=null,toolName,input={}}){
     const tool=this.tools.get(toolName);if(!tool){const error=new Error(`Unknown AI tool: ${toolName}`);error.code="AI_TOOL_NOT_ALLOWED";throw error;}
