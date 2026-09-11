@@ -15,6 +15,7 @@ const STATUS_TRANSITIONS = Object.freeze({
 
 const org=(context)=>{if(!context?.organizationId)throw new Error("organization context required");return context.organizationId;};
 const stamp=()=>new Date().toISOString();
+const canApprove=(context)=>{const permissions=Array.isArray(context?.permissions)?context.permissions:[];return permissions.includes("*")||permissions.includes("ai:approve");};
 
 function transitionError(from,status){
   const error=new Error(`document status transition ${from} -> ${status} is not allowed`);
@@ -79,7 +80,7 @@ export class AiDocumentEngine{
     });
   }
 
-  async setStatus({context,documentId,status,reason=null,approvalAuthority=false}){
+  async setStatus({context,documentId,status,reason=null}){
     if(!DOCUMENT_STATUSES.includes(status))throw new Error(`invalid document status ${status}`);
     const organizationId=org(context);
     return this.database.transaction(async(tx)=>{
@@ -87,6 +88,7 @@ export class AiDocumentEngine{
       if(!current)throw new Error("document not found");
       if(current.status===status)return current;
       if(!STATUS_TRANSITIONS[current.status]?.has(status))throw transitionError(current.status,status);
+      const approvalAuthority=canApprove(context);
       if((OFFICIAL_STATUSES.has(current.status)||OFFICIAL_STATUSES.has(status))&&!approvalAuthority)throw approvalAuthorityError(current.status,status);
       const decidedAt=stamp();
       const approvalEntry=status==="approved"?{status:"approved",approved_by:context.userId,approved_by_name:context.userName??context.userId,approved_at:decidedAt,reason,version:Number(current.version)}:null;
