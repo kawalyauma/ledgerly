@@ -2,102 +2,160 @@ name: ledgerly-selfhost
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
     restart: unless-stopped
+    stop_grace_period: 60s
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    command:
-      - postgres
-      - -c
-      - max_connections=200
-      - -c
-      - shared_preload_libraries=pg_stat_statements
+    command: ["postgres","-c","max_connections=${POSTGRES_MAX_CONNECTIONS:-200}","-c","shared_preload_libraries=pg_stat_statements","-c","idle_in_transaction_session_timeout=${POSTGRES_IDLE_IN_TRANSACTION_TIMEOUT:-60s}","-c","lock_timeout=${POSTGRES_LOCK_TIMEOUT:-15s}","-c","log_min_duration_statement=${POSTGRES_LOG_MIN_DURATION_MS:-1000}"]
     volumes:
       - ledgerly_postgres_data:/var/lib/postgresql/data
       - ./selfhost/postgres/init:/docker-entrypoint-initdb.d:ro
-    ports:
-      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+    ports: ["127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 10s
+    security_opt: ["no-new-privileges:true"]
     networks: [ledgerly_backend]
 
   pgbouncer:
     build:
       context: ./selfhost/pgbouncer
+      args:
+        PGBOUNCER_BASE_IMAGE: ${PGBOUNCER_BASE_IMAGE:-alpine:3.22}
     restart: unless-stopped
+    stop_grace_period: 30s
     environment:
       DATABASE_HOST: postgres
       DATABASE_PORT: 5432
       DATABASE_NAME: ${POSTGRES_DB}
       DATABASE_USER: ${POSTGRES_USER}
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_APP_USER: ${LEDGERLY_DATABASE_APP_USER:-}
+      DATABASE_APP_PASSWORD: ${LEDGERLY_DATABASE_APP_PASSWORD:-}
       PGBOUNCER_POOL_MODE: ${PGBOUNCER_POOL_MODE:-transaction}
       PGBOUNCER_DEFAULT_POOL_SIZE: ${PGBOUNCER_DEFAULT_POOL_SIZE:-40}
+      PGBOUNCER_RESERVE_POOL_SIZE: ${PGBOUNCER_RESERVE_POOL_SIZE:-10}
+      PGBOUNCER_MAX_DB_CONNECTIONS: ${PGBOUNCER_MAX_DB_CONNECTIONS:-70}
       PGBOUNCER_MAX_CLIENT_CONN: ${PGBOUNCER_MAX_CLIENT_CONN:-1000}
+      PGBOUNCER_QUERY_TIMEOUT: ${PGBOUNCER_QUERY_TIMEOUT:-120}
+      PGBOUNCER_CLIENT_IDLE_TIMEOUT: ${PGBOUNCER_CLIENT_IDLE_TIMEOUT:-300}
+      PGBOUNCER_IDLE_TRANSACTION_TIMEOUT: ${PGBOUNCER_IDLE_TRANSACTION_TIMEOUT:-60}
+      PGBOUNCER_SERVER_IDLE_TIMEOUT: ${PGBOUNCER_SERVER_IDLE_TIMEOUT:-600}
+      PGBOUNCER_SERVER_LIFETIME: ${PGBOUNCER_SERVER_LIFETIME:-3600}
     depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "127.0.0.1:${PGBOUNCER_HOST_PORT:-6432}:6432"
+      postgres: {condition: service_healthy}
+    ports: ["127.0.0.1:${PGBOUNCER_HOST_PORT:-6432}:6432"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 10
+    security_opt: ["no-new-privileges:true"]
     networks: [ledgerly_backend]
 
   redis:
-    image: redis:8-alpine
+    image: ${REDIS_IMAGE:-redis:8-alpine}
     restart: unless-stopped
+    stop_grace_period: 30s
     command: ["redis-server", "/usr/local/etc/redis/redis.conf", "--requirepass", "${REDIS_PASSWORD}"]
     volumes:
       - ./selfhost/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
       - ledgerly_redis_data:/data
-    ports:
-      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
+    ports: ["127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"]
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a '${REDIS_PASSWORD}' ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 10
+    security_opt: ["no-new-privileges:true"]
     networks: [ledgerly_backend]
 
   minio:
-    image: minio/minio:latest
+    image: ${MINIO_IMAGE:-minio/minio:latest}
     restart: unless-stopped
+    stop_grace_period: 30s
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    volumes:
-      - ledgerly_object_data:/data
+    volumes: ["ledgerly_object_data:/data"]
     ports:
       - "127.0.0.1:${MINIO_API_HOST_PORT:-9000}:9000"
       - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+    security_opt: ["no-new-privileges:true"]
+    networks: [ledgerly_backend]
+
+  minio-bootstrap:
+    image: ${MINIO_MC_IMAGE:-minio/mc:latest}
+    restart: "no"
+    init: true
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=32m"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        export MC_CONFIG_DIR=/tmp/.mc
+        attempt=0
+        until mc alias set bootstrap http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" >/dev/null 2>&1; do
+          attempt=$$((attempt + 1))
+          [ "$$attempt" -lt 60 ] || { echo "MinIO did not become ready" >&2; exit 1; }
+          sleep 2
+        done
+        mc mb --ignore-existing "bootstrap/$${MINIO_DEFAULT_BUCKET}" >/dev/null
+        if [ -n "$${MINIO_APP_ACCESS_KEY}" ] && [ -n "$${MINIO_APP_SECRET_KEY}" ]; then
+          cat >/tmp/ledgerly-app-policy.json <<EOF
+        {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetBucketLocation","s3:ListBucket","s3:ListBucketMultipartUploads"],"Resource":["arn:aws:s3:::$${MINIO_DEFAULT_BUCKET}"]},{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:DeleteObject","s3:AbortMultipartUpload","s3:ListMultipartUploadParts"],"Resource":["arn:aws:s3:::$${MINIO_DEFAULT_BUCKET}/*"]}]}
+        EOF
+          mc admin policy create bootstrap ledgerly-app /tmp/ledgerly-app-policy.json >/dev/null
+          mc admin user add bootstrap "$${MINIO_APP_ACCESS_KEY}" "$${MINIO_APP_SECRET_KEY}" >/dev/null
+          mc admin policy attach bootstrap ledgerly-app --user "$${MINIO_APP_ACCESS_KEY}" >/dev/null
+        fi
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_DEFAULT_BUCKET: ${MINIO_DEFAULT_BUCKET:-ledgerly}
+      MINIO_APP_ACCESS_KEY: ${MINIO_APP_ACCESS_KEY:-}
+      MINIO_APP_SECRET_KEY: ${MINIO_APP_SECRET_KEY:-}
+    depends_on:
+      minio: {condition: service_started}
     networks: [ledgerly_backend]
 
   api:
     build:
       context: ./server
+      args:
+        NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-node:20-alpine}
     restart: unless-stopped
+    init: true
+    stop_grace_period: 20s
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
     environment:
       LEDGERLY_ENVIRONMENT: ${LEDGERLY_ENVIRONMENT:-development}
       LEDGERLY_RUNTIME_MODE: ${LEDGERLY_RUNTIME_MODE:-foundation}
       LEDGERLY_API_HOST: 0.0.0.0
       LEDGERLY_API_PORT: "8788"
       LEDGERLY_DEPENDENCY_TIMEOUT_MS: ${LEDGERLY_DEPENDENCY_TIMEOUT_MS:-1500}
+      LEDGERLY_TRUST_PROXY_HEADERS: ${LEDGERLY_TRUST_PROXY_HEADERS:-true}
+      LEDGERLY_RATE_LIMIT_WINDOW_MS: ${LEDGERLY_RATE_LIMIT_WINDOW_MS:-60000}
+      LEDGERLY_RATE_LIMIT_MAX_REQUESTS: ${LEDGERLY_RATE_LIMIT_MAX_REQUESTS:-600}
+      LEDGERLY_MAX_REQUEST_BODY_BYTES: ${LEDGERLY_MAX_REQUEST_BODY_BYTES:-67108864}
       LEDGERLY_SCHOOL_SELFHOST_ENABLED: ${LEDGERLY_SCHOOL_SELFHOST_ENABLED:-false}
       LEDGERLY_DATABASE_HOST: pgbouncer
       LEDGERLY_DATABASE_PORT: "6432"
       LEDGERLY_DATABASE_NAME: ${POSTGRES_DB}
-      LEDGERLY_DATABASE_USER: ${POSTGRES_USER}
-      LEDGERLY_DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      LEDGERLY_DATABASE_USER: ${LEDGERLY_DATABASE_APP_USER:-${POSTGRES_USER}}
+      LEDGERLY_DATABASE_PASSWORD: ${LEDGERLY_DATABASE_APP_PASSWORD:-${POSTGRES_PASSWORD}}
       LEDGERLY_DATABASE_POOL_MAX: ${LEDGERLY_DATABASE_POOL_MAX:-20}
       LEDGERLY_DATABASE_IDLE_TIMEOUT_MS: ${LEDGERLY_DATABASE_IDLE_TIMEOUT_MS:-30000}
       LEDGERLY_REDIS_HOST: redis
@@ -133,36 +191,38 @@ services:
       LEDGERLY_OBJECT_STORAGE_HOST: minio
       LEDGERLY_OBJECT_STORAGE_PORT: "9000"
       LEDGERLY_OBJECT_STORAGE_SSL: ${LEDGERLY_OBJECT_STORAGE_SSL:-false}
-      LEDGERLY_OBJECT_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER}
-      LEDGERLY_OBJECT_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      LEDGERLY_OBJECT_STORAGE_ACCESS_KEY: ${MINIO_APP_ACCESS_KEY:-${MINIO_ROOT_USER}}
+      LEDGERLY_OBJECT_STORAGE_SECRET_KEY: ${MINIO_APP_SECRET_KEY:-${MINIO_ROOT_PASSWORD}}
       LEDGERLY_OBJECT_STORAGE_BUCKET: ${MINIO_DEFAULT_BUCKET:-ledgerly}
       LEDGERLY_OBJECT_STORAGE_REGION: ${MINIO_REGION:-us-east-1}
-      LEDGERLY_OBJECT_STORAGE_CREATE_BUCKET: ${LEDGERLY_OBJECT_STORAGE_CREATE_BUCKET:-true}
+      LEDGERLY_OBJECT_STORAGE_CREATE_BUCKET: "false"
       LEDGERLY_STORAGE_PATH: /var/lib/ledgerly/storage
     depends_on:
-      pgbouncer:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_started
-    volumes:
-      - ledgerly_app_storage:/var/lib/ledgerly/storage
-    ports:
-      - "127.0.0.1:${LEDGERLY_API_PORT:-8788}:8788"
+      pgbouncer: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio-bootstrap: {condition: service_completed_successfully}
+    volumes: ["ledgerly_app_storage:/var/lib/ledgerly/storage"]
+    ports: ["127.0.0.1:${LEDGERLY_API_PORT:-8788}:8788"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8788/selfhost/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 5s
-    networks: [ledgerly_backend]
+    networks: [ledgerly_edge, ledgerly_backend]
 
   migrate-d1:
     profiles: ["migration"]
     build:
       context: ./server
+      args:
+        NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-node:20-alpine}
     restart: "no"
+    init: true
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
     command: ["node", "src/migration/cli.mjs", "plan"]
     environment:
       LEDGERLY_DATABASE_HOST: pgbouncer
@@ -181,15 +241,16 @@ services:
       LEDGERLY_D1_MIGRATION_BATCH_SIZE: ${LEDGERLY_D1_MIGRATION_BATCH_SIZE:-250}
       LEDGERLY_D1_MIGRATION_HTTP_TIMEOUT_MS: ${LEDGERLY_D1_MIGRATION_HTTP_TIMEOUT_MS:-15000}
     depends_on:
-      pgbouncer:
-        condition: service_healthy
-    networks: [ledgerly_backend]
+      pgbouncer: {condition: service_healthy}
+    networks: [ledgerly_edge, ledgerly_backend]
 
   caddy:
-    image: caddy:2-alpine
+    image: ${CADDY_IMAGE:-caddy:2-alpine}
     restart: unless-stopped
+    stop_grace_period: 20s
     environment:
       LEDGERLY_SITE_ADDRESS: ${LEDGERLY_SITE_ADDRESS:-http://localhost}
+      LEDGERLY_MAX_REQUEST_BODY: ${LEDGERLY_MAX_REQUEST_BODY:-64MB}
     ports:
       - "${LEDGERLY_HTTP_PORT:-8080}:80"
       - "${LEDGERLY_HTTPS_PORT:-8443}:443"
@@ -197,7 +258,8 @@ services:
       - ./selfhost/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ledgerly_caddy_data:/data
       - ledgerly_caddy_config:/config
-    networks: [ledgerly_edge, ledgerly_backend]
+    security_opt: ["no-new-privileges:true"]
+    networks: [ledgerly_edge]
 
 networks:
   ledgerly_edge:
