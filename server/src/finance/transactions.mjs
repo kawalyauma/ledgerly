@@ -76,13 +76,16 @@ export class FinanceTransactions {
 
     return this.database.transaction(async (tx) => {
       const existing = await tx.query(
-        `SELECT id,payment_id,document_id,amount_minor
+        `SELECT id,payment_id,document_id,amount_minor,reversed_at
            FROM payment_allocations
           WHERE id=$1 AND organization_id=$2`,
         [allocationId,organizationId],
       );
       if (existing.rows[0]) {
         const row = existing.rows[0];
+        if (row.reversed_at != null) {
+          throw new FinanceIntegrityError("ALLOCATION_ALREADY_REVERSED","A reversed allocation id cannot be reused");
+        }
         if (row.payment_id !== paymentId || row.document_id !== documentId || Number(row.amount_minor) !== amount) {
           throw new FinanceIntegrityError("IDEMPOTENCY_CONFLICT","Allocation id already exists with different values");
         }
@@ -111,7 +114,8 @@ export class FinanceTransactions {
 
       const allocatedResult = await tx.query(
         `SELECT COALESCE(SUM(amount_minor),0)::bigint AS allocated_minor
-           FROM payment_allocations WHERE payment_id=$1 AND organization_id=$2`,
+           FROM payment_allocations
+          WHERE payment_id=$1 AND organization_id=$2 AND reversed_at IS NULL`,
         [paymentId,organizationId],
       );
       const allocated = BigInt(allocatedResult.rows[0]?.allocated_minor ?? 0);
@@ -172,9 +176,7 @@ export class FinanceTransactions {
       if (lines.rows.length < 2) throw new FinanceIntegrityError("INVALID_JOURNAL","Posted journal has insufficient lines");
 
       const handler = this.sourceReversalHandlers.get(original.source_type);
-      if (handler) {
-        await handler({ tx,organizationId,actorId,original,postingDate,reason });
-      }
+      if (handler) await handler({ tx,organizationId,actorId,original,postingDate,reason });
 
       await tx.query(
         `INSERT INTO journal_entries
@@ -201,32 +203,4 @@ export class FinanceTransactions {
       return { originalId:journalId,status:"reversed",reversal:{ id:reversalId,reversalOfId:journalId } };
     });
   }
-}
-
-export function schoolFeeReversalHandler() {
-  return async ({ tx,organizationId,original,reason }) => {
-    const payment = await tx.query(
-      `SELECT id,status FROM school_fee_payments
-        WHERE organization_id=$1 AND journal_entry_id=$2 FOR UPDATE`,
-      [organizationId,original.id],
-    );
-    if (!payment.rows[0]) {
-      throw new FinanceIntegrityError("SOURCE_LINK_MISSING","School fee journal has no originating payment");
-    }
-    if (payment.rows[0].status === "reversed") return;
-    const changed = await tx.query(
-      `UPDATE school_fee_payments
-          SET status='reversed',reversal_reason=$3,reversed_at=now(),updated_at=now()
-        WHERE id=$1 AND organization_id=$2 AND status='posted'
-        RETURNING id`,
-      [payment.rows[0].id,organizationId,reason],
-    );
-    if (changed.rowCount !== 1) throw new FinanceIntegrityError("SCHOOL_FEE_REVERSAL_CONFLICT","School fee payment changed while reversing");
-    await tx.query(
-      `UPDATE school_fee_payment_allocations
-          SET status='reversed',updated_at=now()
-        WHERE organization_id=$1 AND payment_id=$2 AND status='posted'`,
-      [organizationId,payment.rows[0].id],
-    );
-  };
 }
