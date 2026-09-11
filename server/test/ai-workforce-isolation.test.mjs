@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JobQueueRouter } from "../src/ai/queue-router.mjs";
 import { AiWorkforceStore } from "../src/ai/store.mjs";
-import { AiKnowledgeService } from "../src/ai/knowledge-memory.mjs";
+import { AiKnowledgeService, AiMemoryService } from "../src/ai/knowledge-memory.mjs";
 
 test("queue router sends AI jobs to dedicated queue and leaves other jobs alone",async()=>{
   const normal=[]; const ai=[];
@@ -48,4 +48,27 @@ test("RAG retrieval always scopes full-text search to the authenticated organiza
   await knowledge.retrieve({context:{organizationId:"org-a"},query:"weather curriculum",limit:5});
   assert.equal(calls[0].values[0],"org-a");
   assert.match(calls[0].sql,/c\.organization_id=\$1/);
+});
+
+test("direct chunk indexing is bounded before embedding work begins",async()=>{
+  let queried=false,embedded=false;
+  const knowledge=new AiKnowledgeService({database:{query:async()=>{queried=true;return {rows:[]};}},embedder:{embed:async()=>{embedded=true;return [0];}},embeddingDimensions:1,vectorEnabled:true});
+  const chunks=Array.from({length:1001},()=>({content:"small chunk"}));
+  await assert.rejects(()=>knowledge.indexChunks({context:{organizationId:"org-a"},sourceId:"11111111-1111-4111-8111-111111111111",chunks}),(error)=>error.code==="AI_KNOWLEDGE_TOO_MANY_CHUNKS");
+  assert.equal(queried,false);
+  assert.equal(embedded,false);
+});
+
+test("knowledge source filters reject malformed UUIDs before SQL casts",async()=>{
+  let queried=false;
+  const knowledge=new AiKnowledgeService({database:{query:async()=>{queried=true;return {rows:[]};}},vectorEnabled:false});
+  await assert.rejects(()=>knowledge.retrieve({context:{organizationId:"org-a"},query:"weather",sourceIds:["not-a-uuid"]}),(error)=>error.code==="AI_KNOWLEDGE_SOURCE_INVALID");
+  assert.equal(queried,false);
+});
+
+test("durable memory rejects oversized values before database writes",async()=>{
+  let queried=false;
+  const memory=new AiMemoryService({database:{query:async()=>{queried=true;return {rows:[]};}},audit:{write:async()=>{}}});
+  await assert.rejects(()=>memory.put({context:{organizationId:"org-a",userId:"u1"},agentId:"a1",type:"durable",key:"large",value:"x".repeat(70*1024)}),(error)=>error.code==="AI_MEMORY_VALUE_TOO_LARGE");
+  assert.equal(queried,false);
 });
