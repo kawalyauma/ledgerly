@@ -1,7 +1,8 @@
 services:
   nvr-mediamtx:
-    image: bluenviron/mediamtx:1.21.0
+    image: ${MEDIAMTX_IMAGE:-bluenviron/mediamtx:1.21.0}
     restart: unless-stopped
+    stop_grace_period: 30s
     volumes:
       - ./camera-server/mediamtx.yml:/mediamtx.yml:ro
       - ${CAMERA_STORAGE_ROOT:-./camera-storage}:/recordings
@@ -11,28 +12,17 @@ services:
       - "127.0.0.1:${CAMERA_HLS_HOST_PORT:-8888}:8888"
       - "127.0.0.1:${CAMERA_WEBRTC_HTTP_HOST_PORT:-8889}:8889"
       - "${CAMERA_WEBRTC_UDP_PORT:-8189}:8189/udp"
-    networks: [ledgerly_backend]
+    security_opt:
+      - no-new-privileges:true
+    networks: [ledgerly_edge, ledgerly_backend]
 
-  backup:
-    image: postgres:17-alpine
-    profiles: ["backup"]
-    restart: "no"
-    environment:
-      PGPASSWORD: ${POSTGRES_PASSWORD}
-      PGHOST: postgres
-      PGPORT: "5432"
-      PGUSER: ${POSTGRES_USER}
-      PGDATABASE: ${POSTGRES_DB}
-      BACKUP_ROOT: /backups
-    volumes:
-      - ./selfhost/backups:/opt/ledgerly-backup:ro
-      - ${LEDGERLY_BACKUP_HOST_PATH:-./backups}:/backups
-    entrypoint: ["/bin/sh","/opt/ledgerly-backup/backup-postgres.sh"]
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks: [ledgerly_backend]
+# Production backups are intentionally host-orchestrated by
+# selfhost/backups/backup-all.sh and the ledgerly-backup systemd timer. The old
+# Compose backup profile was removed because the verified pipeline needs host
+# Docker access to snapshot PostgreSQL, MinIO and safe configuration as one set.
 
 networks:
-  ledgerly_backend:
+  ledgerly_edge:
     external: false
+  ledgerly_backend:
+    internal: true

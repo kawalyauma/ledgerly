@@ -1,4 +1,5 @@
-FROM alpine:3.22
+ARG PGBOUNCER_BASE_IMAGE=alpine:3.22
+FROM ${PGBOUNCER_BASE_IMAGE}
 
 RUN apk add --no-cache pgbouncer postgresql17-client
 
