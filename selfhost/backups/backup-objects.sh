@@ -16,15 +16,15 @@ docker run --rm --network "container:$MINIO_CID" --user "$(id -u):$(id -g)" \
     mc ready source >/dev/null
     mc mirror --overwrite "source/$MINIO_DEFAULT_BUCKET" /backup
   '
+COUNT="$(find "$PARTIAL" -type f | wc -l | tr -d ' ')"
+PAYLOAD_BYTES="$(du -sb "$PARTIAL" | awk '{print $1}')"
+cat <<JSON >"$PARTIAL/meta.json"
+{"kind":"minio","set_id":"$SET_ID","created_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","bucket":"$MINIO_DEFAULT_BUCKET","files":$COUNT,"payload_bytes":$PAYLOAD_BYTES,"checksums_verified":true}
+JSON
 TMP_SUMS="$PARTIAL/.SHA256SUMS.tmp"
 find "$PARTIAL" -type f ! -name SHA256SUMS ! -name '.SHA256SUMS.tmp' -print0 | sort -z | xargs -0 -r sha256sum >"$TMP_SUMS"
 mv "$TMP_SUMS" "$PARTIAL/SHA256SUMS"
 ( cd "$PARTIAL" && sha256sum -c SHA256SUMS >/dev/null )
-COUNT="$(find "$PARTIAL" -type f ! -name SHA256SUMS | wc -l | tr -d ' ')"
-BYTES="$(du -sb "$PARTIAL" | awk '{print $1}')"
-cat <<JSON >"$PARTIAL/meta.json"
-{"kind":"minio","set_id":"$SET_ID","created_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","bucket":"$MINIO_DEFAULT_BUCKET","files":$COUNT,"bytes":$BYTES,"checksums_verified":true}
-JSON
 chmod 0600 "$PARTIAL/meta.json" "$PARTIAL/SHA256SUMS"
 mv "$PARTIAL" "$DEST"; trap - EXIT
 printf '%s\n' "$DEST"
