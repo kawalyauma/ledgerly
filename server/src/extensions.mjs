@@ -14,12 +14,16 @@ function normalizeDescriptor(descriptor, sourceFile) {
   if (typeof descriptor.create !== "function") {
     throw new TypeError(`Runtime extension ${name} must define create()`);
   }
+  if (descriptor.configure != null && typeof descriptor.configure !== "function") {
+    throw new TypeError(`Runtime extension ${name} configure must be a function`);
+  }
   if (descriptor.enabled != null && typeof descriptor.enabled !== "function") {
     throw new TypeError(`Runtime extension ${name} enabled must be a function`);
   }
   return Object.freeze({
     name,
     required: descriptor.required === true,
+    configure: descriptor.configure ?? (() => ({})),
     enabled: descriptor.enabled ?? (() => true),
     create: descriptor.create,
     sourceFile,
@@ -43,6 +47,14 @@ async function discoverDescriptors() {
 }
 
 const DESCRIPTORS = await discoverDescriptors();
+
+function normalizeConfig(name, value) {
+  if (value == null) return Object.freeze({});
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`Runtime extension ${name} configure() must return an object`);
+  }
+  return Object.freeze({ ...value });
+}
 
 function normalizeInstance(descriptor, instance) {
   if (!instance || typeof instance !== "object") {
@@ -72,13 +84,21 @@ export function listRuntimeExtensionDescriptors() {
   return DESCRIPTORS.map(({ name, required, sourceFile }) => ({ name, required, sourceFile }));
 }
 
+export function loadRuntimeExtensionConfig(env = process.env) {
+  return Object.freeze(Object.fromEntries(DESCRIPTORS.map((descriptor) => [
+    descriptor.name,
+    normalizeConfig(descriptor.name, descriptor.configure(env)),
+  ])));
+}
+
 export async function createRuntimeExtensions(context) {
   const instances = [];
   const schedulerQueues = {};
   try {
     for (const descriptor of DESCRIPTORS) {
-      if (!await descriptor.enabled(context.config)) continue;
-      const instance = normalizeInstance(descriptor, await descriptor.create(context));
+      const extensionConfig = context.config.extensions?.[descriptor.name] ?? Object.freeze({});
+      if (!await descriptor.enabled(extensionConfig, context.config)) continue;
+      const instance = normalizeInstance(descriptor, await descriptor.create({ ...context, extensionConfig }));
       for (const [kind, queue] of Object.entries(instance.schedulerQueues)) {
         if (schedulerQueues[kind]) throw new Error(`Duplicate scheduler queue route for job kind: ${kind}`);
         schedulerQueues[kind] = queue;
@@ -86,7 +106,7 @@ export async function createRuntimeExtensions(context) {
       instances.push(instance);
     }
   } catch (error) {
-    await Promise.allSettled(instances.toReversed().map((instance) => instance.close()));
+    await Promise.allSettled([...instances].reverse().map((instance) => instance.close()));
     throw error;
   }
 
@@ -121,7 +141,7 @@ export async function createRuntimeExtensions(context) {
       }]));
     },
     async close() {
-      const settled = await Promise.allSettled(instances.toReversed().map((instance) => instance.close()));
+      const settled = await Promise.allSettled([...instances].reverse().map((instance) => instance.close()));
       const failure = settled.find((result) => result.status === "rejected");
       if (failure) throw failure.reason;
     },
