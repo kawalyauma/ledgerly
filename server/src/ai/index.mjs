@@ -63,10 +63,14 @@ export async function createAiWorkforce({services,config={},businessTools={},aut
     const providerId=config.provider??"ollama";let runtime;
     try{runtime=await providerRegistry.create(providerId,providerConfig).health();}catch(error){runtime={ok:false,provider:providerId,state:"error",error:error instanceof Error?error.message:String(error),code:error?.code};}
     const org=context?.organizationId??null;
-    const statsSql=`SELECT count(*) FILTER (WHERE status='failed')::int AS failed,count(*) FILTER (WHERE status='working')::int AS working,avg(EXTRACT(EPOCH FROM (completed_at-created_at))*1000) FILTER (WHERE completed_at IS NOT NULL) AS avg_ms,max(completed_at) AS last_success FROM ledgerly_ai.tasks${org?" WHERE organization_id=$1":""}`;
-    const [queueLength,taskStats]=await Promise.all([services.queue.size().catch(()=>null),services.database.query(statsSql,org?[org]:[]).then((r)=>r.rows[0]??{}).catch(()=>({}))]);
+    const statsSql=`SELECT count(*) FILTER (WHERE status='failed')::int AS failed,count(*) FILTER (WHERE status='working')::int AS working,count(*) FILTER (WHERE status IN ('queued','working','waiting_for_approval'))::int AS pending,avg(EXTRACT(EPOCH FROM (completed_at-created_at))*1000) FILTER (WHERE completed_at IS NOT NULL) AS avg_ms,max(completed_at) AS last_success FROM ledgerly_ai.tasks${org?" WHERE organization_id=$1":""}`;
+    const taskStats=await services.database.query(statsSql,org?[org]:[]).then((r)=>r.rows[0]??{}).catch(()=>({}));
     const workerStatus=worker.status();
-    return {ok:runtime.ok===true,provider:providerId,runtime,queueLength,activeWorkers:workerStatus.activeWorkers,failedTasks:Number(taskStats.failed??0),averageExecutionDurationMs:workerStatus.averageExecutionDurationMs??(taskStats.avg_ms==null?null:Math.round(Number(taskStats.avg_ms))),lastSuccessfulTask:workerStatus.lastSuccessfulTask??taskStats.last_success??null,worker:workerStatus,knowledge:{...storeCapabilities,embeddingModelConfigured:Boolean(embeddingModel),vectorActive:knowledge.vectorEnabled},limits};
+    const tenantAverage=taskStats.avg_ms==null?null:Math.round(Number(taskStats.avg_ms));
+    const tenantWorker={running:workerStatus.running,activeWorkers:Number(taskStats.working??0),maxConcurrentTasks:workerStatus.maxConcurrentTasks,averageExecutionDurationMs:tenantAverage,lastSuccessfulTask:taskStats.last_success??null};
+    const visibleWorker=org?tenantWorker:workerStatus;
+    const queueLength=org?Number(taskStats.pending??0):await services.queue.size().catch(()=>null);
+    return {ok:runtime.ok===true,provider:providerId,runtime,queueLength,activeWorkers:visibleWorker.activeWorkers,failedTasks:Number(taskStats.failed??0),averageExecutionDurationMs:visibleWorker.averageExecutionDurationMs,lastSuccessfulTask:visibleWorker.lastSuccessfulTask,worker:visibleWorker,knowledge:{...storeCapabilities,embeddingModelConfigured:Boolean(embeddingModel),vectorActive:knowledge.vectorEnabled},limits};
   }
 
   async function close(){await worker.stop();}
