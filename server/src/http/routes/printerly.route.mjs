@@ -6,13 +6,13 @@ function pathPart(pathname,prefix){return pathname.slice(prefix.length).split('/
 const data=(value,status=200)=>({status,body:{data:value}});
 
 export default{
-  name:'printerly-legacy-node',prefix:PREFIX,business:true,priority:100,
+  name:'printerly-legacy-node',prefix:'/api/v1/printerly/node',business:true,priority:100,
   enabled(config){return config.extensions?.printerly?.cutover==='node';},
   async handle({request,url,runtime}){
     const service=runtime.extensions?.printerly?.node;if(!service)throw error('PRINTERLY_SELFHOST_NOT_READY','Printerly self-hosted runtime is not ready',503);
     const parts=pathPart(url.pathname,PREFIX);
     if(request.method==='POST'&&parts.join('/')==='node/pair')return data(await service.pair(await json(request)));
-    if(parts[0]!=='node')return null;
+    if(parts[0]!=='node')throw error('PRINTERLY_ROUTE_NOT_FOUND','Printerly node route not found',404);
     const node=await service.authenticate(bearer(request));
     if(request.method==='POST'&&parts.join('/')==='node/heartbeat')return data({...await service.heartbeat(node,await json(request)),nodeProtocol:3});
     if(request.method==='POST'&&parts.join('/')==='node/jobs/claim')return data(await service.claim(node,await json(request)));

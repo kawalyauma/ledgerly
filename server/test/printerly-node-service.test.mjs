@@ -4,44 +4,11 @@ import {Readable} from 'node:stream';
 import {secureReleasePin} from '../src/printerly/node-service.mjs';
 import route from '../src/http/routes/printerly.route.mjs';
 
-function request(method,path,body=null,headers={}){
-  const chunks=body==null?[]:[Buffer.from(JSON.stringify(body))];
-  const req=Readable.from(chunks);req.method=method;req.headers=headers;
-  return {request:req,url:new URL(`http://ledgerly.local${path}`)};
-}
-
-function runtime(){
-  const node={id:'node-1',organizationId:'org-1'};
-  return {extensions:{printerly:{node:{
-    async pair(body){return {nodeId:'node-1',echo:body.pairingCode};},
-    async authenticate(token){assert.equal(token,'secret');return node;},
-    async heartbeat(_node,body){return {ok:true,serverTime:'2026-09-11T09:00:00.000Z',version:body.version};},
-    async claim(){return {id:'job-1',claim_token:'claim-1'};},
-    async status(_node,id,body){return {id,status:body.status,costing:null};},
-    async redeem(){return {released:true,jobId:'job-1'};},
-    async document(){return {bytes:Buffer.from('pdf'),mimeType:'application/pdf',checksum:'abc',originalName:'job.pdf'};},
-  }}}}};
-}
+function request(method,path,body=null,headers={}){const chunks=body==null?[]:[Buffer.from(JSON.stringify(body))];const req=Readable.from(chunks);req.method=method;req.headers=headers;return {request:req,url:new URL(`http://ledgerly.local${path}`)};}
+function runtime(){const node={id:'node-1',organizationId:'org-1'};return {extensions:{printerly:{node:{async pair(body){return {nodeId:'node-1',echo:body.pairingCode};},async authenticate(token){assert.equal(token,'secret');return node;},async heartbeat(_node,body){return {ok:true,serverTime:'2026-09-11T09:00:00.000Z',version:body.version};},async claim(){return {id:'job-1',claim_token:'claim-1'};},async status(_node,id,body){return {id,status:body.status,costing:null};},async redeem(){return {released:true,jobId:'job-1'};},async document(){return {bytes:Buffer.from('pdf'),mimeType:'application/pdf',checksum:'abc',originalName:'job.pdf'};}}}}}};}
 
 test('secure release PINs are six cryptographically generated digits',()=>{for(let i=0;i<100;i++)assert.match(secureReleasePin(),/^\d{6}$/);});
-
+test('Printerly node compatibility owns only the node API prefix',()=>{assert.equal(route.prefix,'/api/v1/printerly/node');assert.equal('/api/v1/printerly/jobs'.startsWith(`${route.prefix}/`),false);assert.equal('/api/v1/printerly/node/jobs/claim'.startsWith(`${route.prefix}/`),true);});
 test('Printerly legacy route is disabled unless cutover is explicitly node',()=>{assert.equal(route.business,true);assert.equal(route.enabled({extensions:{printerly:{cutover:'cloudflare'}}}),false);assert.equal(route.enabled({extensions:{printerly:{cutover:'shadow'}}}),false);assert.equal(route.enabled({extensions:{printerly:{cutover:'node'}}}),true);});
-
-test('Printerly legacy node JSON contract always wraps successful payloads in data',async()=>{
-  const rt=runtime(),auth={authorization:'Bearer secret'};
-  let response=await route.handle({...request('POST','/api/v1/printerly/node/pair',{pairingCode:'123456'}),runtime:rt});
-  assert.deepEqual(response.body,{data:{nodeId:'node-1',echo:'123456'}});
-  response=await route.handle({...request('POST','/api/v1/printerly/node/heartbeat',{version:'1.2.0'},auth),runtime:rt});
-  assert.equal(response.body.data.nodeProtocol,3);assert.equal(response.body.data.ok,true);
-  response=await route.handle({...request('POST','/api/v1/printerly/node/jobs/claim',{printerSystemNames:['Office']},auth),runtime:rt});
-  assert.deepEqual(response.body,{data:{id:'job-1',claim_token:'claim-1'}});
-  response=await route.handle({...request('POST','/api/v1/printerly/node/jobs/job-1/status',{status:'completed'},auth),runtime:rt});
-  assert.deepEqual(response.body,{data:{id:'job-1',status:'completed',costing:null}});
-  response=await route.handle({...request('POST','/api/v1/printerly/node/release',{pin:'123456'},auth),runtime:rt});
-  assert.deepEqual(response.body,{data:{released:true,jobId:'job-1'}});
-});
-
-test('Printerly legacy document route remains binary and accepts query claim token',async()=>{
-  const response=await route.handle({...request('GET','/api/v1/printerly/node/jobs/job-1/document?claimToken=claim-1',null,{authorization:'Bearer secret'}),runtime:runtime()});
-  assert.equal(response.status,200);assert.equal(response.rawBody.toString(),'pdf');assert.equal(response.headers['x-printerly-sha256'],'abc');
-});
+test('Printerly legacy node JSON contract always wraps successful payloads in data',async()=>{const rt=runtime(),auth={authorization:'Bearer secret'};let response=await route.handle({...request('POST','/api/v1/printerly/node/pair',{pairingCode:'123456'}),runtime:rt});assert.deepEqual(response.body,{data:{nodeId:'node-1',echo:'123456'}});response=await route.handle({...request('POST','/api/v1/printerly/node/heartbeat',{version:'1.2.0'},auth),runtime:rt});assert.equal(response.body.data.nodeProtocol,3);assert.equal(response.body.data.ok,true);response=await route.handle({...request('POST','/api/v1/printerly/node/jobs/claim',{printerSystemNames:['Office']},auth),runtime:rt});assert.deepEqual(response.body,{data:{id:'job-1',claim_token:'claim-1'}});response=await route.handle({...request('POST','/api/v1/printerly/node/jobs/job-1/status',{status:'completed'},auth),runtime:rt});assert.deepEqual(response.body,{data:{id:'job-1',status:'completed',costing:null}});response=await route.handle({...request('POST','/api/v1/printerly/node/release',{pin:'123456'},auth),runtime:rt});assert.deepEqual(response.body,{data:{released:true,jobId:'job-1'}});});
+test('Printerly legacy document route remains binary and accepts query claim token',async()=>{const response=await route.handle({...request('GET','/api/v1/printerly/node/jobs/job-1/document?claimToken=claim-1',null,{authorization:'Bearer secret'}),runtime:runtime()});assert.equal(response.status,200);assert.equal(response.rawBody.toString(),'pdf');assert.equal(response.headers['x-printerly-sha256'],'abc');});
