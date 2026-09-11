@@ -24,10 +24,13 @@ test('Printerly batch dispatch leases work and commits policy, approval, quota a
   assert.match(source,/INSERT INTO prn_dispatch_outbox/);
 });
 
-test('Printerly extension routes durable batch jobs through policy-aware batch service',async()=>{
+test('Printerly extension routes only authoritative durable batch jobs through policy-aware batch service',async()=>{
   const source=await readFile(new URL('../src/extensions/printerly.extension.mjs',import.meta.url),'utf8');
   assert.match(source,/new PrinterlyBatchService/);
+  assert.match(source,/'printerly\.batch-dispatch':'batchCutover'/);
+  assert.match(source,/'printerly\.batch-status':'batchCutover'/);
   assert.match(source,/'printerly\.batch-dispatch':runBatch/);
-  assert.match(source,/await batches\.dispatch\(organizationId\)/);
-  assert.match(source,/await maintenance\.batchStatus\(organizationId\)/);
+  assert.match(source,/if\(!kindEnabled\(job\.kind\)\)return\{skipped:true,reason:'cloudflare-authoritative'\}/);
+  assert.match(source,/await batches\.dispatch\(org\)/);
+  assert.match(source,/await maintenance\.batchStatus\(org\)/);
 });

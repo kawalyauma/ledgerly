@@ -1,6 +1,10 @@
 import {PrinterlyRuntimeService} from '../printerly/runtime-service.mjs';
 import {PrinterlyCostingService} from '../printerly/costing-service.mjs';
 import {PrinterlyNodeService} from '../printerly/node-service.mjs';
+import {PrinterlyScannerService} from '../printerly/scanner-service.mjs';
+import {PrinterlyProcurementService} from '../printerly/procurement-service.mjs';
+import {PrinterlyHardenedManagementService} from '../printerly/management-hardening-service.mjs';
+import {PrinterlyOperationsService} from '../printerly/operations-service.mjs';
 import {PrinterlyDispatchWorker} from '../printerly/dispatch-worker.mjs';
 import {PrinterlyMaintenanceService} from '../printerly/maintenance-service.mjs';
 import {PrinterlyBatchService} from '../printerly/batch-service.mjs';
@@ -9,42 +13,26 @@ import {PrinterlyApprovalService} from '../printerly/approval-service.mjs';
 import {PrinterlyDocumentService} from '../printerly/document-service.mjs';
 import {PrinterlyQueueWorker} from '../printerly/queue-worker.mjs';
 import {PrinterlyScheduleRegistry} from '../printerly/schedule-registry.mjs';
-
 const modes=new Set(['cloudflare','shadow','node']);
 function mode(value,name='LEDGERLY_PRINTERLY_CUTOVER'){const v=String(value||'cloudflare').toLowerCase();if(!modes.has(v))throw new Error(`${name} must be cloudflare, shadow, or node`);return v;}
-
+const surface=(env,key,legacy)=>mode(env[key]??legacy,key);
 export default{
-  name:'printerly',required:false,
-  configure(env){const cutover=mode(env.LEDGERLY_PRINTERLY_CUTOVER),jobCutover=mode(env.LEDGERLY_PRINTERLY_JOB_CUTOVER,'LEDGERLY_PRINTERLY_JOB_CUTOVER');if(jobCutover==='node'&&cutover!=='node')throw new Error('LEDGERLY_PRINTERLY_JOB_CUTOVER=node requires LEDGERLY_PRINTERLY_CUTOVER=node so accepted jobs can be claimed by self-hosted Printerly Nodes');return{cutover,jobCutover,outboxPollMs:Math.max(500,Number(env.LEDGERLY_PRINTERLY_OUTBOX_POLL_MS)||2000),workerPollMs:Math.max(250,Number(env.LEDGERLY_PRINTERLY_WORKER_POLL_MS)||1000)};},
-  enabled(){return true;},
-  async create({services,createQueue,extensionConfig}){
-    const queue=createQueue({name:'printerly',maxAttempts:8});
-    const runtime=new PrinterlyRuntimeService({database:services.database});
-    const costing=new PrinterlyCostingService({database:services.database});
-    const node=new PrinterlyNodeService({database:services.database,storage:services.storage,runtime,costing});
-    const jobs=new PrinterlyJobService({database:services.database,runtime});
-    const approvals=new PrinterlyApprovalService({database:services.database});
-    const documents=new PrinterlyDocumentService({database:services.database,storage:services.storage});
-    const outbox=new PrinterlyDispatchWorker({database:services.database,queue,maxAttempts:8});
-    const maintenance=new PrinterlyMaintenanceService({database:services.database,storage:services.storage,runtime});
-    const batches=new PrinterlyBatchService({database:services.database});
-    const schedules=new PrinterlyScheduleRegistry({database:services.database,scheduler:services.scheduler});
-    const authoritative=extensionConfig.cutover==='node';
-    const organization=job=>{const organizationId=String(job.organizationId||job.payload?.organizationId||'').trim();if(!organizationId)throw new Error('Printerly job is missing organizationId');return organizationId;};
-    const run=method=>async job=>{if(!authoritative)return{skipped:true,reason:'cloudflare-authoritative'};return maintenance[method](organization(job));};
-    const runBatch=async job=>{if(!authoritative)return{skipped:true,reason:'cloudflare-authoritative'};const organizationId=organization(job),result=await batches.dispatch(organizationId);await maintenance.batchStatus(organizationId);return result;};
-    const worker=new PrinterlyQueueWorker({queue,handlers:{'printerly.health':run('health'),'printerly.batch-dispatch':runBatch,'printerly.batch-status':run('batchStatus'),'printerly.retention':run('retention'),'printerly.consumables':run('consumables'),'printerly.service-sla':run('serviceSla'),'printerly.routing':run('routing'),'printerly.release-cleanup':run('releaseCleanup'),'printerly.procurement':run('procurement')}});
-    let outboxTimer=null,workerTimer=null,outboxBusy=false,workerBusy=false,scheduleState={enabled:false};
-    const drainOutbox=async()=>{if(outboxBusy||extensionConfig.cutover==='cloudflare')return;outboxBusy=true;try{await outbox.drain({limit:100});}catch(error){console.error(JSON.stringify({level:'error',component:'printerly-outbox',message:error instanceof Error?error.message:String(error)}));}finally{outboxBusy=false;}};
-    const drainQueue=async()=>{if(workerBusy||extensionConfig.cutover==='cloudflare')return;workerBusy=true;try{await worker.runOnce({limit:50});}catch(error){console.error(JSON.stringify({level:'error',component:'printerly-worker',message:error instanceof Error?error.message:String(error)}));}finally{workerBusy=false;}};
-    try{scheduleState=await schedules.reconcile({enabled:authoritative});}catch(error){scheduleState={enabled:false,error:error instanceof Error?error.message:String(error)};console.error(JSON.stringify({level:'error',component:'printerly-schedules',message:scheduleState.error}));}
-    if(extensionConfig.cutover!=='cloudflare'){outboxTimer=setInterval(()=>void drainOutbox(),extensionConfig.outboxPollMs);outboxTimer.unref?.();workerTimer=setInterval(()=>void drainQueue(),extensionConfig.workerPollMs);workerTimer.unref?.();void drainOutbox();void drainQueue();}
-    return{
-      value:Object.freeze({cutover:extensionConfig.cutover,jobCutover:extensionConfig.jobCutover,queue,runtime,costing,node,jobs,approvals,documents,outbox,maintenance,batches,worker,schedules}),
-      schedulerQueues:Object.fromEntries(['printerly.health','printerly.batch-dispatch','printerly.batch-status','printerly.retention','printerly.consumables','printerly.service-sla','printerly.routing','printerly.release-cleanup','printerly.procurement'].map(kind=>[kind,queue])),
-      async readiness(){if(extensionConfig.cutover==='cloudflare'&&extensionConfig.jobCutover==='cloudflare')return{ok:true,cutover:'cloudflare',jobCutover:'cloudflare',authoritative:false,schedules:scheduleState};const[deadOutbox,deadQueue]=await Promise.all([services.database.query(`SELECT COUNT(*)::int count FROM prn_dispatch_outbox WHERE status='dead'`),queue.deadLetterSize()]);return{ok:Number(deadOutbox.rows[0]?.count||0)===0&&Number(deadQueue||0)===0&&!scheduleState.error,cutover:extensionConfig.cutover,jobCutover:extensionConfig.jobCutover,authoritative,deadOutbox:Number(deadOutbox.rows[0]?.count||0),deadQueue:Number(deadQueue||0),schedules:scheduleState};},
-      describe(){return{cutover:extensionConfig.cutover,jobCutover:extensionConfig.jobCutover,legacyNodeApi:authoritative,jobApi:extensionConfig.jobCutover==='node',outbox:'postgres-to-redis',worker:extensionConfig.cutover==='cloudflare'?'disabled':'redis-consumer',schedules:scheduleState};},
-      async close(){if(outboxTimer)clearInterval(outboxTimer);if(workerTimer)clearInterval(workerTimer);},
-    };
-  },
+ name:'printerly',required:false,
+ configure(env){
+  const cutover=mode(env.LEDGERLY_PRINTERLY_CUTOVER),nodeCutover=surface(env,'LEDGERLY_PRINTERLY_NODE_CUTOVER',cutover),jobCutover=mode(env.LEDGERLY_PRINTERLY_JOB_CUTOVER,'LEDGERLY_PRINTERLY_JOB_CUTOVER'),scannerCutover=surface(env,'LEDGERLY_PRINTERLY_SCANNER_CUTOVER',cutover),procurementCutover=surface(env,'LEDGERLY_PRINTERLY_PROCUREMENT_CUTOVER',cutover),coreCutover=surface(env,'LEDGERLY_PRINTERLY_CORE_CUTOVER',cutover),governanceCutover=surface(env,'LEDGERLY_PRINTERLY_GOVERNANCE_CUTOVER',cutover),batchCutover=surface(env,'LEDGERLY_PRINTERLY_BATCH_CUTOVER',cutover),routingCutover=surface(env,'LEDGERLY_PRINTERLY_ROUTING_CUTOVER',cutover),releaseCutover=surface(env,'LEDGERLY_PRINTERLY_RELEASE_CUTOVER',cutover),retentionCutover=surface(env,'LEDGERLY_PRINTERLY_RETENTION_CUTOVER',cutover),suppliesCutover=surface(env,'LEDGERLY_PRINTERLY_SUPPLIES_CUTOVER',cutover),serviceDeskCutover=surface(env,'LEDGERLY_PRINTERLY_SERVICE_DESK_CUTOVER',cutover),auditCutover=surface(env,'LEDGERLY_PRINTERLY_AUDIT_CUTOVER',cutover);
+  if(jobCutover==='node'&&nodeCutover!=='node')throw new Error('LEDGERLY_PRINTERLY_JOB_CUTOVER=node requires LEDGERLY_PRINTERLY_NODE_CUTOVER=node so accepted jobs can be claimed by self-hosted Printerly Nodes');
+  return{cutover,nodeCutover,jobCutover,scannerCutover,procurementCutover,coreCutover,governanceCutover,batchCutover,routingCutover,releaseCutover,retentionCutover,suppliesCutover,serviceDeskCutover,auditCutover,outboxPollMs:Math.max(500,Number(env.LEDGERLY_PRINTERLY_OUTBOX_POLL_MS)||2000),workerPollMs:Math.max(250,Number(env.LEDGERLY_PRINTERLY_WORKER_POLL_MS)||1000)};
+ },
+ enabled(){return true;},
+ async create({services,createQueue,extensionConfig}){
+  const queue=createQueue({name:'printerly',maxAttempts:8}),runtime=new PrinterlyRuntimeService({database:services.database}),costing=new PrinterlyCostingService({database:services.database}),node=new PrinterlyNodeService({database:services.database,storage:services.storage,runtime,costing}),scanner=new PrinterlyScannerService({database:services.database,storage:services.storage}),procurement=new PrinterlyProcurementService({database:services.database}),jobs=new PrinterlyJobService({database:services.database,runtime}),approvals=new PrinterlyApprovalService({database:services.database}),documents=new PrinterlyDocumentService({database:services.database,storage:services.storage}),outbox=new PrinterlyDispatchWorker({database:services.database,queue,maxAttempts:8}),maintenance=new PrinterlyMaintenanceService({database:services.database,storage:services.storage,runtime}),batches=new PrinterlyBatchService({database:services.database}),management=new PrinterlyHardenedManagementService({database:services.database,runtime,costing,jobs}),operations=new PrinterlyOperationsService({database:services.database,storage:services.storage,batches,maintenance,management}),schedules=new PrinterlyScheduleRegistry({database:services.database,scheduler:services.scheduler});
+  const surfaces=['cutover','nodeCutover','jobCutover','scannerCutover','procurementCutover','coreCutover','governanceCutover','batchCutover','routingCutover','releaseCutover','retentionCutover','suppliesCutover','serviceDeskCutover','auditCutover'],runtimeEnabled=surfaces.some(k=>extensionConfig[k]!=='cloudflare'),organization=job=>{const v=String(job.organizationId||job.payload?.organizationId||'').trim();if(!v)throw new Error('Printerly job is missing organizationId');return v;};
+  const owner={'printerly.health':'coreCutover','printerly.batch-dispatch':'batchCutover','printerly.batch-status':'batchCutover','printerly.retention':'retentionCutover','printerly.consumables':'suppliesCutover','printerly.service-sla':'serviceDeskCutover','printerly.routing':'routingCutover','printerly.release-cleanup':'releaseCutover','printerly.procurement':'procurementCutover'},kindEnabled=kind=>extensionConfig[owner[kind]]==='node',run=method=>async job=>kindEnabled(job.kind)?maintenance[method](organization(job)):{skipped:true,reason:'cloudflare-authoritative'},runBatch=async job=>{if(!kindEnabled(job.kind))return{skipped:true,reason:'cloudflare-authoritative'};const org=organization(job),result=await batches.dispatch(org);await maintenance.batchStatus(org);return result;},worker=new PrinterlyQueueWorker({queue,handlers:{'printerly.health':run('health'),'printerly.batch-dispatch':runBatch,'printerly.batch-status':run('batchStatus'),'printerly.retention':run('retention'),'printerly.consumables':run('consumables'),'printerly.service-sla':run('serviceSla'),'printerly.routing':run('routing'),'printerly.release-cleanup':run('releaseCleanup'),'printerly.procurement':run('procurement')}});
+  let outboxTimer=null,workerTimer=null,outboxBusy=false,workerBusy=false,scheduleState={enabled:false};
+  const drainOutbox=async()=>{if(outboxBusy||!runtimeEnabled)return;outboxBusy=true;try{await outbox.drain({limit:100});}catch(error){console.error(JSON.stringify({level:'error',component:'printerly-outbox',message:error instanceof Error?error.message:String(error)}));}finally{outboxBusy=false;}},drainQueue=async()=>{if(workerBusy||!runtimeEnabled)return;workerBusy=true;try{await worker.runOnce({limit:50});}catch(error){console.error(JSON.stringify({level:'error',component:'printerly-worker',message:error instanceof Error?error.message:String(error)}));}finally{workerBusy=false;}};
+  const enabledKinds=Object.keys(owner).filter(kind=>kindEnabled(kind));try{scheduleState=await schedules.reconcile({enabled:enabledKinds.length>0,enabledKinds});}catch(error){scheduleState={enabled:false,error:error instanceof Error?error.message:String(error)};console.error(JSON.stringify({level:'error',component:'printerly-schedules',message:scheduleState.error}));}
+  if(runtimeEnabled){outboxTimer=setInterval(()=>void drainOutbox(),extensionConfig.outboxPollMs);outboxTimer.unref?.();workerTimer=setInterval(()=>void drainQueue(),extensionConfig.workerPollMs);workerTimer.unref?.();void drainOutbox();void drainQueue();}
+  const cutovers=Object.fromEntries(surfaces.map(k=>[k,extensionConfig[k]]));
+  return{value:Object.freeze({...cutovers,queue,runtime,costing,node,scanner,procurement,jobs,approvals,documents,outbox,maintenance,batches,management,operations,worker,schedules}),schedulerQueues:Object.fromEntries(Object.keys(owner).map(kind=>[kind,queue])),async readiness(){if(!runtimeEnabled)return{ok:true,...cutovers,authoritative:false,schedules:scheduleState};const[deadOutbox,deadQueue]=await Promise.all([services.database.query(`SELECT COUNT(*)::int count FROM prn_dispatch_outbox WHERE status='dead'`),queue.deadLetterSize()]);return{ok:Number(deadOutbox.rows[0]?.count||0)===0&&Number(deadQueue||0)===0&&!scheduleState.error,...cutovers,deadOutbox:Number(deadOutbox.rows[0]?.count||0),deadQueue:Number(deadQueue||0),schedules:scheduleState};},describe(){return{...cutovers,outbox:'postgres-to-redis',worker:runtimeEnabled?'redis-consumer':'disabled',schedules:scheduleState};},async close(){if(outboxTimer)clearInterval(outboxTimer);if(workerTimer)clearInterval(workerTimer);}};
+ }
 };
