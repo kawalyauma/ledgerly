@@ -6,6 +6,7 @@ import { RedisCache, createRedisClient } from "./adapters/redis-cache.mjs";
 import { createRedisEventBus } from "./adapters/redis-events.mjs";
 import { RedisQueue } from "./adapters/redis-queue.mjs";
 import { createMinioStorage } from "./adapters/minio-storage.mjs";
+import { createTenantStorageFactory } from "./adapters/tenant-storage.mjs";
 import { createNotificationBridge } from "./adapters/notification-bridge.mjs";
 import { KindRoutingQueue } from "./adapters/kind-routing-queue.mjs";
 import { SchedulerRunner } from "./scheduler-runner.mjs";
@@ -29,6 +30,7 @@ export async function createRuntime(config) {
   try {
     redisClient = await createRedisClient(config.redis);
     const storage = await createMinioStorage(config.objectStorage);
+    const tenantStorage = createTenantStorageFactory(storage);
     const scheduler = await createPostgresScheduler({ database });
     const audit = await createPostgresAudit({ database });
     events = await createRedisEventBus({
@@ -80,6 +82,7 @@ export async function createRuntime(config) {
       services,
       auth,
       authorization,
+      tenantStorage,
       createQueue,
     });
 
@@ -149,6 +152,7 @@ export async function createRuntime(config) {
         notificationBridgeReady: true,
         authCompatibilityReady: true,
         backgroundAuthorizationReady: true,
+        tenantStorageReady: true,
         runtimeExtensionRegistryReady: true,
         runtimeExtensionDescriptors: listRuntimeExtensionDescriptors(),
         extensions: runtimeExtensions.describe(),
@@ -174,6 +178,7 @@ export async function createRuntime(config) {
       services,
       auth,
       authorization,
+      tenantStorage,
       extensions: runtimeExtensions.values,
       readiness,
       describeContracts,
