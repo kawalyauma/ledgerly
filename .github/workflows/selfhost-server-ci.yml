@@ -9,14 +9,18 @@ on:
     paths:
       - "server/**"
       - "selfhost/**"
+      - "camera-server/mediamtx.yml"
       - "compose.selfhost.yml"
+      - "compose.finance-runtime.yml"
       - ".env.selfhost.example"
       - ".github/workflows/selfhost-server-ci.yml"
   pull_request:
     paths:
       - "server/**"
       - "selfhost/**"
+      - "camera-server/mediamtx.yml"
       - "compose.selfhost.yml"
+      - "compose.finance-runtime.yml"
       - ".env.selfhost.example"
       - ".github/workflows/selfhost-server-ci.yml"
 
@@ -40,9 +44,22 @@ jobs:
       - run: npm run check
       - run: npm test
 
-  compose:
+  operations-static:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate self-hosted compose configuration
-        run: docker compose --env-file .env.selfhost.example -f compose.selfhost.yml config --quiet
+      - name: Prepare non-production validation environment
+        run: |
+          cp .env.selfhost.example /tmp/ledgerly.env
+          sed -E -i 's/CHANGE_ME_[A-Za-z0-9_]+/ci-validation-secret-0123456789abcdef/g' /tmp/ledgerly.env
+          chmod 600 /tmp/ledgerly.env
+          mkdir -p /tmp/ledgerly-backups
+      - name: Validate base and finance/NVR Compose configuration
+        run: docker compose --env-file /tmp/ledgerly.env -f compose.selfhost.yml -f compose.finance-runtime.yml config --quiet
+      - name: Run safe operations production-readiness checks
+        env:
+          LEDGERLY_ENV_FILE: /tmp/ledgerly.env
+          LEDGERLY_BACKUP_ENV_FILE: /tmp/ledgerly-no-backup-env
+          BACKUP_ROOT: /tmp/ledgerly-backups
+          OPS_LIVE_TESTS: "false"
+        run: selfhost/ops/validate-production.sh

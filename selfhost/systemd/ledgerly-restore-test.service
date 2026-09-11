@@ -1,0 +1,24 @@
+[Unit]
+Description=Ledgerly disposable backup restore rehearsal
+Wants=docker.service
+After=docker.service network-online.target ledgerly-backup.service
+ConditionPathExists=/etc/ledgerly/ledgerly.env
+ConditionPathExists=/etc/ledgerly/backup.env
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/etc/ledgerly/backup.env
+WorkingDirectory=/opt/ledgerly
+ExecStart=/opt/ledgerly/selfhost/backups/test-latest-restore.sh
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/backups/ledgerly /run /var/run
+NoNewPrivileges=true
+UMask=0077
+TimeoutStartSec=6h

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Ledgerly verified backups nightly
+
+[Timer]
+OnCalendar=*-*-* 02:15:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=ledgerly-backup.service
+
+[Install]
+WantedBy=timers.target

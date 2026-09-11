@@ -1,0 +1,22 @@
+[Unit]
+Description=Ledgerly self-hosted health and backup freshness check
+After=docker.service network-online.target
+Wants=docker.service network-online.target
+ConditionPathExists=/etc/ledgerly/ledgerly.env
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=LEDGERLY_REPO_ROOT=/opt/ledgerly
+Environment=LEDGERLY_ENV_FILE=/etc/ledgerly/ledgerly.env
+Environment=LEDGERLY_BACKUP_ENV_FILE=/etc/ledgerly/backup.env
+WorkingDirectory=/opt/ledgerly
+ExecStart=/opt/ledgerly/selfhost/ops/health-check.sh
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadOnlyPaths=/opt/ledgerly /etc/ledgerly
+NoNewPrivileges=true
+UMask=0077
+TimeoutStartSec=2m
