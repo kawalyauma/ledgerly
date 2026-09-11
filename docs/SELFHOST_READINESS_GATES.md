@@ -56,7 +56,7 @@ This fails closed unless:
 
 The output is JSON and should be archived with the cutover record.
 
-A successful readiness command does **not** by itself authorize cutover. Migration coverage, restore, load, financial reconciliation, object migration, Printerly, NVR and AI operational checks still apply.
+A successful readiness command does **not** by itself authorize cutover. Migration coverage, route authority, restore, load, financial reconciliation, object migration, Printerly, NVR and AI operational checks still apply.
 
 ## 3. Security / exposure policy
 
@@ -89,7 +89,33 @@ Confirm the configured PostgreSQL, PgBouncer, Redis, MinIO and Node API host por
 
 If the repository is not the parent directory of `server/`, set `LEDGERLY_REPOSITORY_ROOT` before running the readiness commands.
 
-## 4. Bounded HTTP load smoke
+## 4. Business-route cutover authority
+
+Run:
+
+```bash
+npm run readiness:authority
+```
+
+The report inventories every discovered `business: true` HTTP descriptor and records its `/api/v1/*` prefix, source file, cutover capability and current `cloudflare`, `shadow` or `node` state.
+
+The HTTP registry fails closed when:
+
+- a business route has no reviewed authority-policy entry;
+- a policy entry references an unknown cutover capability;
+- the policy contains a stale route name or maps a non-business route;
+- a feature-enabled business route is not explicitly `node` authoritative.
+
+`cloudflare` and `shadow` therefore never expose the self-hosted `/api/v1/*` endpoint. Feature/module enablement and cutover authority are separate checks, so an accidentally permissive module flag cannot silently switch production authority.
+
+Current Printerly business capabilities default to Cloudflare:
+
+- node appliance API → `printerly.nodes`;
+- jobs/documents/approvals APIs → `printerly.jobs`.
+
+Archive this JSON whenever changing authority. A capability becoming `node` must be an explicit cutover decision backed by the corresponding migration, integrity, restore/rollback and operational evidence.
+
+## 5. Bounded HTTP load smoke
 
 The load tool performs GET requests only. The default target is `/selfhost/ready`, making the default run non-mutating.
 
@@ -118,7 +144,7 @@ npm run readiness:load
 
 Do not point `LEDGERLY_LOAD_PATH` at a mutating endpoint. For authenticated read-path load testing, use a dedicated test tenant and a separate purpose-built load harness rather than embedding production credentials in this command.
 
-## 5. Safe PostgreSQL restore drill
+## 6. Safe PostgreSQL restore drill
 
 A backup is not valid merely because `pg_dump` returned exit code 0. Run a disposable restore drill:
 
@@ -147,7 +173,7 @@ selfhost/backups/test-restore-postgres.sh /backups/postgres/ledgerly-20260911T10
 
 Never weaken the required `ledgerly_restore_test_` prefix. It is a guard against accidentally dropping/restoring the production database.
 
-## 6. Final cutover evidence bundle
+## 7. Final cutover evidence bundle
 
 Archive at minimum:
 
@@ -155,6 +181,7 @@ Archive at minimum:
 - `migration:rehearsal -- cutover-validate` JSON;
 - `readiness:migration` JSON;
 - `readiness:security` JSON;
+- `readiness:authority` JSON;
 - `readiness:cutover` JSON;
 - `readiness:load` JSON;
 - disposable restore-drill JSON;

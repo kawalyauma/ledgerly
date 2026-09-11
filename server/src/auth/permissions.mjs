@@ -6,6 +6,7 @@ export const ALL_SCOPES = Object.freeze([
   "students:read", "students:write", "staff:read", "staff:write", "academics:read", "academics:write",
   "fees:read", "fees:write", "finance:read", "finance:write", "inventory:read", "inventory:write",
   "tasks:read", "tasks:write", "approvals:read", "approvals:write", "notifications:send", "support:read", "support:write",
+  "security:read", "security:live", "security:export", "security:review", "security:manage",
   "ai:read", "ai:write", "ai:approve", "ai:knowledge:read", "ai:knowledge:write",
 ]);
 
