@@ -1,0 +1,2 @@
+import { canAccessCommunications } from '../communications-auth.mjs';
+export async function createCollection({services}){if(!services?.database)throw new TypeError('database service required');return Object.freeze({moduleKey:'communications',collectionKey:'deliveries',schemaVersion:2,async canRead({organizationId,userId}){return canAccessCommunications(services.database,{organizationId,userId,level:'read'});}});}
