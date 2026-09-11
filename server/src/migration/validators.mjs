@@ -1,6 +1,6 @@
 import { recordValidation } from "./bookkeeping.mjs";
 
-const RELATIONSHIP_CHECKS = Object.freeze([
+export const AUTH_CORE_RELATIONSHIP_CHECKS = Object.freeze([
   ["memberships.organization", `SELECT count(*)::bigint AS count FROM memberships x LEFT JOIN organizations p ON p.id=x.organization_id WHERE p.id IS NULL`],
   ["memberships.user", `SELECT count(*)::bigint AS count FROM memberships x LEFT JOIN users p ON p.id=x.user_id WHERE p.id IS NULL`],
   ["accounts.organization", `SELECT count(*)::bigint AS count FROM accounts x LEFT JOIN organizations p ON p.id=x.organization_id WHERE p.id IS NULL`],
@@ -17,9 +17,9 @@ const RELATIONSHIP_CHECKS = Object.freeze([
   ["school_login_events.user", `SELECT count(*)::bigint AS count FROM school_login_events x LEFT JOIN users p ON p.id=x.user_id WHERE x.user_id IS NOT NULL AND p.id IS NULL`],
 ]);
 
-export async function validateRelationships(database, runId) {
+export async function validateRelationshipChecks(database, runId, checks) {
   let failed = 0;
-  for (const [name, sql] of RELATIONSHIP_CHECKS) {
+  for (const [name, sql] of checks) {
     const result = await database.query(sql);
     const count = Number(result.rows[0]?.count ?? 0);
     const status = count === 0 ? "passed" : "failed";
@@ -31,7 +31,11 @@ export async function validateRelationships(database, runId) {
       actual: { orphanCount: count },
     });
   }
-  return { ok: failed === 0, failedChecks: failed, totalChecks: RELATIONSHIP_CHECKS.length };
+  return { ok: failed === 0, failedChecks: failed, totalChecks: checks.length };
+}
+
+export function validateRelationships(database, runId) {
+  return validateRelationshipChecks(database, runId, AUTH_CORE_RELATIONSHIP_CHECKS);
 }
 
 export async function validateTableCounts(database, source, runId, table) {

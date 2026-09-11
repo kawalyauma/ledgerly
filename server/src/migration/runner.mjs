@@ -1,6 +1,5 @@
-import { AUTH_CORE_TABLES } from "./auth-core-manifest.mjs";
-import { ensureAuthCoreSchema } from "./auth-core-schema.mjs";
 import {
+  assertMigrationPrerequisites,
   checkpointTable,
   createMigrationRun,
   ensureMigrationMetadata,
@@ -12,7 +11,8 @@ import {
   recordValidation,
   resumeLatestRun,
 } from "./bookkeeping.mjs";
-import { validateRelationships, validateTableCounts } from "./validators.mjs";
+import { getMigrationPhase } from "./phases.mjs";
+import { validateRelationshipChecks, validateTableCounts } from "./validators.mjs";
 
 function quoteIdentifier(value) {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) throw new TypeError(`Unsafe SQL identifier: ${value}`);
@@ -42,21 +42,32 @@ function buildUpsert(table, rows) {
 }
 
 export class D1MigrationRunner {
-  constructor({ database, source, sourceIdentity, batchSize = 250, logger = console }) {
+  constructor({ database, source, sourceIdentity, phase = "auth-core", batchSize = 250, logger = console }) {
     if (!database || !source) throw new TypeError("D1MigrationRunner requires database and source");
     this.database = database;
     this.source = source;
     this.sourceIdentity = sourceIdentity;
+    this.phase = typeof phase === "string" ? getMigrationPhase(phase) : phase;
+    if (!this.phase?.name || !Array.isArray(this.phase.tables) || typeof this.phase.ensureSchema !== "function") {
+      throw new TypeError("D1MigrationRunner requires a valid migration phase");
+    }
     this.batchSize = Math.max(1, Math.min(Number(batchSize) || 250, 1000));
     this.logger = logger;
   }
 
   async prepare() {
     await ensureMigrationMetadata(this.database);
-    await ensureAuthCoreSchema(this.database);
+    await this.phase.ensureSchema(this.database);
   }
 
-  async plan(tables = AUTH_CORE_TABLES) {
+  async assertPrerequisites() {
+    return assertMigrationPrerequisites(this.database, {
+      sourceIdentity: this.sourceIdentity,
+      prerequisites: this.phase.prerequisites ?? [],
+    });
+  }
+
+  async plan(tables = this.phase.tables) {
     const items = [];
     for (const table of tables) {
       const exists = await this.source.tableExists(table.name);
@@ -67,29 +78,39 @@ export class D1MigrationRunner {
         dependencies: table.dependencies,
       });
     }
-    return { phase: "auth-core", sourceIdentity: this.sourceIdentity, tables: items };
+    return {
+      phase: this.phase.name,
+      description: this.phase.description,
+      prerequisites: this.phase.prerequisites ?? [],
+      sourceIdentity: this.sourceIdentity,
+      tables: items,
+    };
   }
 
-  async run({ resume = true, tables = AUTH_CORE_TABLES } = {}) {
+  async run({ resume = true, tables = this.phase.tables } = {}) {
     await this.prepare();
-    const existingRun = resume ? await resumeLatestRun(this.database, { sourceIdentity: this.sourceIdentity, phase: "auth-core" }) : null;
+    await this.assertPrerequisites();
+    const phaseName = this.phase.name;
+    const existingRun = resume ? await resumeLatestRun(this.database, { sourceIdentity: this.sourceIdentity, phase: phaseName }) : null;
     const runId = existingRun ?? await createMigrationRun(this.database, {
       sourceIdentity: this.sourceIdentity,
-      phase: "auth-core",
-      metadata: { batchSize: this.batchSize, tableCount: tables.length },
+      phase: phaseName,
+      metadata: { batchSize: this.batchSize, tableCount: tables.length, prerequisites: this.phase.prerequisites ?? [] },
     });
 
     try {
       for (const table of tables) await this.copyTable(runId, table);
+      if (typeof this.phase.finalizeSchema === "function") await this.phase.finalizeSchema(this.database);
+
       let validationFailed = false;
       for (const table of tables) {
         const result = await validateTableCounts(this.database, this.source, runId, table);
         if (!result.ok) validationFailed = true;
       }
-      const relationships = await validateRelationships(this.database, runId);
+      const relationships = await validateRelationshipChecks(this.database, runId, this.phase.relationshipChecks ?? []);
       if (!relationships.ok) validationFailed = true;
       await finishRun(this.database, runId, validationFailed ? "validation_failed" : "completed");
-      return { runId, status: validationFailed ? "validation_failed" : "completed" };
+      return { runId, phase: phaseName, status: validationFailed ? "validation_failed" : "completed" };
     } catch (error) {
       await finishRun(this.database, runId, "failed", error instanceof Error ? error.message : String(error)).catch(() => undefined);
       throw error;
@@ -104,7 +125,7 @@ export class D1MigrationRunner {
     }
 
     const sourceCountStart = await this.source.count(table.name);
-    let state = await ensureTableState(this.database, runId, table.name, sourceCountStart);
+    const state = await ensureTableState(this.database, runId, table.name, sourceCountStart);
     if (state.status === "validated") return;
     await markTableCopying(this.database, runId, table.name);
     let cursor = Number(state.last_rowid ?? 0);
@@ -128,7 +149,7 @@ export class D1MigrationRunner {
         });
         cursor = nextCursor;
         copiedRows = nextCopiedRows;
-        this.logger.info?.(JSON.stringify({ component: "d1-migration", runId, table: table.name, copiedRows, cursor }));
+        this.logger.info?.(JSON.stringify({ component: "d1-migration", phase: this.phase.name, runId, table: table.name, copiedRows, cursor }));
       }
 
       const sourceCountEnd = await this.source.count(table.name);
@@ -149,8 +170,10 @@ export class D1MigrationRunner {
     }
   }
 
-  async validate({ runId, tables = AUTH_CORE_TABLES }) {
+  async validate({ runId, tables = this.phase.tables }) {
     await this.prepare();
+    await this.assertPrerequisites();
+    if (typeof this.phase.finalizeSchema === "function") await this.phase.finalizeSchema(this.database);
     let failed = false;
     const counts = [];
     for (const table of tables) {
@@ -158,8 +181,8 @@ export class D1MigrationRunner {
       counts.push({ table: table.name, ...result });
       if (!result.ok) failed = true;
     }
-    const relationships = await validateRelationships(this.database, runId);
+    const relationships = await validateRelationshipChecks(this.database, runId, this.phase.relationshipChecks ?? []);
     if (!relationships.ok) failed = true;
-    return { ok: !failed, counts, relationships };
+    return { ok: !failed, phase: this.phase.name, counts, relationships };
   }
 }

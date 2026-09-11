@@ -2,9 +2,6 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Local/offline AI document extraction. No remote document-processing service is required.
-RUN apk add --no-cache poppler-utils
-
 COPY package.json ./package.json
 RUN npm install --omit=dev --no-audit --no-fund
 

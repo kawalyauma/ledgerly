@@ -3,7 +3,6 @@ export const ALL_SCOPES = Object.freeze([
   "contacts:read", "contacts:write", "products:read", "products:write", "documents:read", "documents:write",
   "payments:read", "payments:write", "payroll:read", "payroll:write", "periods:read", "periods:write",
   "admin:read", "admin:write", "communications:read", "communications:write", "school:read", "school:write",
-  "ai:read", "ai:write", "ai:approve",
 ]);
 
 export function parseScopes(value) {
@@ -17,8 +16,15 @@ export function parseScopes(value) {
   }
 }
 
+export function effectiveScopes(principal) {
+  if (!principal) return [];
+  if (principal.role === "owner" || principal.role === "admin") return ["*"];
+  return [...new Set(parseScopes(principal.scopes))];
+}
+
 export function hasScope(principal, scope) {
   if (!principal) return false;
   if (principal.role === "owner" || principal.role === "admin") return true;
-  return Array.isArray(principal.scopes) && principal.scopes.includes(scope);
+  const scopes = effectiveScopes(principal);
+  return scopes.includes("*") || scopes.includes(scope);
 }
