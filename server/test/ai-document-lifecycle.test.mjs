@@ -1,0 +1,106 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { AiDocumentEngine } from "../src/ai/document-engine.mjs";
+import { createAiDocumentRenderer } from "../src/ai/document-renderer.mjs";
+
+function makeDocumentDatabase(initial) {
+  const state={
+    ...initial,
+    approvals:[...(initial.approvals??[])],
+    human_editors:[...(initial.human_editors??[])],
+  };
+  const db={
+    async transaction(work){return work(db);},
+    async query(sql,params=[]) {
+      if(sql.includes("SELECT * FROM ledgerly_ai.documents")) return {rows:[{...state}],rowCount:1};
+      if(sql.startsWith("UPDATE ledgerly_ai.documents SET status=")) {
+        const [status,approvalJson]=params;
+        state.status=status;
+        if(approvalJson)state.approvals.push(JSON.parse(approvalJson));
+        if(status==="changes_requested")state.rendered_pdf_ref=null;
+        return {rows:[{...state}],rowCount:1};
+      }
+      if(sql.startsWith("UPDATE ledgerly_ai.documents SET content=")) {
+        const [contentJson,version,provenanceJson,humanEditorsJson]=params;
+        state.content=JSON.parse(contentJson);
+        state.version=version;
+        state.ai_provenance=JSON.parse(provenanceJson);
+        if(humanEditorsJson)state.human_editors.push(...JSON.parse(humanEditorsJson));
+        state.rendered_pdf_ref=null;
+        return {rows:[{...state}],rowCount:1};
+      }
+      if(sql.startsWith("INSERT INTO ledgerly_ai.document_versions")) return {rows:[],rowCount:1};
+      if(sql.startsWith("UPDATE ledgerly_ai.documents SET rendered_pdf_ref=")) {
+        const [ref,,org,version]=params;
+        if(org!==state.organization_id||Number(version)!==Number(state.version))return {rows:[],rowCount:0};
+        state.rendered_pdf_ref=ref;
+        return {rows:[{...state}],rowCount:1};
+      }
+      throw new Error(`unexpected SQL in document test: ${sql}`);
+    },
+  };
+  return {db,state};
+}
+
+const context={organizationId:"org-1",userId:"director-1",userName:"Director"};
+
+test("official document approval requires the review state and records the human approval",async()=>{
+  const {db,state}=makeDocumentDatabase({document_id:"doc-1",organization_id:"org-1",type:"letter",title:"Parents Notice",content:{body:"Draft"},version:1,status:"draft",creator:{actor_type:"ai_agent"},ai_provenance:{fields:{}},rendered_pdf_ref:null});
+  const engine=new AiDocumentEngine({database:db,audit:null});
+
+  await assert.rejects(
+    engine.setStatus({context,documentId:"doc-1",status:"approved"}),
+    (error)=>error?.code==="AI_DOCUMENT_INVALID_STATUS_TRANSITION",
+  );
+
+  await engine.setStatus({context,documentId:"doc-1",status:"in_review",reason:"Ready for review"});
+  const approved=await engine.setStatus({context,documentId:"doc-1",status:"approved",reason:"Approved by Director"});
+  assert.equal(approved.status,"approved");
+  assert.equal(state.approvals.length,1);
+  assert.equal(state.approvals[0].approved_by,"director-1");
+  assert.equal(state.approvals[0].version,1);
+});
+
+test("approved documents are immutable until an approver explicitly reopens them",async()=>{
+  const {db,state}=makeDocumentDatabase({document_id:"doc-2",organization_id:"org-1",type:"letter",title:"Circular",content:{body:"Approved copy"},version:2,status:"approved",creator:{actor_type:"ai_agent"},ai_provenance:{fields:{}},rendered_pdf_ref:"ai/documents/doc-2/v2.pdf"});
+  const engine=new AiDocumentEngine({database:db,audit:null});
+
+  await assert.rejects(
+    engine.reviseHuman({context,documentId:"doc-2",content:{body:"Silent edit"}}),
+    (error)=>error?.code==="AI_DOCUMENT_NOT_EDITABLE",
+  );
+
+  await engine.setStatus({context,documentId:"doc-2",status:"changes_requested",reason:"Correct the closing date"});
+  assert.equal(state.rendered_pdf_ref,null);
+  const revised=await engine.reviseHuman({context,documentId:"doc-2",content:{body:"Corrected copy"},reason:"Correct date"});
+  assert.equal(revised.version,3);
+  assert.deepEqual(revised.content,{body:"Corrected copy"});
+});
+
+test("published documents cannot be silently reopened or edited",async()=>{
+  const {db}=makeDocumentDatabase({document_id:"doc-3",organization_id:"org-1",type:"notice",title:"Published",content:{body:"Final"},version:4,status:"published",creator:{actor_type:"human"},ai_provenance:{fields:{}},rendered_pdf_ref:"ai/documents/doc-3/v4.pdf"});
+  const engine=new AiDocumentEngine({database:db,audit:null});
+  await assert.rejects(engine.reviseHuman({context,documentId:"doc-3",content:{body:"Changed"}}),(error)=>error?.code==="AI_DOCUMENT_NOT_EDITABLE");
+  await assert.rejects(engine.setStatus({context,documentId:"doc-3",status:"changes_requested"}),(error)=>error?.code==="AI_DOCUMENT_INVALID_STATUS_TRANSITION");
+});
+
+test("Secretary renderer writes an approved PDF only through tenant-scoped storage",async()=>{
+  let stored=null;
+  const database={
+    async query(sql){
+      if(sql.includes("FROM organizations"))return {rows:[{id:"org-1",name:"Lubowa Memorial Junior School",legal_name:"Lubowa Memorial Junior School",timezone:"Africa/Kampala",branding_json:"{}"}]};
+      if(sql.includes("FROM school_profiles"))return {rows:[{school_code:"LMJS",motto:"Knowledge and Discipline",physical_address:"Kampala",country:"Uganda",branding_json:"{}"}]};
+      throw new Error(`unexpected SQL in renderer test: ${sql}`);
+    },
+  };
+  const tenantStorage={forOrganization(organizationId){assert.equal(organizationId,"org-1");return {async put(key,data,metadata){stored={key,data:Buffer.from(data),metadata};}};}};
+  const renderer=createAiDocumentRenderer({database,tenantStorage});
+  const result=await renderer({
+    context,
+    document:{document_id:"doc-secretary",organization_id:"org-1",type:"letter",title:"End of Term Notice",content:{recipient:"Parents and Guardians",body:"Term closes on Friday."},version:2,status:"approved",creator:{agent_name:"Mirembe"}},
+  });
+  assert.equal(result.ref,"ai/documents/doc-secretary/v2.pdf");
+  assert.equal(stored.key,result.ref);
+  assert.equal(stored.metadata.contentType,"application/pdf");
+  assert.equal(stored.data.subarray(0,4).toString("ascii"),"%PDF");
+});
