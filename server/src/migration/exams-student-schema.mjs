@@ -1,5 +1,0 @@
-export async function ensureExamStudentCompatibilitySchema(database){await database.query(`
-CREATE TABLE IF NOT EXISTS school_students(
-id text PRIMARY KEY,organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,admission_number text NOT NULL,student_number text NOT NULL,first_name text NOT NULL,middle_name text,last_name text NOT NULL,current_academic_year_id text REFERENCES school_academic_years(id) ON DELETE SET NULL,current_class_id text REFERENCES school_classes(id) ON DELETE SET NULL,current_stream_id text REFERENCES school_streams(id) ON DELETE SET NULL,status text NOT NULL DEFAULT 'active',created_at timestamptz NOT NULL DEFAULT now(),updated_at timestamptz NOT NULL DEFAULT now(),UNIQUE(organization_id,admission_number),UNIQUE(organization_id,student_number));
-CREATE INDEX IF NOT EXISTS school_students_exam_context_idx ON school_students(organization_id,current_academic_year_id,current_class_id,current_stream_id,status);
-`)}
