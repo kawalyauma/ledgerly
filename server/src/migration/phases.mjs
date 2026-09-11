@@ -7,6 +7,9 @@ import { AUTH_CORE_RELATIONSHIP_CHECKS } from "./validators.mjs";
 import { SCHOOL_CONFIGURATION_TABLES, SCHOOL_PEOPLE_TABLES, SCHOOL_STAFF_TABLES } from "./school-data-manifest.mjs";
 import { ensureSchoolConfigurationSchema, finalizeSchoolConfigurationSchema, ensureSchoolPeopleSchema, finalizeSchoolPeopleSchema, ensureSchoolStaffSchema, finalizeSchoolStaffSchema } from "./school-data-schema.mjs";
 import { SCHOOL_CONFIGURATION_RELATIONSHIP_CHECKS, SCHOOL_PEOPLE_RELATIONSHIP_CHECKS, SCHOOL_STAFF_RELATIONSHIP_CHECKS } from "./school-data-validators.mjs";
+import { ATTENDANCE_TABLES } from "./attendance-manifest.mjs";
+import { ensureAttendanceSchema, finalizeAttendanceSchema } from "./attendance-schema.mjs";
+import { ATTENDANCE_RELATIONSHIP_CHECKS } from "./attendance-validators.mjs";
 
 const ensureReferenceWithLateColumns = async (database) => {
   await ensureSchoolReferenceSchema(database);
@@ -21,6 +24,7 @@ const PHASES = Object.freeze({
   "school-configuration": Object.freeze({ name: "school-configuration", description: "School grading, calendar, fee/payment references, settings, templates, files and school-scoped IAM", prerequisites: Object.freeze(["auth-core","school-reference"]), tables: SCHOOL_CONFIGURATION_TABLES, ensureSchema: async (database) => { await ensureAuthCoreSchema(database); await ensureReferenceWithLateColumns(database); await ensureSchoolConfigurationSchema(database); }, finalizeSchema: finalizeSchoolConfigurationSchema, relationshipChecks: SCHOOL_CONFIGURATION_RELATIONSHIP_CHECKS }),
   "school-people": Object.freeze({ name: "school-people", description: "Admissions, students, guardians, enrollment/lifecycle, promotion and discipline data", prerequisites: Object.freeze(["auth-core","school-reference","school-configuration"]), tables: SCHOOL_PEOPLE_TABLES, ensureSchema: async (database) => { await ensureAuthCoreSchema(database); await ensureReferenceWithLateColumns(database); await ensureSchoolConfigurationSchema(database); await ensureSchoolPeopleSchema(database); }, finalizeSchema: finalizeSchoolPeopleSchema, relationshipChecks: SCHOOL_PEOPLE_RELATIONSHIP_CHECKS }),
   "school-staff": Object.freeze({ name: "school-staff", description: "Staff and teacher identity, positions, qualifications, files and teaching assignments without payroll postings", prerequisites: Object.freeze(["auth-core","school-reference","school-configuration"]), tables: SCHOOL_STAFF_TABLES, ensureSchema: async (database) => { await ensureAuthCoreSchema(database); await ensureReferenceWithLateColumns(database); await ensureSchoolConfigurationSchema(database); await ensureSchoolStaffSchema(database); }, finalizeSchema: finalizeSchoolStaffSchema, relationshipChecks: SCHOOL_STAFF_RELATIONSHIP_CHECKS }),
+  "attendance": Object.freeze({ name: "attendance", description: "Legacy and canonical school attendance, devices, offline batches, QR identifiers and biometric metadata", prerequisites: Object.freeze(["auth-core","school-reference","school-configuration","school-people","school-staff"]), tables: ATTENDANCE_TABLES, ensureSchema: async (database) => { await ensureAuthCoreSchema(database); await ensureReferenceWithLateColumns(database); await ensureSchoolConfigurationSchema(database); await ensureSchoolPeopleSchema(database); await ensureSchoolStaffSchema(database); await ensureAttendanceSchema(database); }, finalizeSchema: finalizeAttendanceSchema, relationshipChecks: ATTENDANCE_RELATIONSHIP_CHECKS }),
 });
 
 export function getMigrationPhase(name = "auth-core") {
