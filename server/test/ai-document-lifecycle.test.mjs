@@ -5,6 +5,7 @@ import { AiDocumentEngine } from "../src/ai/document-engine.mjs";
 function makeDocumentDatabase(initial) {
   const state={
     ...initial,
+    required_permissions:initial.required_permissions??["documents:read"],
     approvals:[...(initial.approvals??[])],
     human_editors:[...(initial.human_editors??[])],
   };
@@ -41,8 +42,8 @@ function makeDocumentDatabase(initial) {
   return {db,state};
 }
 
-const writerContext={organizationId:"org-1",userId:"teacher-1",userName:"Teacher",permissions:["ai:write"]};
-const approverContext={organizationId:"org-1",userId:"director-1",userName:"Director",permissions:["ai:write","ai:approve"]};
+const writerContext={organizationId:"org-1",userId:"teacher-1",userName:"Teacher",permissions:["ai:write","documents:read","documents:write","academics:read"]};
+const approverContext={organizationId:"org-1",userId:"director-1",userName:"Director",permissions:["ai:write","ai:approve","documents:read","documents:write","academics:read"]};
 
 test("official document approval requires the review state and records the human approver",async()=>{
   const {db,state}=makeDocumentDatabase({document_id:"doc-1",organization_id:"org-1",type:"letter",title:"Parents Notice",content:{body:"Draft"},version:1,status:"draft",creator:{actor_type:"ai_agent"},ai_provenance:{fields:{}},rendered_pdf_ref:null});
@@ -93,6 +94,15 @@ test("published documents remain immutable and archiving them requires an approv
   const archived=await engine.setStatus({context:approverContext,documentId:"doc-3",status:"archived",reason:"Superseded"});
   assert.equal(archived.status,"archived");
   assert.equal(state.status,"archived");
+});
+
+test("academic documents remain hidden from generic document writers without academic authority",async()=>{
+  const {db}=makeDocumentDatabase({document_id:"doc-academic",organization_id:"org-1",type:"lesson_plan",title:"Weather",content:{topic:"Weather"},version:1,status:"draft",creator:{actor_type:"ai_agent"},ai_provenance:{fields:{}},required_permissions:["documents:read","academics:read"]});
+  const engine=new AiDocumentEngine({database:db,audit:null});
+  await assert.rejects(
+    engine.reviseHuman({context:{organizationId:"org-1",userId:"secretary-1",permissions:["documents:read","documents:write"]},documentId:"doc-academic",content:{topic:"Changed"}}),
+    (error)=>error?.code==="AI_DOCUMENT_ACCESS_DENIED"&&error?.details?.missingPermissions?.includes("academics:read"),
+  );
 });
 
 test("Secretary renderer writes an approved PDF only through tenant-scoped storage",async(t)=>{
