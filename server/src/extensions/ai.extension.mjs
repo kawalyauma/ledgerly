@@ -45,7 +45,12 @@ export default {
     };
   },
   enabled(config){return config.enabled===true;},
-  async create({services,authorization,tenantStorage,createQueue,extensionConfig}){
+  async create({services,auth,authorization,tenantStorage,createQueue,extensionConfig}){
+    const authHealth=await auth.health();
+    if(!authHealth.ok){
+      const missing=(authHealth.missingTables??[]).join(", ");
+      throw new Error(`AI Workforce requires completed auth-core migration${missing?`: missing ${missing}`:""}`);
+    }
     const aiQueue=createQueue({name:extensionConfig.queueName,maxAttempts:Math.max(1,extensionConfig.limits.maxRetries+1)});
     const documentRenderer=createAiDocumentRenderer({database:services.database,tenantStorage});
     const ai=await createAiWorkforce({
@@ -70,6 +75,7 @@ export default {
         tenantScopedStorage:true,
         liveRequesterAuthorization:true,
         structuredPdfRendering:true,
+        authCoreRequired:true,
       }),
       close:()=>ai.close(),
     };
