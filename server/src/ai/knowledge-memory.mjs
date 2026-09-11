@@ -23,11 +23,11 @@ export class AiMemoryService {
       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)
       ON CONFLICT (organization_id,agent_id,memory_type,key) DO UPDATE SET value=EXCLUDED.value,expires_at=EXCLUDED.expires_at,disabled=false,updated_at=now()
       RETURNING *`, [memoryId,org,employee,memoryType,normalizedKey,JSON.stringify(value),expiry]);
-    await this.audit?.write?.({ organization_id:org,actor_type:"human",actor_id:context.userId,action:"ai.memory.updated",entity_type:"ai_memory",entity_id:result.rows[0]?.memory_id,metadata:{agent_id:employee,type:memoryType,key:normalizedKey} });
+    await this.audit?.write?.({ organization_id:org,actor_type:"human",actor_id:context.userId,action:"ai.memory.updated",entity_type:"ai_memory",entity_id:result.rows[0]?.memory_id,metadata:{agent_id:employee,type:memoryType,key:normalizedKey,expires_at:expiry} });
     return result.rows[0];
   }
 
-  async list({ context, agentId, type=null, includeDisabled=false }) {
+  async list({ context, agentId, type=null, includeDisabled=false, includeExpired=false }) {
     const org=context.organizationId;
     if (!org) throw new Error("organization context required");
     const employee=requiredText(agentId,"agentId",200);if(type&&!MEMORY_TYPES.has(type))throw invalid("AI_MEMORY_TYPE_INVALID","memory type must be task or durable");
@@ -35,8 +35,8 @@ export class AiMemoryService {
     const filters=["organization_id=$1","agent_id=$2"];
     if (type) { values.push(type); filters.push(`memory_type=$${values.length}`); }
     if (!includeDisabled) filters.push("disabled=false");
-    filters.push("(expires_at IS NULL OR expires_at>now())");
-    const result=await this.database.query(`SELECT * FROM ledgerly_ai.memories WHERE ${filters.join(" AND ")} ORDER BY updated_at DESC LIMIT 1000`,values);
+    if (!includeExpired) filters.push("(expires_at IS NULL OR expires_at>now())");
+    const result=await this.database.query(`SELECT *,(expires_at IS NOT NULL AND expires_at<=now()) AS expired FROM ledgerly_ai.memories WHERE ${filters.join(" AND ")} ORDER BY updated_at DESC LIMIT 1000`,values);
     return result.rows;
   }
 
