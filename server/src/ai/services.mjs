@@ -4,6 +4,7 @@ import { DOCUMENT_STATUSES, TASK_STATUSES, DEFAULT_LIMITS } from "./constants.mj
 import { aiAttribution, humanEditProvenance } from "./provenance.mjs";
 
 function assertOrg(context){if(!context?.organizationId)throw new Error("organization context required");return context.organizationId;}
+function assertRequester(context){if(!context?.userId)throw new Error("attributable requester is required");return context.userId;}
 function now(){return new Date().toISOString();}
 
 export class AiApprovalService{
@@ -16,11 +17,30 @@ export class AiApprovalService{
 
 export class AiTaskService{
  constructor({database,queue,audit,limits=DEFAULT_LIMITS}){this.database=database;this.queue=queue;this.audit=audit;this.limits={...DEFAULT_LIMITS,...limits};}
- async create({context,assignedAgent,instruction,priority=50,dueTime=null,inputReferences=[],idempotencyKey=null,parentTaskId=null,handoffDepth=0,actor=null}){const org=assertOrg(context);if(!instruction||instruction.length>this.limits.maxPromptChars)throw new Error("AI task instruction is empty or exceeds configured input limit");if(handoffDepth>this.limits.maxHandoffs)throw new Error("AI handoff depth limit exceeded");const taskId=randomUUID();const result=await this.database.query(`INSERT INTO ledgerly_ai.tasks (task_id,organization_id,assigned_agent,requested_by,instruction,priority,due_time,input_references,idempotency_key,parent_task_id,handoff_depth) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11) ON CONFLICT (organization_id,idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE SET updated_at=ledgerly_ai.tasks.updated_at RETURNING *`,[taskId,org,assignedAgent,context.userId,instruction,priority,dueTime,JSON.stringify(inputReferences),idempotencyKey,parentTaskId,handoffDepth]);const task=result.rows[0];if(task.task_id===taskId)await this.queue.enqueue(createJobEnvelope({kind:"ai.task",organizationId:org,jobId:taskId,idempotencyKey:`ai:${taskId}`,payload:{taskId}}));await this.audit?.write?.({organization_id:org,...(actor??{actor_type:"human",actor_id:context.userId}),action:"ai.task.created",entity_type:"ai_task",entity_id:task.task_id,reason:instruction,metadata:{assigned_agent:assignedAgent,parent_task_id:parentTaskId,handoff_depth:handoffDepth}});return task;}
- async handoff({context,task,fromAgent,toAgent,instruction}){if(!fromAgent?.agentId)throw new Error("AI handoff requires source agent attribution");const actor={actor_type:"ai_agent",actor_id:fromAgent.agentId,agent_id:fromAgent.agentId,agent_name:fromAgent.name,agent_role:fromAgent.role};const next=await this.create({context:{...context,userId:fromAgent.agentId},assignedAgent:toAgent,instruction,priority:task.priority,inputReferences:[...(task.output_references??[]),{type:"task",id:task.task_id}],parentTaskId:task.task_id,handoffDepth:Number(task.handoff_depth??0)+1,idempotencyKey:`handoff:${task.task_id}:${toAgent}`,actor});await this.audit?.write?.({organization_id:context.organizationId,...actor,action:"ai.task.handoff",entity_type:"ai_task",entity_id:task.task_id,reason:instruction,metadata:{to_agent:toAgent,child_task_id:next.task_id}});return next;}
+ async create({context,assignedAgent,instruction,priority=50,dueTime=null,inputReferences=[],idempotencyKey=null,parentTaskId=null,handoffDepth=0,actor=null}){
+  const org=assertOrg(context),requester=assertRequester(context);
+  if(!assignedAgent)throw new Error("assigned AI agent is required");
+  if(!instruction||instruction.length>this.limits.maxPromptChars)throw new Error("AI task instruction is empty or exceeds configured input limit");
+  if(handoffDepth>this.limits.maxHandoffs)throw new Error("AI handoff depth limit exceeded");
+  const taskId=randomUUID();
+  const result=await this.database.query(`INSERT INTO ledgerly_ai.tasks (task_id,organization_id,assigned_agent,requested_by,instruction,priority,due_time,input_references,idempotency_key,parent_task_id,handoff_depth) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11) ON CONFLICT (organization_id,idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE SET updated_at=ledgerly_ai.tasks.updated_at RETURNING *`,[taskId,org,assignedAgent,requester,instruction,priority,dueTime,JSON.stringify(inputReferences),idempotencyKey,parentTaskId,handoffDepth]);
+  const task=result.rows[0];
+  if(task.task_id===taskId)await this.queue.enqueue(createJobEnvelope({kind:"ai.task",organizationId:org,jobId:taskId,idempotencyKey:`ai:${taskId}`,payload:{taskId}}));
+  await this.audit?.write?.({organization_id:org,...(actor??{actor_type:"human",actor_id:requester}),action:"ai.task.created",entity_type:"ai_task",entity_id:task.task_id,reason:instruction,metadata:{assigned_agent:assignedAgent,requested_by:requester,parent_task_id:parentTaskId,handoff_depth:handoffDepth}});
+  return task;
+ }
+ async handoff({context,task,fromAgent,toAgent,instruction}){
+  if(!fromAgent?.agentId)throw new Error("AI handoff requires source agent attribution");
+  if(!task?.requested_by)throw new Error("AI handoff cannot lose the original requester");
+  const actor={actor_type:"ai_agent",actor_id:fromAgent.agentId,agent_id:fromAgent.agentId,agent_name:fromAgent.name,agent_role:fromAgent.role};
+  const next=await this.create({context:{...context,userId:task.requested_by},assignedAgent:toAgent,instruction,priority:task.priority,inputReferences:[...(task.output_references??[]),{type:"task",id:task.task_id}],parentTaskId:task.task_id,handoffDepth:Number(task.handoff_depth??0)+1,idempotencyKey:`handoff:${task.task_id}:${toAgent}`,actor});
+  await this.audit?.write?.({organization_id:context.organizationId,...actor,action:"ai.task.handoff",entity_type:"ai_task",entity_id:task.task_id,reason:instruction,metadata:{to_agent:toAgent,child_task_id:next.task_id,requested_by:task.requested_by}});
+  return next;
+ }
  async setStatus({organizationId,taskId,status,agent=null,error=null,outputReferences=null}){if(!TASK_STATUSES.includes(status))throw new Error(`invalid task status ${status}`);const result=await this.database.query(`UPDATE ledgerly_ai.tasks SET status=$1,last_error=$2,output_references=COALESCE($3::jsonb,output_references),attempts=CASE WHEN $1='working' THEN attempts+1 ELSE attempts END,completed_at=CASE WHEN $1='completed' THEN now() ELSE completed_at END,updated_at=now() WHERE task_id=$4 AND organization_id=$5 RETURNING *`,[status,error,outputReferences?JSON.stringify(outputReferences):null,taskId,organizationId]);if(!result.rowCount)throw new Error("AI task not found");await this.audit?.write?.({organization_id:organizationId,actor_type:agent?"ai_agent":"system",actor_id:agent?.agentId??"ai-worker",agent_id:agent?.agentId,agent_name:agent?.name,agent_role:agent?.role,action:`ai.task.${status}`,entity_type:"ai_task",entity_id:taskId,reason:error});return result.rows[0];}
 }
 
+// Kept for backwards compatibility with early AI tests. New integrations use AiDocumentEngine.
 export class AiDocumentService{
  constructor({database,audit}){this.database=database;this.audit=audit;}
  async createAiDraft({context,agent,taskId=null,type,title,content,reason}){const org=assertOrg(context),documentId=randomUUID(),provenance=aiAttribution({agent,taskId,reason});const result=await this.database.query(`INSERT INTO ledgerly_ai.documents (document_id,organization_id,type,title,content,creator,ai_provenance) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb) RETURNING *`,[documentId,org,type,title,JSON.stringify(content),JSON.stringify(provenance),JSON.stringify(provenance)]);await this.database.query(`INSERT INTO ledgerly_ai.document_versions (document_id,version,organization_id,content,provenance,edited_by) VALUES ($1,1,$2,$3::jsonb,$4::jsonb,$5::jsonb)`,[documentId,org,JSON.stringify(content),JSON.stringify(provenance),JSON.stringify(provenance)]);await this.audit?.write?.({organization_id:org,actor_type:"ai_agent",actor_id:agent.agentId,agent_id:agent.agentId,agent_name:agent.name,agent_role:agent.role,action:"ai.document.created",entity_type:"document",entity_id:documentId,reason,after:content,metadata:{task_id:taskId,type,title}});return result.rows[0];}
