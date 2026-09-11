@@ -15,6 +15,7 @@
     "migration:rehearsal": "node src/migration/rehearsal-cli.mjs",
     "readiness:cutover": "node src/readiness/readiness-cli.mjs cutover",
     "readiness:migration": "node src/readiness/readiness-cli.mjs migration",
+    "readiness:security": "node src/readiness/security-cli.mjs",
     "readiness:load": "node scripts/load-smoke.mjs"
   },
   "dependencies": {
