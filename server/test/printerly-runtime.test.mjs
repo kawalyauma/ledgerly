@@ -45,7 +45,7 @@ test('secure release issuer uses injected six-digit cryptographic pin source and
   assert.ok(insert);
   assert.equal(insert[1][4],'digest:004321');
   assert.equal(insert[1][5],'digest:token-secret');
-  assert.equal(JSON.stringify(writes).includes('"004321"'),false,'clear PIN must not be persisted as a query argument');
+  assert.equal(writes.some(([,args])=>args.some(value=>value==='004321'||value==='token-secret')),false,'clear release secrets must not be persisted as query arguments');
 });
 
 test('secure release issuer rejects malformed pin providers',async()=>{
