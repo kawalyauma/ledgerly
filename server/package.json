@@ -1,12 +1,12 @@
 {
   "name": "@ledgerly/selfhost-server",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "description": "Self-hosted Ledgerly Node runtime foundation",
   "scripts": {
     "start": "node src/index.mjs",
-    "check": "node --check src/index.mjs && node --check src/config.mjs && node --check src/contracts.mjs && node --check src/runtime.mjs && node --check src/scheduler-runner.mjs && node --check src/auth/crypto.mjs && node --check src/auth/errors.mjs && node --check src/auth/jwt.mjs && node --check src/auth/mfa.mjs && node --check src/auth/permissions.mjs && node --check src/auth/service.mjs && node --check src/migration/auth-core-manifest.mjs && node --check src/migration/auth-core-schema.mjs && node --check src/migration/bookkeeping.mjs && node --check src/migration/cli.mjs && node --check src/migration/d1-source.mjs && node --check src/migration/phases.mjs && node --check src/migration/runner.mjs && node --check src/migration/school-reference-manifest.mjs && node --check src/migration/school-reference-schema.mjs && node --check src/migration/school-reference-validators.mjs && node --check src/migration/validators.mjs && node --check src/adapters/foundation-services.mjs && node --check src/adapters/local-storage.mjs && node --check src/adapters/memory-cache.mjs && node --check src/adapters/memory-queue.mjs && node --check src/adapters/postgres-database.mjs && node --check src/adapters/postgres-audit.mjs && node --check src/adapters/postgres-scheduler.mjs && node --check src/adapters/redis-cache.mjs && node --check src/adapters/redis-events.mjs && node --check src/adapters/redis-queue.mjs && node --check src/adapters/minio-storage.mjs && node --check src/adapters/notification-bridge.mjs && node --check src/adapters/tcp-health.mjs",
+    "check": "node scripts/check.mjs",
     "test": "node --test test/*.test.mjs",
     "migration:phases": "node src/migration/cli.mjs phases",
     "migration:plan": "node src/migration/cli.mjs plan",

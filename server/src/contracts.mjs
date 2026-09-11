@@ -20,14 +20,17 @@ export function tenantCacheKey(organizationId, ...parts) {
   return `ledgerly:v1:org:${org}${tail ? `:${tail}` : ""}`;
 }
 
+export function tenantStoragePrefix(organizationId) {
+  return `org/${segment(organizationId)}/`;
+}
+
 export function tenantStorageKey(organizationId, logicalKey) {
-  const org = segment(organizationId);
   const raw = requireText(logicalKey, "logicalKey").replaceAll("\\", "/");
   const parts = raw.split("/").filter(Boolean);
   if (parts.length === 0 || parts.some((part) => part === "." || part === "..")) {
     throw new Error("Storage keys may not contain traversal segments");
   }
-  return `org/${org}/${parts.map(segment).join("/")}`;
+  return `${tenantStoragePrefix(organizationId)}${parts.map(segment).join("/")}`;
 }
 
 export function createJobEnvelope({
