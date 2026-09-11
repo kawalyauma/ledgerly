@@ -1,0 +1,37 @@
+const DEFINITIONS=Object.freeze([
+  ['health','printerly.health','*/5 * * * *'],
+  ['batch-dispatch','printerly.batch-dispatch','*/5 * * * *'],
+  ['batch-status','printerly.batch-status','*/5 * * * *'],
+  ['retention','printerly.retention','*/5 * * * *'],
+  ['consumables','printerly.consumables','*/5 * * * *'],
+  ['service-sla','printerly.service-sla','*/5 * * * *'],
+  ['routing','printerly.routing','*/5 * * * *'],
+  ['release-cleanup','printerly.release-cleanup','0 * * * *'],
+  ['procurement','printerly.procurement','0 * * * *'],
+]);
+
+export const PRINTERLY_SCHEDULE_DEFINITIONS=DEFINITIONS;
+
+export class PrinterlyScheduleRegistry{
+  constructor({database,scheduler}){if(!database?.query||!scheduler?.register||!scheduler?.list||!scheduler?.cancel)throw new TypeError('PrinterlyScheduleRegistry requires database and scheduler');this.database=database;this.scheduler=scheduler;}
+  async enabledOrganizations(){
+    const result=await this.database.query(`SELECT DISTINCT organization_id FROM organization_modules WHERE module_key='printerly' AND enabled=true ORDER BY organization_id`);
+    return result.rows.map(row=>row.organization_id);
+  }
+  async reconcile({enabled}){
+    const prefix='printerly:',existing=await this.scheduler.list({limit:500}),byId=new Map(existing.filter(s=>String(s.id).startsWith(prefix)).map(s=>[s.id,s]));
+    if(!enabled){let cancelled=0;for(const schedule of byId.values())if(schedule.enabled){await this.scheduler.cancel(schedule.id);cancelled++;}return{enabled:false,organizations:0,schedules:0,cancelled};}
+    const organizations=await this.enabledOrganizations(),wanted=new Set();let registered=0,refreshed=0,cancelled=0;
+    for(const organizationId of organizations){
+      for(const [suffix,kind,cron] of DEFINITIONS){
+        const id=`printerly:${organizationId}:${suffix}`;wanted.add(id);const current=byId.get(id);
+        const unchanged=current&&current.enabled&&current.organization_id===organizationId&&current.kind===kind&&current.cron_expression===cron&&current.timezone==='UTC';
+        if(unchanged)continue;
+        await this.scheduler.register({id,name:`Printerly ${suffix}`,organizationId,kind,cron,timezone:'UTC',payload:{organizationId},enabled:true});
+        if(current)refreshed++;else registered++;
+      }
+    }
+    for(const schedule of byId.values())if(schedule.enabled&&!wanted.has(schedule.id)){await this.scheduler.cancel(schedule.id);cancelled++;}
+    return{enabled:true,organizations:organizations.length,schedules:wanted.size,registered,refreshed,cancelled};
+  }
+}
