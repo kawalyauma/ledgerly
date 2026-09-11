@@ -91,6 +91,38 @@ services:
     security_opt: ["no-new-privileges:true"]
     networks: [ledgerly_backend]
 
+  minio-bootstrap:
+    image: ${MINIO_MC_IMAGE:-minio/mc:latest}
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        attempt=0
+        until mc alias set bootstrap http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" >/dev/null 2>&1; do
+          attempt=$$((attempt + 1))
+          [ "$$attempt" -lt 60 ] || { echo "MinIO did not become ready" >&2; exit 1; }
+          sleep 2
+        done
+        mc mb --ignore-existing "bootstrap/$${MINIO_DEFAULT_BUCKET}" >/dev/null
+        if [ -n "$${MINIO_APP_ACCESS_KEY}" ] && [ -n "$${MINIO_APP_SECRET_KEY}" ]; then
+          cat >/tmp/ledgerly-app-policy.json <<EOF
+        {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetBucketLocation","s3:ListBucket","s3:ListBucketMultipartUploads"],"Resource":["arn:aws:s3:::$${MINIO_DEFAULT_BUCKET}"]},{"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:DeleteObject","s3:AbortMultipartUpload","s3:ListMultipartUploadParts"],"Resource":["arn:aws:s3:::$${MINIO_DEFAULT_BUCKET}/*"]}]}
+        EOF
+          mc admin policy create bootstrap ledgerly-app /tmp/ledgerly-app-policy.json >/dev/null
+          mc admin user add bootstrap "$${MINIO_APP_ACCESS_KEY}" "$${MINIO_APP_SECRET_KEY}" >/dev/null
+          mc admin policy attach bootstrap ledgerly-app --user "$${MINIO_APP_ACCESS_KEY}" >/dev/null
+        fi
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_DEFAULT_BUCKET: ${MINIO_DEFAULT_BUCKET:-ledgerly}
+      MINIO_APP_ACCESS_KEY: ${MINIO_APP_ACCESS_KEY:-}
+      MINIO_APP_SECRET_KEY: ${MINIO_APP_SECRET_KEY:-}
+    depends_on:
+      minio: {condition: service_started}
+    security_opt: ["no-new-privileges:true"]
+    networks: [ledgerly_backend]
+
   api:
     build:
       context: ./server
@@ -109,6 +141,10 @@ services:
       LEDGERLY_API_HOST: 0.0.0.0
       LEDGERLY_API_PORT: "8788"
       LEDGERLY_DEPENDENCY_TIMEOUT_MS: ${LEDGERLY_DEPENDENCY_TIMEOUT_MS:-1500}
+      LEDGERLY_TRUST_PROXY_HEADERS: ${LEDGERLY_TRUST_PROXY_HEADERS:-true}
+      LEDGERLY_RATE_LIMIT_WINDOW_MS: ${LEDGERLY_RATE_LIMIT_WINDOW_MS:-60000}
+      LEDGERLY_RATE_LIMIT_MAX_REQUESTS: ${LEDGERLY_RATE_LIMIT_MAX_REQUESTS:-600}
+      LEDGERLY_MAX_REQUEST_BODY_BYTES: ${LEDGERLY_MAX_REQUEST_BODY_BYTES:-67108864}
       LEDGERLY_SCHOOL_SELFHOST_ENABLED: ${LEDGERLY_SCHOOL_SELFHOST_ENABLED:-false}
       LEDGERLY_DATABASE_HOST: pgbouncer
       LEDGERLY_DATABASE_PORT: "6432"
@@ -150,16 +186,16 @@ services:
       LEDGERLY_OBJECT_STORAGE_HOST: minio
       LEDGERLY_OBJECT_STORAGE_PORT: "9000"
       LEDGERLY_OBJECT_STORAGE_SSL: ${LEDGERLY_OBJECT_STORAGE_SSL:-false}
-      LEDGERLY_OBJECT_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER}
-      LEDGERLY_OBJECT_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      LEDGERLY_OBJECT_STORAGE_ACCESS_KEY: ${MINIO_APP_ACCESS_KEY:-${MINIO_ROOT_USER}}
+      LEDGERLY_OBJECT_STORAGE_SECRET_KEY: ${MINIO_APP_SECRET_KEY:-${MINIO_ROOT_PASSWORD}}
       LEDGERLY_OBJECT_STORAGE_BUCKET: ${MINIO_DEFAULT_BUCKET:-ledgerly}
       LEDGERLY_OBJECT_STORAGE_REGION: ${MINIO_REGION:-us-east-1}
-      LEDGERLY_OBJECT_STORAGE_CREATE_BUCKET: ${LEDGERLY_OBJECT_STORAGE_CREATE_BUCKET:-true}
+      LEDGERLY_OBJECT_STORAGE_CREATE_BUCKET: "false"
       LEDGERLY_STORAGE_PATH: /var/lib/ledgerly/storage
     depends_on:
       pgbouncer: {condition: service_healthy}
       redis: {condition: service_healthy}
-      minio: {condition: service_started}
+      minio-bootstrap: {condition: service_completed_successfully}
     volumes: ["ledgerly_app_storage:/var/lib/ledgerly/storage"]
     ports: ["127.0.0.1:${LEDGERLY_API_PORT:-8788}:8788"]
     healthcheck:

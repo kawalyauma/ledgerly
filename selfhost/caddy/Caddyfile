@@ -22,9 +22,9 @@
       respond "ledgerly-selfhost-edge-ok" 200
     }
 
-    # Readiness/contracts are host-administration surfaces. They stay reachable
-    # directly on the loopback-bound Node port, never through the public edge.
-    @privateOps path /selfhost/ready /selfhost/contracts
+    # Readiness/contracts/ops are host-administration surfaces. They stay
+    # reachable only through loopback/private administration, never public edge.
+    @privateOps path /selfhost/ready /selfhost/contracts /selfhost/ops*
     handle @privateOps {
       respond 404
     }

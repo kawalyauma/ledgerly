@@ -45,14 +45,16 @@ ORDER BY n_dead_tup DESC
 LIMIT 30;
 
 \echo '== pg_stat_statements top total time (when available) =='
-DO $$ BEGIN
-  IF to_regclass('public.pg_stat_statements') IS NULL THEN
-    RAISE NOTICE 'pg_stat_statements view is not available in public schema';
-  END IF;
-END $$;
+SELECT EXISTS (
+  SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements'
+) AS has_pg_stat_statements \gset
+\if :has_pg_stat_statements
 SELECT calls, round(total_exec_time::numeric,2) AS total_ms,
        round(mean_exec_time::numeric,2) AS mean_ms, rows,
        left(query,220) AS query
 FROM pg_stat_statements
 ORDER BY total_exec_time DESC
 LIMIT 30;
+\else
+\echo 'pg_stat_statements extension is not installed; skipping statement timing report'
+\endif
