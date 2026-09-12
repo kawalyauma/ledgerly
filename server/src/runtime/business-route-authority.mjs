@@ -1,8 +1,10 @@
 import { CUTOVER_CAPABILITIES, createCutoverCapabilities } from './cutover-capabilities.mjs';
 
 export const BUSINESS_ROUTE_AUTHORITY_POLICY=Object.freeze({
+  'platform-modules':Object.freeze({capability:'platform.modules'}),
   'school-setup':Object.freeze({capability:'school.reference.read'}),
   'school-student-management':Object.freeze({capability:'school.people.read'}),
+  'human-resources-api':Object.freeze({capability:'human-resources.core'}),
   'printerly-legacy-node':Object.freeze({capability:'printerly.nodes'}),
   'printerly-jobs':Object.freeze({capability:'printerly.jobs'}),
   'printerly-documents':Object.freeze({capability:'printerly.jobs'}),
@@ -36,15 +38,19 @@ function combineModes(...values){const modes=values.map(normalizeMode);if(modes.
 export function createHttpCutoverCapabilities(config,overrides={}){
   const printerly=config?.extensions?.printerly??{};
   const school=config?.extensions?.['school-platform']??{};
+  const platformModules=config?.extensions?.['platform-modules']??{};
+  const humanResources=config?.extensions?.['human-resources']??{};
   const fallback=normalizeMode(printerly.cutover);
   const surface=(value)=>normalizeMode(value??fallback);
   const core=surface(printerly.coreCutover);
   const governance=surface(printerly.governanceCutover);
   return createCutoverCapabilities({
+    'platform.modules':normalizeMode(platformModules.cutover),
     'school.reference.read':normalizeMode(school.referenceReadCutover),
     'school.reference.write':normalizeMode(school.referenceWriteCutover),
     'school.people.read':normalizeMode(school.peopleReadCutover),
     'school.people.write':normalizeMode(school.peopleWriteCutover),
+    'human-resources.core':normalizeMode(humanResources.cutover),
     'printerly.nodes':surface(printerly.nodeCutover),
     'printerly.jobs':normalizeMode(printerly.jobCutover),
     'printerly.scanner':surface(printerly.scannerCutover),
