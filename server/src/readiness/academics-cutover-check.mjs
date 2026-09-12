@@ -7,7 +7,7 @@ import { ACADEMICS_MOBILE_SYNC_SPECS } from '../migration/academics-mobile-sync-
 const config=loadConfig(process.env);
 const database=await createPostgresDatabase(config.database);
 try{
-  const critical=['acad_rooms','acad_teacher_availability','acad_timetables','acad_timetable_entries','acad_timetable_changes','acad_substitute_lessons','acad_schemes','acad_scheme_items','acad_scheme_versions','acad_lesson_plan_templates','acad_lesson_plans','acad_lesson_deliveries','acad_delivery_attachments','acad_observations','acad_observation_attachments','acad_inspections','acad_inspection_samples','acad_inspection_attachments','att_sessions','school_staff_teaching_assignments','mobile_sync_record_versions','mobile_sync_changes','mobile_sync_tombstones','academics_mobile_sync_suppression'];
+  const critical=['school_files','acad_rooms','acad_teacher_availability','acad_timetables','acad_timetable_entries','acad_timetable_changes','acad_substitute_lessons','acad_schemes','acad_scheme_items','acad_scheme_versions','acad_lesson_plan_templates','acad_lesson_plans','acad_lesson_deliveries','acad_delivery_attachments','acad_observations','acad_observation_attachments','acad_inspections','acad_inspection_samples','acad_inspection_attachments','att_sessions','school_staff_teaching_assignments','mobile_sync_record_versions','mobile_sync_changes','mobile_sync_tombstones','academics_mobile_sync_suppression'];
   const expr=critical.map((name,index)=>`to_regclass('public.${name}') AS t${index}`).join(',');
   const tableRow=(await database.query(`SELECT ${expr}`)).rows[0]??{};
   const missing=critical.filter((_,index)=>!tableRow[`t${index}`]);
@@ -29,6 +29,6 @@ try{
   const bridge=(await database.query(`SELECT to_regprocedure('academics_mobile_sync_emit_row()') IS NOT NULL AS function_ready,(SELECT count(*)::int FROM pg_trigger WHERE NOT tgisinternal AND tgname LIKE 'academics_ms_%') AS trigger_count`)).rows[0]??{};
   const mobileBridgeReady=bridge.function_ready===true&&Number(bridge.trigger_count)>=ACADEMICS_MOBILE_SYNC_SPECS.length;
   const ok=missing.length===0&&relationshipChecks.length===0&&moduleCatalogReady&&canonicalAttendanceColumn&&Number(examsLeak)===0&&mobileBridgeReady;
-  console.log(JSON.stringify({ok,provider:database.provider,registeredAcademicsTables:ACADEMICS_TABLES.length,criticalTables:critical.length,missing,relationshipChecks,moduleCatalogReady,moduleCatalog:catalog.rows,moduleRows:moduleRows.rows.length,academicsEnabledOrganizations,canonicalAttendanceColumn,examsSeparated:Number(examsLeak)===0,mobileBridgeReady,mobileSyncTriggers:Number(bridge.trigger_count??0),expectedMobileSyncTriggers:ACADEMICS_MOBILE_SYNC_SPECS.length},null,2));
+  console.log(JSON.stringify({ok,provider:database.provider,registeredAcademicsTables:ACADEMICS_TABLES.length,criticalTables:critical.length,missing,relationshipChecks,moduleCatalogReady,moduleCatalog:catalog.rows,moduleRows:moduleRows.rows.length,academicsEnabledOrganizations,schoolFileRegistryReady:!missing.includes('school_files'),canonicalAttendanceColumn,examsSeparated:Number(examsLeak)===0,mobileBridgeReady,mobileSyncTriggers:Number(bridge.trigger_count??0),expectedMobileSyncTriggers:ACADEMICS_MOBILE_SYNC_SPECS.length},null,2));
   if(!ok)process.exitCode=1;
 }finally{await database.close();}
