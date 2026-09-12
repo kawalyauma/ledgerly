@@ -48,8 +48,9 @@ run_schema() {
     node src/migration/cli.mjs schema --phase "$phase"
 }
 
-# School people depends on contacts and mobile-sync core. Schema-only rehearsal is ordered explicitly.
+# School configuration owns module enablement through the shared registry; School people also depends on contacts/mobile sync.
 run_schema auth-core
+run_schema module-registry
 run_schema contacts
 run_schema mobile-sync-core
 run_schema school-reference
