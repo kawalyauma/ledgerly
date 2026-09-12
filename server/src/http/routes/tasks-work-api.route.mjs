@@ -5,13 +5,15 @@ async function json(request,maxBytes){const bytes=await readBytes(request,maxByt
 function contentType(request){const headers=request.headers;return typeof headers?.get==="function"?headers.get("content-type"):headers?.["content-type"]??headers?.["Content-Type"]??"";}
 function parseMultipartFile(bytes,type){const boundaryMatch=String(type).match(/boundary=(?:"([^"]+)"|([^;]+))/i);if(!boundaryMatch)fail(400,"MULTIPART_BOUNDARY_REQUIRED","Multipart boundary is missing");const boundary=Buffer.from(`--${boundaryMatch[1]||boundaryMatch[2]}`);let cursor=0;while(cursor<bytes.length){const start=bytes.indexOf(boundary,cursor);if(start<0)break;let partStart=start+boundary.length;if(bytes.subarray(partStart,partStart+2).toString()==="--")break;if(bytes.subarray(partStart,partStart+2).toString()==="\r\n")partStart+=2;const headerEnd=bytes.indexOf(Buffer.from("\r\n\r\n"),partStart);if(headerEnd<0)break;const headerText=bytes.subarray(partStart,headerEnd).toString("utf8");const next=bytes.indexOf(boundary,headerEnd+4);if(next<0)break;let bodyEnd=next;if(bytes.subarray(bodyEnd-2,bodyEnd).toString()==="\r\n")bodyEnd-=2;const disposition=headerText.match(/content-disposition:\s*form-data;([^\r\n]+)/i)?.[1]||"";const name=disposition.match(/name="([^"]+)"/i)?.[1];if(name==="file"){const fileName=disposition.match(/filename="([^"]*)"/i)?.[1]||"attachment";const mimeType=headerText.match(/content-type:\s*([^\r\n]+)/i)?.[1]?.trim()||"application/octet-stream";return{fileName,mimeType,bytes:bytes.subarray(headerEnd+4,bodyEnd)};}cursor=next;}fail(422,"FILE_REQUIRED","Multipart upload must include a file field");}
 async function principal(runtime,request){return runtime.auth.authenticateRequest({headers:request.headers});}
+async function requireEnabled(runtime,organizationId){const result=await runtime.services.database.query("SELECT enabled FROM organization_modules WHERE organization_id=$1 AND module_key='tasks-work'",[organizationId]);if(result.rows[0]?.enabled!==true)fail(403,"MODULE_DISABLED","tasks-work module is not enabled for this organization");}
 
 export default {
   name:"tasks-work-api",prefix:PREFIX,business:true,priority:50,
   enabled(config){return config.extensions?.["tasks-work"]?.enabled===true;},
   async handle({request,url,runtime,config,requestId}){
     const api=runtime.extensions?.["tasks-work"]?.api;if(!api)fail(503,"TASKS_WORK_NOT_READY","Self-hosted Tasks & Work is unavailable");
-    const p=await principal(runtime,request),suffix=url.pathname.slice(PREFIX.length).replace(/^\/+|\/+$/g,"");
+    const p=await principal(runtime,request);await requireEnabled(runtime,p.organizationId);
+    const suffix=url.pathname.slice(PREFIX.length).replace(/^\/+|\/+$/g,"");
     const q=Object.fromEntries(url.searchParams.entries()),max=config.http.maxRequestBodyBytes;
     if(request.method==="GET"&&suffix==="manifest")return{status:200,body:{data:api.manifest()}};
     if(request.method==="GET"&&suffix==="organization")return{status:200,body:{data:await api.organization(p)}};
