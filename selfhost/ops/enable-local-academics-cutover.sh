@@ -20,6 +20,12 @@ cd "$ROOT_DIR"
 COMPOSE=("${DOCKER[@]}" compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$MODULE_OVERLAY")
 printf 'Building migration/runtime images...\n'
 "${COMPOSE[@]}" build api migrate-d1
+printf 'Running targeted Academics, School files and mobile-sync parity tests...\n'
+"${COMPOSE[@]}" run --rm --no-deps api node --test \
+  test/academics-cutover.test.mjs \
+  test/academics-workflow-parity.test.mjs \
+  test/academics-mobile-sync-runtime.test.mjs \
+  test/school-files-cutover.test.mjs
 run_schema(){ local phase="$1"; printf 'Preparing PostgreSQL phase: %s\n' "$phase"; "${COMPOSE[@]}" --profile migration run --rm migrate-d1 node src/migration/cli.mjs schema --phase "$phase"; }
 run_schema auth-core
 run_schema module-registry
@@ -47,6 +53,7 @@ printf 'Restarting the self-hosted API...\n'
 printf 'Verifying live Academics, School files and mobile-sync runtime wiring...\n'
 "${COMPOSE[@]}" exec -T api node src/readiness/academics-runtime-check.mjs
 printf '\nAcademics cutover rehearsal completed.\n'
+printf '  Targeted parity tests:         passed\n'
 printf '  Module registry:              Node/PostgreSQL\n'
 printf '  Academics API authority:      Node/PostgreSQL\n'
 printf '  School file API authority:    Node/PostgreSQL + MinIO\n'
@@ -61,5 +68,5 @@ printf '  Evidence attachments:         enabled\n'
 printf '  Exams:                        untouched / separate module\n'
 printf '  Runtime mode:                 foundation\n'
 printf '  Organization enablement:      preserved; enable School Management then Academics per organization\n'
-printf '\nThis is a local schema/runtime rehearsal, not proof that existing Cloudflare D1 Academics data has been migrated.\n'
-printf 'For production cutover, migrate and validate the Academics phase against D1 before moving authority.\n'
+printf '\nThis is a local schema/runtime rehearsal, not proof that existing Cloudflare D1 Academics data or R2 file objects have been migrated.\n'
+printf 'For production cutover, migrate and validate both Academics D1 data and required file objects before moving authority.\n'
