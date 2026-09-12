@@ -18,12 +18,12 @@ export default {
   enabled(extensionConfig) {
     return extensionConfig.enabled === true;
   },
-  async create({ services }) {
+  async create({ services, extensionConfig }) {
     const service = createPlatformModulesService({ database: services.database, audit: services.audit });
     return {
       value: service,
       readiness: () => service.readiness(),
-      describe: () => ({ ...service.describe(), cutover: service ? undefined : undefined }),
+      describe: () => ({ ...service.describe(), cutover: extensionConfig.cutover }),
     };
   },
 };
