@@ -9,5 +9,8 @@ export function mapFinanceError(error) {
 export async function authenticateFinance(runtime,request,scope){const p=await runtime.auth.authenticateRequest({headers:request.headers});if(scope)runtime.auth.requireScope(p,scope);return p}
 export async function readJson(request,{optional=false}={}){try{return await request.json()}catch{if(optional)return{};throw financeError(422,'VALIDATION_ERROR','Request body must be valid JSON')}}
 export function requiredHeader(request,name,max=200){const v=String(request.headers.get(name)||'').trim();if(!v||v.length>max)throw financeError(422,`${name.toUpperCase().replace(/-/g,'_')}_REQUIRED`,`${name} header is required`);return v}
+export function requireNodeCutover(extension,field,code='FINANCE_WRITE_NOT_CUT_OVER'){
+  if(extension?.[field]!=='node')throw financeError(503,code,'This finance capability is not yet Node-authoritative');
+}
 export function pagination(url){const l=Number(url.searchParams.get('limit')||50),o=Number(url.searchParams.get('offset')||0);return{limit:Number.isInteger(l)?Math.max(1,Math.min(l,200)):50,offset:Number.isInteger(o)?Math.max(0,o):0}}
 export const ok=(body,status=200,headers={})=>({status,body,headers});

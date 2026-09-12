@@ -12,6 +12,12 @@ export const BUSINESS_ROUTE_AUTHORITY_POLICY=Object.freeze({
   'school-student-management':Object.freeze({capability:'school.people.read'}),
   'school-files':Object.freeze({capability:'school.files'}),
   'human-resources-api':Object.freeze({capability:'human-resources.core'}),
+  'finance-accounts':Object.freeze({capability:'finance.reference.read'}),
+  'finance-documents':Object.freeze({capability:'finance.documents.read'}),
+  'finance-payments':Object.freeze({capability:'finance.payments.read'}),
+  'finance-journals':Object.freeze({capability:'finance.journals.read'}),
+  'school-fees':Object.freeze({capability:'school-fees.read'}),
+  'payroll-finance':Object.freeze({capability:'payroll.read'}),
   'printerly-legacy-node':Object.freeze({capability:'printerly.nodes'}),
   'printerly-jobs':Object.freeze({capability:'printerly.jobs'}),
   'printerly-documents':Object.freeze({capability:'printerly.jobs'}),
@@ -45,6 +51,7 @@ function combineModes(...values){const modes=values.map(normalizeMode);if(modes.
 export function createHttpCutoverCapabilities(config,overrides={}){
   const printerly=config?.extensions?.printerly??{};
   const school=config?.extensions?.['school-platform']??{};
+  const finance=config?.extensions?.['finance-api']??{};
   const platformModules=config?.extensions?.['platform-modules']??{};
   const contacts=config?.extensions?.contacts??{};
   const communications=config?.extensions?.communications??{};
@@ -67,6 +74,23 @@ export function createHttpCutoverCapabilities(config,overrides={}){
     'school.people.write':normalizeMode(school.peopleWriteCutover),
     'school.files':normalizeMode(school.filesCutover),
     'human-resources.core':normalizeMode(humanResources.cutover),
+    'finance.reference.read':normalizeMode(finance.referenceReadCutover??finance.referenceCutover),
+    'finance.reference.write':normalizeMode(finance.referenceWriteCutover??finance.referenceCutover),
+    'finance.documents.read':normalizeMode(finance.documentsReadCutover??finance.documentsCutover),
+    'finance.documents.write':normalizeMode(finance.documentsWriteCutover??finance.documentsCutover),
+    'finance.payments.read':normalizeMode(finance.paymentsReadCutover??finance.paymentsCutover),
+    'finance.payments.write':normalizeMode(finance.paymentsWriteCutover??finance.paymentsCutover),
+    'finance.journals.read':normalizeMode(finance.journalsReadCutover??finance.journalsCutover),
+    'finance.journals.write':normalizeMode(finance.journalsWriteCutover??finance.journalsCutover),
+    'finance.reversals.write':normalizeMode(finance.reversalsWriteCutover),
+    'finance.budgets.read':normalizeMode(finance.referenceReadCutover??finance.referenceCutover),
+    'finance.budgets.write':normalizeMode(finance.referenceWriteCutover??finance.referenceCutover),
+    'school-fees.read':normalizeMode(finance.schoolFeesReadCutover??finance.feesCutover),
+    'school-fees.write':normalizeMode(finance.schoolFeesWriteCutover??finance.feesCutover),
+    'school-fees.reversal':normalizeMode(finance.schoolFeesReversalCutover),
+    'payroll.read':normalizeMode(finance.payrollReadCutover??finance.payrollCutover),
+    'payroll.write':normalizeMode(finance.payrollWriteCutover??finance.payrollCutover),
+    'payroll.reversal':normalizeMode(finance.payrollReversalCutover),
     'printerly.nodes':surface(printerly.nodeCutover),
     'printerly.jobs':normalizeMode(printerly.jobCutover),
     'printerly.scanner':surface(printerly.scannerCutover),
