@@ -23,7 +23,19 @@ set_env() {
 
 [[ -f "$ENV_FILE" ]] || fail "Missing $ENV_FILE. Copy .env.selfhost.example first and populate its secrets."
 command -v docker >/dev/null 2>&1 || fail "docker is required"
-docker compose version >/dev/null 2>&1 || fail "docker compose is required"
+
+DOCKER=(docker)
+if ! docker info >/dev/null 2>&1; then
+  if command -v sudo >/dev/null 2>&1; then
+    printf 'Docker requires elevated access; requesting sudo once for this rehearsal...\n'
+    sudo -v || fail "sudo authentication failed"
+    sudo docker info >/dev/null 2>&1 || fail "Docker daemon is not accessible even with sudo"
+    DOCKER=(sudo docker)
+  else
+    fail "Current user cannot access the Docker daemon and sudo is unavailable"
+  fi
+fi
+"${DOCKER[@]}" compose version >/dev/null 2>&1 || fail "docker compose is required"
 
 ENVIRONMENT="$(read_env LEDGERLY_ENVIRONMENT)"
 RUNTIME_MODE="$(read_env LEDGERLY_RUNTIME_MODE)"
@@ -34,8 +46,8 @@ RUNTIME_MODE="$(read_env LEDGERLY_RUNTIME_MODE)"
 
 printf 'Preparing auth/core PostgreSQL schema (no Cloudflare credentials are used)...\n'
 cd "$ROOT_DIR"
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build api migrate-d1
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile migration run --rm migrate-d1 \
+"${DOCKER[@]}" compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build api migrate-d1
+"${DOCKER[@]}" compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile migration run --rm migrate-d1 \
   node src/migration/cli.mjs schema --phase auth-core
 
 printf 'Enabling Node auth login + registration for this local rehearsal...\n'
@@ -43,7 +55,7 @@ set_env LEDGERLY_AUTH_LOGIN_CUTOVER node
 set_env LEDGERLY_AUTH_REGISTER_CUTOVER node
 
 printf 'Restarting the self-hosted API with the auth route enabled...\n'
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build api
+"${DOCKER[@]}" compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build api
 
 printf '\nLocal auth rehearsal is enabled.\n'
 printf 'Runtime mode remains foundation; Printerly and other business cutovers were not changed.\n'
