@@ -37,7 +37,7 @@ function bounded(value,fallback=100,max=500){const n=Number(value);return Number
 function camel(row){if(!row||typeof row!=='object')return row;return Object.fromEntries(Object.entries(row).map(([key,value])=>[key.replace(/_([a-z])/g,(_,c)=>c.toUpperCase()),value]));}
 function publicMetadata(row,{contentUrl=false}={}){const item=camel(row);delete item.objectKey;if(item.sizeBytes!=null)item.sizeBytes=Number(item.sizeBytes);item.checksum=item.checksumSha256;delete item.checksumSha256;if(contentUrl)item.contentUrl=`${PREFIX}/${encodeURIComponent(item.id)}/content`;return item;}
 function principalScopes(principal){return Array.isArray(principal?.scopes)?principal.scopes:[];}
-function directPermission(principal,permission){if(['owner','admin','super_admin'].includes(principal?.role))return true;const s=principalScopes(principal);return s.includes('*')||s.includes('school:*')||s.includes(permission);}
+function directPermission(principal,permission){if(['owner','admin','super_admin'].includes(principal?.role))return true;const s=principalScopes(principal);return s.includes(permission)||s.includes('school:*')||(s.includes('school:write')&&(permission.endsWith(':write')||permission.endsWith(':approve')||permission.endsWith(':export')));}
 async function requireSchoolPermission(database,principal,permission){
   if(directPermission(principal,permission))return;
   const result=await database.query(`SELECT 1 FROM school_user_roles ur JOIN school_role_permissions rp ON rp.organization_id=ur.organization_id AND rp.role_id=ur.role_id WHERE ur.organization_id=$1 AND ur.user_id=$2 AND rp.permission=$3 AND rp.effect='allow' AND (ur.starts_at IS NULL OR ur.starts_at<=CURRENT_TIMESTAMP) AND (ur.ends_at IS NULL OR ur.ends_at>=CURRENT_TIMESTAMP) UNION ALL SELECT 1 FROM school_temporary_permissions tp WHERE tp.organization_id=$1 AND tp.user_id=$2 AND tp.permission=$3 AND tp.revoked_at IS NULL AND tp.starts_at<=CURRENT_TIMESTAMP AND tp.ends_at>=CURRENT_TIMESTAMP LIMIT 1`,[principal.organizationId,principal.userId,permission]);
@@ -90,7 +90,7 @@ export default{
     }
 
     if(request.method==='POST'&&!suffix){
-      runtime.auth.requireScope(principal,'school:write');await requireSchoolPermission(database,principal,'school.files:write');
+      runtime.auth.requireScope(principal,'school:read');runtime.auth.requireScope(principal,'school:write');await requireSchoolPermission(database,principal,'school.files:write');
       const form=await parseMultipart(request),part=form.get('file');
       if(!part||typeof part!=='object'||typeof part.arrayBuffer!=='function')fail(422,'FILE_REQUIRED','Choose a file to upload');
       const fileSize=Number(part.size??0);if(fileSize<=0)fail(422,'EMPTY_FILE','The selected file is empty');if(fileSize>MAX_FILE_BYTES)fail(413,'FILE_TOO_LARGE',`The file is ${(fileSize/1024/1024).toFixed(1)} MB. School uploads are limited to 15 MB per file.`);
@@ -119,7 +119,7 @@ export default{
       const file=await ownedFile(database,principal.organizationId,decodeURIComponent(match[1]));return{status:200,body:{data:publicMetadata(file,{contentUrl:true})}};
     }
     if(match&&request.method==='DELETE'){
-      runtime.auth.requireScope(principal,'school:write');await requireSchoolPermission(database,principal,'school.files:write');
+      runtime.auth.requireScope(principal,'school:read');runtime.auth.requireScope(principal,'school:write');await requireSchoolPermission(database,principal,'school.files:write');
       const file=await ownedFile(database,principal.organizationId,decodeURIComponent(match[1])),usedBy=await referenceDescription(database,principal.organizationId,file.id);
       if(usedBy)fail(409,'FILE_IN_USE',`This file is currently used as a ${usedBy}. Remove or replace that reference before deleting the file.`);
       await storage.delete(file.object_key);await database.query(`UPDATE school_files SET deleted_at=now(),updated_at=now() WHERE id=$1 AND organization_id=$2`,[file.id,principal.organizationId]);
