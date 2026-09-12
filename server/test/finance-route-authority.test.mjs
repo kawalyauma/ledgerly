@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import schoolFeesRoute from '../src/http/routes/school-fees.route.mjs';
 import payrollRoute from '../src/http/routes/payroll.route.mjs';
+import bankingRoute from '../src/http/routes/finance-banking.route.mjs';
+import taxRoute from '../src/http/routes/finance-tax.route.mjs';
 
 function matches(route,method,path){return route.matches({request:{method},url:new URL(`http://ledgerly${path}`)});}
 
@@ -23,4 +25,20 @@ test('Payroll Node authority includes only implemented endpoint/method pairs',()
   assert.equal(matches(payrollRoute,'GET','/api/v1/payroll/statutory-returns'),false);
   assert.equal(matches(payrollRoute,'POST','/api/v1/payroll/payment-batches'),false);
   assert.equal(matches(payrollRoute,'PATCH','/api/v1/payroll/components/c1'),false);
+});
+
+test('Banking Node authority fails closed outside implemented operations',()=>{
+  assert.equal(matches(bankingRoute,'GET','/api/v1/banking/accounts'),true);
+  assert.equal(matches(bankingRoute,'POST','/api/v1/banking/accounts/b1/reconciliations'),true);
+  assert.equal(matches(bankingRoute,'POST','/api/v1/banking/transfers'),true);
+  assert.equal(matches(bankingRoute,'DELETE','/api/v1/banking/accounts/b1'),false);
+  assert.equal(matches(bankingRoute,'GET','/api/v1/banking/cash-drawers'),false);
+});
+
+test('Tax Node authority fails closed outside implemented operations',()=>{
+  assert.equal(matches(taxRoute,'GET','/api/v1/tax/codes'),true);
+  assert.equal(matches(taxRoute,'POST','/api/v1/tax/returns/r1/file'),true);
+  assert.equal(matches(taxRoute,'POST','/api/v1/tax/returns/prepare'),true);
+  assert.equal(matches(taxRoute,'DELETE','/api/v1/tax/codes/t1'),false);
+  assert.equal(matches(taxRoute,'GET','/api/v1/tax/rates'),false);
 });
