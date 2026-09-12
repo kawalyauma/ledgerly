@@ -19,6 +19,7 @@
     "readiness:migration": "node src/readiness/readiness-cli.mjs migration",
     "readiness:security": "node src/readiness/security-cli.mjs",
     "readiness:authority": "node src/readiness/authority-cli.mjs",
+    "readiness:academics": "node src/readiness/academics-runtime-check.mjs",
     "readiness:load": "node scripts/load-smoke.mjs"
   },
   "dependencies": {
