@@ -4,6 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {Pool} from 'pg';
 import {PostgresDatabase} from '../src/adapters/postgres-database.mjs';
 import {FinanceTransactions} from '../src/finance/transactions.mjs';
+import {FinanceApprovalService} from '../src/finance/approval-service.mjs';
 
 const connectionString=process.env.LEDGERLY_TEST_DATABASE_URL;
 const enabled=Boolean(connectionString);
@@ -39,6 +40,7 @@ before(async()=>{
       total_minor bigint NOT NULL,
       paid_minor bigint NOT NULL DEFAULT 0,
       status text NOT NULL,
+      approval_status text NOT NULL DEFAULT 'not_required',
       updated_at timestamptz NOT NULL DEFAULT now()
     );
     CREATE TABLE payment_allocations(
@@ -65,6 +67,34 @@ before(async()=>{
       journal_entry_id text NOT NULL,
       debit_minor bigint NOT NULL DEFAULT 0,
       credit_minor bigint NOT NULL DEFAULT 0
+    );
+    CREATE TABLE approval_policies(
+      id text PRIMARY KEY,
+      organization_id text NOT NULL,
+      document_type text NOT NULL,
+      minimum_minor bigint NOT NULL DEFAULT 0,
+      maximum_minor bigint,
+      levels integer NOT NULL DEFAULT 1,
+      approver_roles text NOT NULL,
+      active boolean NOT NULL DEFAULT true,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE TABLE document_approval_requests(
+      id text PRIMARY KEY,
+      organization_id text NOT NULL,
+      entity_type text NOT NULL,
+      entity_id text NOT NULL,
+      policy_id text,
+      status text NOT NULL DEFAULT 'pending',
+      current_level integer NOT NULL DEFAULT 1,
+      submitted_by text NOT NULL,
+      submitted_at timestamptz NOT NULL DEFAULT now(),
+      decided_by text,
+      decided_at timestamptz,
+      comments text,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now()
     );
   `);
 });
@@ -133,4 +163,44 @@ suite('unbalanced journal posting rolls back against PostgreSQL',async()=>{
   const journal=await database.query(`SELECT status,posted_at FROM journal_entries WHERE id='j1' AND organization_id='o1'`);
   assert.equal(journal.rows[0].status,'draft');
   assert.equal(journal.rows[0].posted_at,null);
+});
+
+function approvalService(){return new FinanceApprovalService({services:{database,cache:{invalidateTag:async()=>{}},audit:{write:async()=>{}}}});}
+function principal(userId='u1',organizationId='o1'){return{userId,organizationId};}
+async function resetApprovalFixture(){
+  await database.query('TRUNCATE document_approval_requests,approval_policies,payment_allocations,documents,payments');
+  await database.query(`INSERT INTO documents(id,organization_id,type,contact_id,currency,total_minor,paid_minor,status,approval_status) VALUES('approval-doc','o1','invoice','c1','UGX',100,0,'draft','not_required')`);
+  await database.query(`INSERT INTO approval_policies(id,organization_id,document_type,minimum_minor,maximum_minor,levels,approver_roles,active) VALUES('policy-1','o1','invoice',0,NULL,1,'["manager"]',true)`);
+}
+
+suite('simultaneous approval submissions create one pending request',async()=>{
+  await resetApprovalFixture();const service=approvalService();
+  const results=await Promise.allSettled([
+    service.submitDocument({principal:principal('u1'),documentId:'approval-doc',requestId:'req-1'}),
+    service.submitDocument({principal:principal('u2'),documentId:'approval-doc',requestId:'req-2'}),
+  ]);
+  assert.equal(results.filter(x=>x.status==='fulfilled').length,2);
+  assert.equal(results.some(x=>x.status==='fulfilled'&&x.value.alreadySubmitted===true),true);
+  const pending=await database.query(`SELECT id,status FROM document_approval_requests WHERE organization_id='o1' AND entity_id='approval-doc'`);
+  assert.equal(pending.rowCount,1);assert.equal(pending.rows[0].status,'pending');
+});
+
+suite('competing approval decisions serialize and only one wins',async()=>{
+  await resetApprovalFixture();const service=approvalService();
+  const submitted=await service.submitDocument({principal:principal('u1'),documentId:'approval-doc',requestId:'req-submit'});
+  const results=await Promise.allSettled([
+    service.decide({principal:principal('manager-a'),approvalId:submitted.id,decision:'approve',body:{},requestId:'req-a'}),
+    service.decide({principal:principal('manager-b'),approvalId:submitted.id,decision:'reject',body:{},requestId:'req-b'}),
+  ]);
+  assert.equal(results.filter(x=>x.status==='fulfilled').length,1);
+  assert.equal(results.filter(x=>x.status==='rejected'&&x.reason?.code==='INVALID_STATE').length,1);
+  const requestRow=await database.query(`SELECT status FROM document_approval_requests WHERE id=$1 AND organization_id='o1'`,[submitted.id]);
+  const doc=await database.query(`SELECT approval_status FROM documents WHERE id='approval-doc' AND organization_id='o1'`);
+  assert.equal(doc.rows[0].approval_status,requestRow.rows[0].status);
+});
+
+suite('approval submission cannot cross tenant boundaries',async()=>{
+  await resetApprovalFixture();const service=approvalService();
+  await assert.rejects(service.submitDocument({principal:principal('u1','o2'),documentId:'approval-doc',requestId:'tenant'}),error=>error?.code==='DOCUMENT_NOT_FOUND');
+  const requests=await database.query(`SELECT id FROM document_approval_requests WHERE organization_id='o2'`);assert.equal(requests.rowCount,0);
 });
