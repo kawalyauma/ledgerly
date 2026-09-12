@@ -1,6 +1,7 @@
 import { CUTOVER_CAPABILITIES, createCutoverCapabilities } from './cutover-capabilities.mjs';
 
 export const BUSINESS_ROUTE_AUTHORITY_POLICY=Object.freeze({
+  'school-setup':Object.freeze({capability:'school.reference.read'}),
   'printerly-legacy-node':Object.freeze({capability:'printerly.nodes'}),
   'printerly-jobs':Object.freeze({capability:'printerly.jobs'}),
   'printerly-documents':Object.freeze({capability:'printerly.jobs'}),
@@ -33,11 +34,14 @@ function combineModes(...values){const modes=values.map(normalizeMode);if(modes.
 
 export function createHttpCutoverCapabilities(config,overrides={}){
   const printerly=config?.extensions?.printerly??{};
+  const school=config?.extensions?.['school-platform']??{};
   const fallback=normalizeMode(printerly.cutover);
   const surface=(value)=>normalizeMode(value??fallback);
   const core=surface(printerly.coreCutover);
   const governance=surface(printerly.governanceCutover);
   return createCutoverCapabilities({
+    'school.reference.read':normalizeMode(school.referenceReadCutover),
+    'school.reference.write':normalizeMode(school.referenceWriteCutover),
     'printerly.nodes':surface(printerly.nodeCutover),
     'printerly.jobs':normalizeMode(printerly.jobCutover),
     'printerly.scanner':surface(printerly.scannerCutover),
