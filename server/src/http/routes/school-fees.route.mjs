@@ -1,7 +1,16 @@
 import {authenticateFinance,mapFinanceError,ok,pagination,readJson,requiredHeader} from '../../finance/http.mjs';
 import {withFinanceIdempotencyLock} from '../../finance/idempotency-lock.mjs';
 const PREFIX='/api/v1/school-fees',parts=url=>url.pathname.slice(PREFIX.length).split('/').filter(Boolean);
-export default{name:'school-fees',prefix:PREFIX,business:true,priority:95,enabled:c=>c.extensions?.['finance-api']?.feesCutover==='node',async handle({request,url,runtime,requestId}){try{const api=runtime.extensions?.['finance-api']?.schoolFees;if(!api)throw Object.assign(new Error('School Fees runtime unavailable'),{status:503,code:'FINANCE_SELFHOST_NOT_READY'});const p=parts(url),scope=request.method==='GET'?'school:read':'school:write',x=await authenticateFinance(runtime,request,scope),page=pagination(url);
+const SUPPORTED=[
+  ['GET',/^\/fee-categories$/],
+  ['GET',/^\/structures$/],['POST',/^\/structures$/],
+  ['GET',/^\/charges$/],['POST',/^\/charges$/],['POST',/^\/charges\/[^/]+\/adjustments$/],
+  ['GET',/^\/receipts$/],['POST',/^\/receipts$/],['POST',/^\/receipts\/[^/]+\/snapshot$/],['POST',/^\/receipts\/[^/]+\/prints$/],
+  ['GET',/^\/students\/[^/]+\/balance$/],
+  ['GET',/^\/mobile-intents$/],['POST',/^\/mobile-intents$/],
+];
+function matches({request,url}){const relative=url.pathname.slice(PREFIX.length)||'/';return SUPPORTED.some(([method,pattern])=>request.method===method&&pattern.test(relative));}
+export default{name:'school-fees',prefix:PREFIX,business:true,priority:95,enabled:c=>c.extensions?.['finance-api']?.feesCutover==='node',matches,async handle({request,url,runtime,requestId}){try{const api=runtime.extensions?.['finance-api']?.schoolFees;if(!api)throw Object.assign(new Error('School Fees runtime unavailable'),{status:503,code:'FINANCE_SELFHOST_NOT_READY'});const p=parts(url),scope=request.method==='GET'?'school:read':'school:write',x=await authenticateFinance(runtime,request,scope),page=pagination(url);
 if(request.method==='GET'&&p[0]==='fee-categories'&&p.length===1)return ok({data:await api.feeCategories(x.organizationId)});
 if(request.method==='GET'&&p[0]==='structures'&&p.length===1)return ok({data:await api.feeStructures(x.organizationId,page.limit),pagination:page});
 if(request.method==='POST'&&p[0]==='structures'&&p.length===1)return ok({data:await api.createFeeStructure({principal:x,body:await readJson(request),requestId})},201);
