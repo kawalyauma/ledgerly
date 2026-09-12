@@ -12,12 +12,16 @@ set_env(){ local key="$1" value="$2"; if grep -q -E "^${key}=" "$ENV_FILE"; then
 command -v docker >/dev/null 2>&1 || fail "docker is required"
 DOCKER=(docker)
 if ! docker info >/dev/null 2>&1; then command -v sudo >/dev/null 2>&1 || fail "Docker is not accessible and sudo is unavailable"; sudo -v || fail "sudo authentication failed"; DOCKER=(sudo docker); fi
+"${DOCKER[@]}" compose version >/dev/null 2>&1 || fail "docker compose is required"
 [[ "${LEDGERLY_ENVIRONMENT:-$(read_env LEDGERLY_ENVIRONMENT)}" != production ]] || fail "This rehearsal refuses production"
+[[ "${LEDGERLY_RUNTIME_MODE:-$(read_env LEDGERLY_RUNTIME_MODE)}" != production ]] || fail "Keep LEDGERLY_RUNTIME_MODE=foundation during Attendance rehearsal"
+[[ -n "$(read_env POSTGRES_PASSWORD)" ]] || fail "POSTGRES_PASSWORD is missing"
 cd "$ROOT_DIR"
 COMPOSE=("${DOCKER[@]}" compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" -f "$MODULE_OVERLAY")
 "${COMPOSE[@]}" build api migrate-d1
 run_schema(){ printf 'Preparing PostgreSQL phase: %s\n' "$1"; "${COMPOSE[@]}" --profile migration run --rm migrate-d1 node src/migration/cli.mjs schema --phase "$1"; }
 run_schema auth-core
+run_schema module-registry
 run_schema contacts
 run_schema mobile-sync-core
 run_schema school-reference
@@ -36,11 +40,14 @@ PY
   set_env BIOMETRIC_ENCRYPTION_KEY "$BIOMETRIC_KEY"
   printf 'Generated a local 32-byte biometric encryption key. Keep .env.selfhost private.\n'
 fi
+set_env LEDGERLY_PLATFORM_MODULES_SELFHOST_ENABLED true
+set_env LEDGERLY_PLATFORM_MODULES_CUTOVER node
 set_env LEDGERLY_ATTENDANCE_SELFHOST_ENABLED true
 set_env SELFHOST_ATTENDANCE_ENABLED true
 set_env LEDGERLY_ATTENDANCE_CUTOVER node
 "${COMPOSE[@]}" up -d --build api
 printf '\nAttendance cutover rehearsal completed.\n'
+printf '  Module registry: Node/PostgreSQL\n'
 printf '  Attendance API authority: Node\n'
 printf '  PostgreSQL sessions/records/events/devices: enabled\n'
 printf '  Offline kiosk sync + one-time QR enrollment: enabled\n'
