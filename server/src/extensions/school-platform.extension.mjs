@@ -19,6 +19,7 @@ export default {
       referenceWriteCutover: cutover(env.LEDGERLY_SCHOOL_REFERENCE_WRITE_CUTOVER),
       peopleReadCutover: cutover(env.LEDGERLY_SCHOOL_PEOPLE_READ_CUTOVER),
       peopleWriteCutover: cutover(env.LEDGERLY_SCHOOL_PEOPLE_WRITE_CUTOVER),
+      filesCutover: cutover(env.LEDGERLY_SCHOOL_FILES_CUTOVER),
     };
   },
   enabled(extensionConfig) {
