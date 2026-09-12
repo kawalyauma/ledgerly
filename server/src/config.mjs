@@ -29,6 +29,14 @@ function readBoolean(value, fallback = false) {
   throw new Error(`Invalid boolean value: ${value}`);
 }
 
+function readCutoverMode(value, fallback = "cloudflare", name = "cutover mode") {
+  const mode = String(value ?? fallback).trim().toLowerCase();
+  if (!["cloudflare", "shadow", "node"].includes(mode)) {
+    throw new Error(`${name} must be cloudflare, shadow, or node`);
+  }
+  return mode;
+}
+
 function readCsv(value) {
   return String(value ?? "")
     .split(",")
@@ -109,6 +117,8 @@ export function loadConfig(env = process.env) {
       secret: jwtSecret,
       accessTokenTtlSeconds: readPositiveInt(env.LEDGERLY_ACCESS_TOKEN_TTL_SECONDS, 900, "LEDGERLY_ACCESS_TOKEN_TTL_SECONDS"),
       refreshTtlDays: readPositiveInt(env.LEDGERLY_REFRESH_TOKEN_TTL_DAYS, 30, "LEDGERLY_REFRESH_TOKEN_TTL_DAYS"),
+      loginCutover: readCutoverMode(env.LEDGERLY_AUTH_LOGIN_CUTOVER, "cloudflare", "LEDGERLY_AUTH_LOGIN_CUTOVER"),
+      registerCutover: readCutoverMode(env.LEDGERLY_AUTH_REGISTER_CUTOVER, "cloudflare", "LEDGERLY_AUTH_REGISTER_CUTOVER"),
     }),
     notifications: Object.freeze({
       timeoutMs: readPositiveInt(env.LEDGERLY_NOTIFICATION_TIMEOUT_MS, 10000, "LEDGERLY_NOTIFICATION_TIMEOUT_MS"),
