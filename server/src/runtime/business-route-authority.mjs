@@ -5,6 +5,7 @@ export const BUSINESS_ROUTE_AUTHORITY_POLICY=Object.freeze({
   'contacts-api':Object.freeze({capability:'contacts.core'}),
   'communications-api':Object.freeze({capability:'communications.core'}),
   'mobile-sync-api':Object.freeze({capability:'mobile-sync.core'}),
+  'tasks-work-api':Object.freeze({capability:'tasks-work.core'}),
   'school-setup':Object.freeze({capability:'school.reference.read'}),
   'school-student-management':Object.freeze({capability:'school.people.read'}),
   'human-resources-api':Object.freeze({capability:'human-resources.core'}),
@@ -45,6 +46,7 @@ export function createHttpCutoverCapabilities(config,overrides={}){
   const contacts=config?.extensions?.contacts??{};
   const communications=config?.extensions?.communications??{};
   const mobileSync=config?.extensions?.['mobile-sync']??{};
+  const tasksWork=config?.extensions?.['tasks-work']??{};
   const humanResources=config?.extensions?.['human-resources']??{};
   const fallback=normalizeMode(printerly.cutover);
   const surface=(value)=>normalizeMode(value??fallback);
@@ -55,6 +57,8 @@ export function createHttpCutoverCapabilities(config,overrides={}){
     'contacts.core':normalizeMode(contacts.cutover),
     'communications.core':normalizeMode(communications.cutover),
     'mobile-sync.core':normalizeMode(mobileSync.cutover),
+    'tasks-work.core':normalizeMode(tasksWork.cutover),
+    'tasks-work.webhook':normalizeMode(tasksWork.webhookCutover),
     'school.reference.read':normalizeMode(school.referenceReadCutover),
     'school.reference.write':normalizeMode(school.referenceWriteCutover),
     'school.people.read':normalizeMode(school.peopleReadCutover),
