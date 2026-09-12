@@ -20,7 +20,7 @@ export default {
   required: false,
   configure(env) {
     return {
-      enabled: String(env.SELFHOST_COMMUNICATIONS_ENABLED ?? "").toLowerCase() === "true",
+      enabled: String(env.LEDGERLY_COMMUNICATIONS_SELFHOST_ENABLED ?? env.SELFHOST_COMMUNICATIONS_ENABLED ?? "").toLowerCase() === "true",
       cutover: cutover(env.LEDGERLY_COMMUNICATIONS_CUTOVER),
       batchSize: asPositiveInt(env.SELFHOST_COMMUNICATIONS_BATCH_SIZE, 100, 500),
       pollIntervalMs: asPositiveInt(env.SELFHOST_COMMUNICATIONS_POLL_MS, 500, 60000),
@@ -35,29 +35,14 @@ export default {
     const repository = new PostgresCommunicationsRepository({ database: services.database });
     const queue = createQueue({ name: "communications", maxAttempts: extensionConfig.maxAttempts });
     const service = new CommunicationsService({ repository, queue, notifications: services.notifications, audit: services.audit, batchSize: extensionConfig.batchSize });
-    const api = new CommunicationsApiService({
-      database: services.database,
-      service,
-      repository,
-      audit: services.audit,
-      notificationConfig: config.notifications,
-    });
+    const api = new CommunicationsApiService({ database: services.database, service, repository, audit: services.audit, notificationConfig: config.notifications });
     const worker = new CommunicationsWorker({ queue, service });
     let stopped = false;
     let running = false;
 
     async function ensureOrganizationSchedule(organizationId) {
       if (typeof organizationId !== "string" || organizationId.trim() === "") throw new TypeError("organizationId is required");
-      return services.scheduler.register({
-        id: `communications-scan:${organizationId}`,
-        name: "Communications scheduled campaign scan",
-        organizationId,
-        kind: "communications.dispatch-due",
-        cron: extensionConfig.scheduleCron,
-        timezone: "UTC",
-        payload: {},
-        enabled: true,
-      });
+      return services.scheduler.register({ id: `communications-scan:${organizationId}`, name: "Communications scheduled campaign scan", organizationId, kind: "communications.dispatch-due", cron: extensionConfig.scheduleCron, timezone: "UTC", payload: {}, enabled: true });
     }
 
     const orgs = await services.database.query("SELECT id FROM organizations WHERE status='active' ORDER BY id");
@@ -88,10 +73,10 @@ export default {
       async readiness() {
         const [queueHealth, schema] = await Promise.all([
           queue.health(),
-          services.database.query(`SELECT to_regclass('public.communication_campaigns') IS NOT NULL AS campaigns, to_regclass('public.communication_deliveries') IS NOT NULL AS deliveries, to_regclass('public.communication_preferences') IS NOT NULL AS preferences`),
+          services.database.query(`SELECT to_regclass('public.communication_message_types') IS NOT NULL AS message_types,to_regclass('public.communication_campaigns') IS NOT NULL AS campaigns,to_regclass('public.communication_recipients') IS NOT NULL AS recipients,to_regclass('public.communication_deliveries') IS NOT NULL AS deliveries,to_regclass('public.communication_preferences') IS NOT NULL AS preferences`),
         ]);
         const row = schema.rows[0] ?? {};
-        const schemaReady = row.campaigns === true && row.deliveries === true && row.preferences === true;
+        const schemaReady = row.message_types === true && row.campaigns === true && row.recipients === true && row.deliveries === true && row.preferences === true;
         return { ok: queueHealth.ok === true && schemaReady, provider: "postgresql-redis-notification-bridge", queue: queueHealth, schemaReady };
       },
       describe() {
