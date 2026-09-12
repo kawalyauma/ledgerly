@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createPostgresDatabase } from "../adapters/postgres-database.mjs";
 import { D1HttpSource } from "./d1-source.mjs";
-import { listMigrationPhases } from "./phases.mjs";
+import { getMigrationPhase, listMigrationPhases } from "./phases.mjs";
 import { D1MigrationRunner } from "./runner.mjs";
 
 function required(name) {
@@ -49,6 +49,30 @@ async function main() {
   }
 
   const phaseName = option(args, "--phase") || process.env.LEDGERLY_MIGRATION_PHASE || "auth-core";
+
+  // Schema-only bootstrap is intentionally independent of Cloudflare. It is useful for
+  // disposable/local self-host rehearsals where a fresh PostgreSQL database must be able
+  // to accept newly registered users before any D1 data is copied. It never marks a D1
+  // migration as validated and therefore does not constitute production cutover evidence.
+  if (command === "schema") {
+    const phase = getMigrationPhase(phaseName);
+    const database = await createPostgresDatabase(databaseConfig());
+    try {
+      await phase.ensureSchema(database);
+      if (phase.finalizeSchema) await phase.finalizeSchema(database);
+      console.log(JSON.stringify({
+        ok: true,
+        command: "schema",
+        phase: phase.name,
+        tables: phase.tables.map((table) => table.name),
+        migrationValidated: false,
+      }, null, 2));
+    } finally {
+      await database.close();
+    }
+    return;
+  }
+
   const accountId = required("CLOUDFLARE_ACCOUNT_ID");
   const databaseId = required("CLOUDFLARE_D1_DATABASE_ID");
   const source = new D1HttpSource({
