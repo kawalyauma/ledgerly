@@ -17,14 +17,20 @@ test('School Fees Node authority includes only implemented endpoint/method pairs
   assert.equal(matches(schoolFeesRoute,'DELETE','/api/v1/school-fees/structures/s1'),false);
 });
 
-test('Payroll Node authority includes only implemented endpoint/method pairs',()=>{
-  assert.equal(matches(payrollRoute,'GET','/api/v1/payroll/employees'),true);
-  assert.equal(matches(payrollRoute,'POST','/api/v1/payroll/runs'),true);
-  assert.equal(matches(payrollRoute,'POST','/api/v1/payroll/runs/run1/reverse'),true);
-  assert.equal(matches(payrollRoute,'POST','/api/v1/payroll/salary-payments/pay1/reverse'),true);
-  assert.equal(matches(payrollRoute,'GET','/api/v1/payroll/statutory-returns'),false);
-  assert.equal(matches(payrollRoute,'POST','/api/v1/payroll/payment-batches'),false);
-  assert.equal(matches(payrollRoute,'PATCH','/api/v1/payroll/components/c1'),false);
+test('Payroll Node authority covers implemented Worker parity and leaves calculation fallback',()=>{
+  assert.equal(matches(payrollRoute,'GET','/api/v1/payroll/manifest'),true);
+  assert.equal(matches(payrollRoute,'GET','/api/v1/payroll/workforce'),true);
+  assert.equal(matches(payrollRoute,'POST','/api/v1/payroll/employees'),true);
+  assert.equal(matches(payrollRoute,'POST','/api/v1/payroll/runs/run1/approve'),true);
+  assert.equal(matches(payrollRoute,'POST','/api/v1/payroll/runs/run1/reverse-safe'),true);
+  assert.equal(matches(payrollRoute,'GET','/api/v1/payroll/runs/run1/payslips/emp1/pdf'),true);
+  assert.equal(matches(payrollRoute,'PATCH','/api/v1/payroll/components/c1'),true);
+  assert.equal(matches(payrollRoute,'PATCH','/api/v1/payroll/rules/r1'),true);
+  assert.equal(matches(payrollRoute,'GET','/api/v1/payroll/statutory-returns'),true);
+  assert.equal(matches(payrollRoute,'POST','/api/v1/payroll/payment-batches/b1/process-safe'),true);
+  assert.equal(matches(payrollRoute,'GET','/api/v1/payroll/year-end/2026/statements'),true);
+  assert.equal(matches(payrollRoute,'POST','/api/v1/payroll/runs/calculate'),false);
+  assert.equal(matches(payrollRoute,'DELETE','/api/v1/payroll/components/c1'),false);
 });
 
 test('Banking Node authority fails closed outside implemented operations',()=>{
