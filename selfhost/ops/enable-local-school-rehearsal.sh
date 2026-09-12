@@ -42,7 +42,11 @@ printf 'Validating required school tables in PostgreSQL...\n'
   psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER_VALUE" -d "$POSTGRES_DB_VALUE" -Atc \
   "SELECT CASE WHEN COUNT(*)=15 THEN 'school-schema-ok' ELSE (1/0)::text END FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND c.relname IN ('school_profiles','school_branches','school_academic_years','school_terms','school_class_levels','school_classes','school_streams','school_subjects','school_class_subjects','school_grading_scales','school_roles','school_students','school_guardians','school_staff_profiles','school_settings');"
 
-printf 'School schema validation passed. Enabling ONLY the School setup/reference Node surface...\n'
+printf 'Exercising the School setup service against PostgreSQL before changing authority...\n'
+"${DOCKER[@]}" compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile migration run --rm migrate-d1 \
+  node src/school-platform/validate-setup-cutover.mjs
+
+printf 'School schema/service validation passed. Enabling ONLY the School setup/reference Node surface...\n'
 set_env LEDGERLY_SCHOOL_SELFHOST_ENABLED true
 set_env LEDGERLY_SCHOOL_SETUP_CUTOVER node
 
