@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+const read=p=>readFile(new URL(`../${p}`,import.meta.url),'utf8');
+
+test('banking and tax cutover remain Cloudflare-default and granular',async()=>{const ext=await read('src/extensions/finance-api.extension.mjs'),bank=await read('src/http/routes/finance-banking.route.mjs'),tax=await read('src/http/routes/finance-tax.route.mjs');assert.match(ext,/LEDGERLY_FINANCE_BANKING_CUTOVER/);assert.match(ext,/LEDGERLY_FINANCE_TAX_CUTOVER/);assert.match(ext,/value\|\|'cloudflare'/);assert.match(bank,/prefix:PREFIX,business:true/);assert.match(bank,/bankingCutover==='node'/);assert.match(tax,/taxCutover==='node'/);assert.match(bank,/\/api\/v1\/banking/);assert.match(tax,/\/api\/v1\/tax/)});
+
+test('banking cutover preserves legacy frontend endpoints and high-risk locking',async()=>{const route=await read('src/http/routes/finance-banking.route.mjs'),svc=await read('src/finance/banking-api-service.mjs');for(const token of ["'accounts'","'transactions'","'statements'","'reconciliation-statement'","'reconciliations'","'charges'","'transfers'","'match'"])assert.ok(route.includes(token),`missing ${token}`);assert.match(svc,/FOR UPDATE/);assert.match(svc,/pg_advisory_xact_lock/);assert.match(svc,/idempotency_key/);assert.match(svc,/difference!==0/);assert.match(svc,/await inv\.committed\(\)/);assert.match(svc,/inv\.rollback\(\)/)});
+
+test('tax return lifecycle is tenant scoped and transactional',async()=>{const route=await read('src/http/routes/finance-tax.route.mjs'),svc=await read('src/finance/tax-api-service.mjs');assert.match(route,/accounts:read/);assert.match(route,/accounts:write/);assert.match(route,/reports:read/);assert.match(route,/reports:write/);assert.match(route,/returns.*prepare/s);assert.match(route,/returns.*lock/s);assert.match(route,/returns.*file/s);assert.match(svc,/organization_id=\$2/);assert.match(svc,/status='locked'/);assert.match(svc,/status='filed'/);assert.match(svc,/JOIN tax_codes/)});
