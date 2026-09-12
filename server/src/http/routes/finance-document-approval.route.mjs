@@ -1,0 +1,4 @@
+import {authenticateFinance,mapFinanceError,ok} from '../../finance/http.mjs';
+const PREFIX='/api/v1/operations/documents';
+const parts=url=>url.pathname.slice(PREFIX.length).split('/').filter(Boolean);
+export default{name:'finance-document-approval',prefix:PREFIX,business:true,priority:98,enabled:c=>c.extensions?.['finance-api']?.approvalsCutover==='node',matches({request,url}){const p=parts(url);return request.method==='POST'&&p.length===2&&p[1]==='submit';},async handle({request,url,runtime,requestId}){try{const api=runtime.extensions?.['finance-api']?.approvals;if(!api)throw Object.assign(new Error('Finance approvals runtime unavailable'),{status:503,code:'FINANCE_SELFHOST_NOT_READY'});const p=parts(url),principal=await authenticateFinance(runtime,request,'documents:write');return ok({data:await api.submitDocument({principal,documentId:p[0],requestId})},201);}catch(error){throw mapFinanceError(error)}}};
