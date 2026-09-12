@@ -31,24 +31,29 @@ run_schema school-people
 run_schema school-staff
 run_schema attendance
 run_schema academics
-printf 'Validating Academics schema, relationships and Attendance linkage...\n'
+printf 'Validating Academics schema, relationships, Attendance linkage and mobile bridge...\n'
 "${COMPOSE[@]}" --profile migration run --rm migrate-d1 node src/readiness/academics-cutover-check.mjs
-printf 'Enabling PostgreSQL module registry and Academics authority...\n'
+printf 'Enabling PostgreSQL module registry, Academics authority and shared mobile sync...\n'
 set_env LEDGERLY_PLATFORM_MODULES_SELFHOST_ENABLED true
 set_env LEDGERLY_PLATFORM_MODULES_CUTOVER node
+set_env SELFHOST_MOBILE_SYNC_ENABLED true
 set_env LEDGERLY_ACADEMICS_SELFHOST_ENABLED true
 set_env SELFHOST_ACADEMICS_ENABLED true
 set_env LEDGERLY_ACADEMICS_CUTOVER node
 printf 'Restarting the self-hosted API...\n'
 "${COMPOSE[@]}" up -d --build api
+printf 'Verifying live Academics and mobile-sync runtime wiring...\n'
+"${COMPOSE[@]}" exec -T api node src/readiness/academics-runtime-check.mjs
 printf '\nAcademics cutover rehearsal completed.\n'
 printf '  Module registry:             Node/PostgreSQL\n'
 printf '  Academics API authority:     Node/PostgreSQL\n'
+printf '  Mobile sync transport:       PostgreSQL / enabled\n'
+printf '  Academics mobile collections: 8 verified\n'
 printf '  Timetables + allocations:    enabled\n'
 printf '  Schemes + lesson plans:      enabled\n'
 printf '  Delivery + Attendance link:  enabled\n'
 printf '  Supervision + inspections:   enabled\n'
 printf '  Exams:                       untouched / separate module\n'
 printf '  Runtime mode:                foundation\n'
-printf '\nThis is a local schema rehearsal, not proof that existing Cloudflare D1 Academics data has been migrated.\n'
+printf '\nThis is a local schema/runtime rehearsal, not proof that existing Cloudflare D1 Academics data has been migrated.\n'
 printf 'For production cutover, migrate and validate the Academics phase against D1 before moving authority.\n'
