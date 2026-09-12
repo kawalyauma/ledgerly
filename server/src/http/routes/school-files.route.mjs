@@ -35,6 +35,7 @@ function safeName(value){const name=String(value??'file').normalize('NFKD').repl
 function id(){return`sfl_${randomUUID().replaceAll('-','')}`;}
 function bounded(value,fallback=100,max=500){const n=Number(value);return Number.isFinite(n)?Math.min(max,Math.max(1,Math.trunc(n))):fallback;}
 function camel(row){if(!row||typeof row!=='object')return row;return Object.fromEntries(Object.entries(row).map(([key,value])=>[key.replace(/_([a-z])/g,(_,c)=>c.toUpperCase()),value]));}
+function publicMetadata(row,{contentUrl=false}={}){const item=camel(row);delete item.objectKey;if(item.sizeBytes!=null)item.sizeBytes=Number(item.sizeBytes);item.checksum=item.checksumSha256;delete item.checksumSha256;if(contentUrl)item.contentUrl=`${PREFIX}/${encodeURIComponent(item.id)}/content`;return item;}
 function principalScopes(principal){return Array.isArray(principal?.scopes)?principal.scopes:[];}
 function directPermission(principal,permission){if(['owner','admin','super_admin'].includes(principal?.role))return true;const s=principalScopes(principal);return s.includes('*')||s.includes('school:*')||s.includes(permission);}
 async function requireSchoolPermission(database,principal,permission){
@@ -85,7 +86,7 @@ export default{
       runtime.auth.requireScope(principal,'school:read');await requireSchoolPermission(database,principal,'school.files:read');
       const limit=bounded(url.searchParams.get('limit'));
       const result=await database.query(`SELECT id,original_name,mime_type,size_bytes,checksum_sha256,purpose,created_at FROM school_files WHERE organization_id=$1 AND deleted_at IS NULL ORDER BY created_at DESC LIMIT $2`,[principal.organizationId,limit]);
-      return{status:200,body:{data:result.rows.map(camel)}};
+      return{status:200,body:{data:result.rows.map(row=>publicMetadata(row))}};
     }
 
     if(request.method==='POST'&&!suffix){
@@ -115,7 +116,7 @@ export default{
     match=suffix.match(/^([^/]+)$/);
     if(match&&request.method==='GET'){
       runtime.auth.requireScope(principal,'school:read');await requireSchoolPermission(database,principal,'school.files:read');
-      const file=camel(await ownedFile(database,principal.organizationId,decodeURIComponent(match[1])));delete file.objectKey;file.checksum=file.checksumSha256;delete file.checksumSha256;file.contentUrl=`${PREFIX}/${encodeURIComponent(file.id)}/content`;return{status:200,body:{data:file}};
+      const file=await ownedFile(database,principal.organizationId,decodeURIComponent(match[1]));return{status:200,body:{data:publicMetadata(file,{contentUrl:true})}};
     }
     if(match&&request.method==='DELETE'){
       runtime.auth.requireScope(principal,'school:write');await requireSchoolPermission(database,principal,'school.files:write');
