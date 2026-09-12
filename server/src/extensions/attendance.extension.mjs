@@ -1,4 +1,4 @@
-import { createAttendanceService } from '../attendance/service.mjs';
+import { createAttendanceParityService } from '../attendance/parity-service.mjs';
 
 function cutover(value){
   const mode=String(value??'cloudflare').trim().toLowerCase();
@@ -18,7 +18,7 @@ export default {
   },
   enabled(config){return config.enabled===true;},
   async create({services,extensionConfig}){
-    const api=createAttendanceService({database:services.database,audit:services.audit,biometricKey:extensionConfig.biometricKey});
+    const api=createAttendanceParityService({database:services.database,audit:services.audit,biometricKey:extensionConfig.biometricKey});
     return {
       value:Object.freeze({api}),
       readiness:()=>api.readiness(),
