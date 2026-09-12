@@ -1,0 +1,11 @@
+# Cumulative overlay for self-hosted business-module cutovers.
+# Keep migration-only Cloudflare credentials out of the long-running API container.
+services:
+  api:
+    environment:
+      LEDGERLY_TASKS_WORK_SELFHOST_ENABLED: ${LEDGERLY_TASKS_WORK_SELFHOST_ENABLED:-false}
+      LEDGERLY_TASKS_WORK_CUTOVER: ${LEDGERLY_TASKS_WORK_CUTOVER:-cloudflare}
+      LEDGERLY_TASKS_WORK_WEBHOOK_CUTOVER: ${LEDGERLY_TASKS_WORK_WEBHOOK_CUTOVER:-cloudflare}
+      SELFHOST_TASKS_WORK_REMINDER_CRON: ${SELFHOST_TASKS_WORK_REMINDER_CRON:-*/5 * * * *}
+      SELFHOST_TASKS_WORK_POLL_MS: ${SELFHOST_TASKS_WORK_POLL_MS:-750}
+      SELFHOST_TASKS_WORK_MAX_ATTEMPTS: ${SELFHOST_TASKS_WORK_MAX_ATTEMPTS:-5}
