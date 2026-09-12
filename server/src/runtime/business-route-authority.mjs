@@ -7,6 +7,7 @@ export const BUSINESS_ROUTE_AUTHORITY_POLICY=Object.freeze({
   'attendance-api':Object.freeze({capability:'attendance.core'}),
   'attendance-device':Object.freeze({capability:'attendance.core'}),
   'attendance-device-enrollment':Object.freeze({capability:'attendance.core'}),
+  'academics-api':Object.freeze({capability:'academics.core'}),
   'school-setup':Object.freeze({capability:'school.reference.read'}),
   'school-student-management':Object.freeze({capability:'school.people.read'}),
   'human-resources-api':Object.freeze({capability:'human-resources.core'}),
@@ -47,6 +48,7 @@ export function createHttpCutoverCapabilities(config,overrides={}){
   const contacts=config?.extensions?.contacts??{};
   const communications=config?.extensions?.communications??{};
   const attendance=config?.extensions?.attendance??{};
+  const academics=config?.extensions?.academics??{};
   const humanResources=config?.extensions?.['human-resources']??{};
   const fallback=normalizeMode(printerly.cutover);
   const surface=(value)=>normalizeMode(value??fallback);
@@ -57,6 +59,7 @@ export function createHttpCutoverCapabilities(config,overrides={}){
     'contacts.core':normalizeMode(contacts.cutover),
     'communications.core':normalizeMode(communications.cutover),
     'attendance.core':normalizeMode(attendance.cutover),
+    'academics.core':normalizeMode(academics.cutover),
     'school.reference.read':normalizeMode(school.referenceReadCutover),
     'school.reference.write':normalizeMode(school.referenceWriteCutover),
     'school.people.read':normalizeMode(school.peopleReadCutover),
