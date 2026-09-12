@@ -2,6 +2,7 @@ import { CUTOVER_CAPABILITIES, createCutoverCapabilities } from './cutover-capab
 
 export const BUSINESS_ROUTE_AUTHORITY_POLICY=Object.freeze({
   'school-setup':Object.freeze({capability:'school.reference.read'}),
+  'school-student-management':Object.freeze({capability:'school.people.read'}),
   'printerly-legacy-node':Object.freeze({capability:'printerly.nodes'}),
   'printerly-jobs':Object.freeze({capability:'printerly.jobs'}),
   'printerly-documents':Object.freeze({capability:'printerly.jobs'}),
@@ -42,6 +43,8 @@ export function createHttpCutoverCapabilities(config,overrides={}){
   return createCutoverCapabilities({
     'school.reference.read':normalizeMode(school.referenceReadCutover),
     'school.reference.write':normalizeMode(school.referenceWriteCutover),
+    'school.people.read':normalizeMode(school.peopleReadCutover),
+    'school.people.write':normalizeMode(school.peopleWriteCutover),
     'printerly.nodes':surface(printerly.nodeCutover),
     'printerly.jobs':normalizeMode(printerly.jobCutover),
     'printerly.scanner':surface(printerly.scannerCutover),
