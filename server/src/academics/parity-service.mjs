@@ -4,13 +4,22 @@ function text(value){if(value==null)return null;const v=String(value).trim();ret
 function camel(row){if(!row||typeof row!=='object')return row;const out={};for(const[k,v]of Object.entries(row)){const n=k.replace(/_([a-z])/g,(_,c)=>c.toUpperCase());if(k.endsWith('_json')){try{out[n.replace(/Json$/,'')]=typeof v==='string'?JSON.parse(v):v??{};}catch{out[n.replace(/Json$/,'')]={};}}else out[n]=v;}return out;}
 function fail(status,code,message){const e=new Error(message);e.status=status;e.code=code;throw e;}
 
+// Keep these action names/statuses identical to the Cloudflare Academics service and web UI.
+// The explicit HOD-approved stage is important because DOS submission is a separate control step.
+export const ACADEMICS_SCHEME_TRANSITIONS=Object.freeze({
+  submit_hod:Object.freeze({from:Object.freeze(['draft','rejected']),to:'submitted_hod'}),
+  hod_approve:Object.freeze({from:Object.freeze(['submitted_hod']),to:'hod_approved'}),
+  submit_dos:Object.freeze({from:Object.freeze(['hod_approved']),to:'submitted_dos'}),
+  dos_approve:Object.freeze({from:Object.freeze(['submitted_dos']),to:'approved'}),
+  reject:Object.freeze({from:Object.freeze(['submitted_hod','submitted_dos']),to:'rejected'}),
+});
+
 export class PostgresAcademicsParityService extends PostgresAcademicsService{
   manifest(){return{...super.manifest(),examsIncluded:false};}
 
   async schemeWorkflow({organizationId,userId,id:schemeId,action,feedback=null,requestId=null}){
     const s=await this.owned('acad_schemes',schemeId,organizationId,'Scheme of work');
-    const transitions={submit:{from:['draft','rejected'],to:'submitted_hod'},hod_approve:{from:['submitted_hod'],to:'submitted_dos'},dos_approve:{from:['submitted_dos'],to:'approved'},reject:{from:['submitted_hod','submitted_dos'],to:'rejected'},archive:{from:['draft','submitted_hod','submitted_dos','approved','rejected'],to:'archived'}};
-    const x=transitions[action];
+    const x=ACADEMICS_SCHEME_TRANSITIONS[action];
     if(!x||!x.from.includes(s.status))fail(409,'INVALID_STATUS',`Cannot ${action} this scheme from ${s.status}.`);
     let sql='UPDATE acad_schemes SET status=$1,updated_at=now()',vals=[x.to];
     if(action==='hod_approve'){vals.push(text(feedback),userId);sql+=',hod_feedback=$2,hod_reviewed_by=$3,hod_reviewed_at=now()';}
