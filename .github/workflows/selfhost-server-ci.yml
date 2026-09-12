@@ -54,8 +54,8 @@ jobs:
           sed -E -i 's/CHANGE_ME_[A-Za-z0-9_]+/ci-validation-secret-0123456789abcdef/g' /tmp/ledgerly.env
           chmod 600 /tmp/ledgerly.env
           mkdir -p /tmp/ledgerly-backups
-      - name: Validate base and finance/NVR Compose configuration
-        run: docker compose --env-file /tmp/ledgerly.env -f compose.selfhost.yml -f compose.finance-runtime.yml config --quiet
+      - name: Validate base, module-cutover and finance/NVR Compose configuration
+        run: docker compose --env-file /tmp/ledgerly.env -f compose.selfhost.yml -f selfhost/ops/compose-module-cutovers.yml -f compose.finance-runtime.yml config --quiet
       - name: Run safe operations production-readiness checks
         env:
           LEDGERLY_ENV_FILE: /tmp/ledgerly.env
