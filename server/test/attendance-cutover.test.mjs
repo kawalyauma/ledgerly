@@ -9,7 +9,7 @@ import enrollmentRoute from '../src/http/routes/attendance-device-enrollment.rou
 
 function request(payload,{method='GET',headers={}}={}){const stream=Readable.from(payload===undefined?[]:[Buffer.from(JSON.stringify(payload))]);stream.method=method;stream.headers=headers;return stream;}
 const config={http:{maxRequestBodyBytes:4096},extensions:{attendance:{enabled:true,cutover:'node'},contacts:{},communications:{},'platform-modules':{},'human-resources':{},'school-platform':{},printerly:{}}};
-function userRuntime(api){return{auth:{async authenticateRequest(){return{organizationId:'org_1',userId:'usr_1',role:'owner',scopes:[]};}},services:{database:{async query(){return{rows:[]};}}},extensions:{attendance:{api}}};}
+function userRuntime(api){return{auth:{async authenticateRequest(){return{organizationId:'org_1',userId:'usr_1',role:'owner',scopes:[]};},requireScope(principal,scope){if(principal.role==='owner'||principal.role==='admin'||principal.scopes?.includes(scope)||principal.scopes?.includes('*'))return principal;throw Object.assign(new Error('forbidden'),{status:403});}},services:{database:{async query(){return{rows:[]};}}},extensions:{attendance:{api}}};}
 
 test('Attendance management and kiosk routes are registered as business routes',()=>{
   const routes=listHttpRouteDescriptors();
