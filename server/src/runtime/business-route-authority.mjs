@@ -4,6 +4,9 @@ export const BUSINESS_ROUTE_AUTHORITY_POLICY=Object.freeze({
   'platform-modules':Object.freeze({capability:'platform.modules'}),
   'contacts-api':Object.freeze({capability:'contacts.core'}),
   'communications-api':Object.freeze({capability:'communications.core'}),
+  'attendance-api':Object.freeze({capability:'attendance.core'}),
+  'attendance-device':Object.freeze({capability:'attendance.core'}),
+  'attendance-device-enrollment':Object.freeze({capability:'attendance.core'}),
   'school-setup':Object.freeze({capability:'school.reference.read'}),
   'school-student-management':Object.freeze({capability:'school.people.read'}),
   'human-resources-api':Object.freeze({capability:'human-resources.core'}),
@@ -43,6 +46,7 @@ export function createHttpCutoverCapabilities(config,overrides={}){
   const platformModules=config?.extensions?.['platform-modules']??{};
   const contacts=config?.extensions?.contacts??{};
   const communications=config?.extensions?.communications??{};
+  const attendance=config?.extensions?.attendance??{};
   const humanResources=config?.extensions?.['human-resources']??{};
   const fallback=normalizeMode(printerly.cutover);
   const surface=(value)=>normalizeMode(value??fallback);
@@ -52,6 +56,7 @@ export function createHttpCutoverCapabilities(config,overrides={}){
     'platform.modules':normalizeMode(platformModules.cutover),
     'contacts.core':normalizeMode(contacts.cutover),
     'communications.core':normalizeMode(communications.cutover),
+    'attendance.core':normalizeMode(attendance.cutover),
     'school.reference.read':normalizeMode(school.referenceReadCutover),
     'school.reference.write':normalizeMode(school.referenceWriteCutover),
     'school.people.read':normalizeMode(school.peopleReadCutover),
