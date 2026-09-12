@@ -1,10 +1,16 @@
 import { PostgresMobileSyncRepository } from "../mobile-sync/repository.mjs";
 import { MobileSyncService } from "../mobile-sync/service.mjs";
 import { loadMobileSyncCollections } from "../mobile-sync/collections.mjs";
+import { createMobileSyncApiService } from "../mobile-sync/api-service.mjs";
 
 function bounded(value, fallback, max) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, max) : fallback;
+}
+function cutover(value) {
+  const mode = String(value ?? "cloudflare").trim().toLowerCase();
+  if (!["cloudflare", "shadow", "node"].includes(mode)) throw new Error("LEDGERLY_MOBILE_SYNC_CUTOVER must be cloudflare, shadow, or node");
+  return mode;
 }
 
 export default {
@@ -12,7 +18,8 @@ export default {
   required: false,
   configure(env) {
     return {
-      enabled: String(env.SELFHOST_MOBILE_SYNC_ENABLED ?? "").toLowerCase() === "true",
+      enabled: String(env.LEDGERLY_MOBILE_SYNC_SELFHOST_ENABLED ?? env.SELFHOST_MOBILE_SYNC_ENABLED ?? "").toLowerCase() === "true",
+      cutover: cutover(env.LEDGERLY_MOBILE_SYNC_CUTOVER),
       maxPush: bounded(env.SELFHOST_MOBILE_SYNC_MAX_PUSH, 250, 1000),
       maxPull: bounded(env.SELFHOST_MOBILE_SYNC_MAX_PULL, 500, 1000),
     };
@@ -24,6 +31,7 @@ export default {
     const repository = new PostgresMobileSyncRepository({ database: services.database });
     const collections = await loadMobileSyncCollections({ services });
     const service = new MobileSyncService({ repository, collections, maxPush: extensionConfig.maxPush, maxPull: extensionConfig.maxPull });
+    const api = createMobileSyncApiService({ database: services.database, service, collections, audit: services.audit });
 
     async function registerDevice({ organizationId, userId, deviceId, installationId = deviceId, platform = "android", appVersion = "unknown", deviceName = "Ledgerly device" }) {
       if (!organizationId || !userId || !deviceId) throw new TypeError("organizationId, userId and deviceId are required");
@@ -41,15 +49,10 @@ export default {
     }
 
     return {
-      value: Object.freeze({ service, repository, registerDevice, collections }),
-      async readiness() {
-        const result = await services.database.query(`SELECT to_regclass('public.mobile_sync_devices') IS NOT NULL AS devices, to_regclass('public.mobile_sync_changes') IS NOT NULL AS changes, to_regclass('public.mobile_sync_operations') IS NOT NULL AS operations, to_regclass('public.mobile_sync_tombstones') IS NOT NULL AS tombstones`);
-        const row = result.rows[0] ?? {};
-        const ok = row.devices === true && row.changes === true && row.operations === true && row.tombstones === true;
-        return { ok, provider: "postgresql-mobile-sync", schemaReady: ok, collections: collections.length };
-      },
+      value: Object.freeze({ service, api, repository, registerDevice, collections }),
+      readiness: () => api.readiness(),
       describe() {
-        return { provider: "postgresql-mobile-sync", collections: collections.map(({ moduleKey, collectionKey, sourceFile }) => ({ moduleKey, collectionKey, sourceFile })), maxPush: extensionConfig.maxPush, maxPull: extensionConfig.maxPull, cloudflareFallbackPreserved: true };
+        return { ...api.describe(), cutover: extensionConfig.cutover, maxPush: extensionConfig.maxPush, maxPull: extensionConfig.maxPull };
       },
     };
   },
