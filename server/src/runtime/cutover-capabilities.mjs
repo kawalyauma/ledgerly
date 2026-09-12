@@ -2,7 +2,7 @@ const states=new Set(['cloudflare','shadow','node']);
 const defaults=Object.freeze({
   'auth.login':'cloudflare','auth.register':'cloudflare','organizations.read':'cloudflare','organizations.write':'cloudflare',
   'school.reference.read':'cloudflare','school.reference.write':'cloudflare',
-  'finance.reference.read':'cloudflare','finance.documents.write':'cloudflare','finance.payments.write':'cloudflare','finance.journals.write':'cloudflare','finance.reversals.write':'cloudflare',
+  'finance.reference.read':'cloudflare','finance.documents.write':'cloudflare','finance.payments.write':'cloudflare','finance.journals.write':'cloudflare','finance.reversals.write':'cloudflare','finance.approvals.write':'cloudflare','finance.reports.read':'cloudflare',
   'school-fees.read':'cloudflare','school-fees.write':'cloudflare','school-fees.reversal':'cloudflare',
   'payroll.read':'cloudflare','payroll.write':'cloudflare','payroll.reversal':'cloudflare',
   'inventory.read':'cloudflare','inventory.write':'cloudflare','printerly.jobs':'cloudflare','nvr.metadata':'cloudflare'
