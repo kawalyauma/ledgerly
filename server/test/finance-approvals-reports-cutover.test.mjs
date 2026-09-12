@@ -36,7 +36,7 @@ test('approval routes are granular and do not swallow unrelated operations',()=>
   assert.equal(approvalsRoute.matches({request:request('POST'),url:url('/api/v1/operations/approvals/apr_1/revise')}),true);
 });
 
-test('report type parity matches the Worker report catalog',()=>{
+test('report type parity matches the Worker report catalog and every branch executes',async()=>{
   assert.deepEqual(REPORT_TYPES,[
     'profit-loss','balance-sheet','cash-flow','trial-balance','general-ledger','transaction-detail',
     'receivables-ageing','payables-ageing','sales-analysis','expense-analysis','inventory-valuation',
@@ -46,7 +46,8 @@ test('report type parity matches the Worker report catalog',()=>{
   ]);
   const service=new FinanceReportsReadService({database:{query:async()=>({rows:[]})}});
   assert.equal(service.types().length,25);
-  assert.rejects(service.generate('org','not-a-report',{}),error=>error?.code==='UNKNOWN_REPORT'&&error?.status===404);
+  for(const type of REPORT_TYPES){const result=await service.generate('org',type,{from:'2026-01-01',to:'2026-09-12',asOf:'2026-09-12'});assert.equal(result.reportType,type);assert.ok(Array.isArray(result.columns));assert.ok(Array.isArray(result.rows));}
+  await assert.rejects(service.generate('org','not-a-report',{}),error=>error?.code==='UNKNOWN_REPORT'&&error?.status===404);
 });
 
 test('approval writes lock rows transactionally and invalidate only after commit',async()=>{
