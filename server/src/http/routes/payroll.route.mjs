@@ -1,8 +1,9 @@
 import {authenticateFinance,mapFinanceError,ok,readJson} from '../../finance/http.mjs';
+import {PayrollCalculationService} from '../../finance/payroll-calculation-service.mjs';
 const PREFIX='/api/v1/payroll',parts=url=>url.pathname.slice(PREFIX.length).split('/').filter(Boolean);
 const SUPPORTED=[
   ['GET',/^\/manifest$/],['GET',/^\/workforce$/],['GET',/^\/employees$/],['POST',/^\/employees$/],
-  ['GET',/^\/runs$/],['POST',/^\/runs$/],['GET',/^\/runs\/[^/]+\/lines$/],['POST',/^\/runs\/[^/]+\/approve$/],['POST',/^\/runs\/[^/]+\/post$/],['POST',/^\/runs\/[^/]+\/(?:reverse|reverse-safe)$/],
+  ['GET',/^\/runs$/],['POST',/^\/runs$/],['POST',/^\/runs\/calculate$/],['GET',/^\/runs\/[^/]+\/lines$/],['POST',/^\/runs\/[^/]+\/approve$/],['POST',/^\/runs\/[^/]+\/post$/],['POST',/^\/runs\/[^/]+\/(?:reverse|reverse-safe)$/],
   ['GET',/^\/runs\/[^/]+\/payslips\/[^/]+$/],['GET',/^\/runs\/[^/]+\/payslips\/[^/]+\/pdf$/],['POST',/^\/runs\/[^/]+\/payslips\/[^/]+\/deliver$/],
   ['GET',/^\/components$/],['POST',/^\/components$/],['PATCH',/^\/components\/[^/]+$/],
   ['GET',/^\/rules$/],['POST',/^\/rules$/],['PATCH',/^\/rules\/[^/]+$/],
@@ -19,6 +20,7 @@ if(request.method==='GET'&&p.length===1&&p[0]==='employees')return ok({data:awai
 if(request.method==='POST'&&p.length===1&&p[0]==='employees')return ok({data:await api.createEmployee(org,user,await readJson(request))},201);
 if(request.method==='GET'&&p.length===1&&p[0]==='runs')return ok({data:await api.runs(org)});
 if(request.method==='POST'&&p.length===1&&p[0]==='runs')return ok({data:await api.createRun(org,user,await readJson(request))},201);
+if(request.method==='POST'&&p.length===2&&p[0]==='runs'&&p[1]==='calculate'){const calculator=new PayrollCalculationService({database:runtime.services.database,cache:runtime.services.cache});return ok({data:await calculator.calculate({organizationId:org,actorId:user,input:await readJson(request)})},201);}
 if(request.method==='GET'&&p.length===3&&p[0]==='runs'&&p[2]==='lines')return ok({data:await api.runLines(org,p[1])});
 if(request.method==='POST'&&p.length===3&&p[0]==='runs'&&p[2]==='approve')return ok({data:await api.approveRun(org,user,p[1])});
 if(request.method==='POST'&&p.length===3&&p[0]==='runs'&&p[2]==='post')return ok({data:await api.postRun(org,user,p[1],await readJson(request))});
