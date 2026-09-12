@@ -9,11 +9,12 @@ const ROUTE_DIRECTORY = new URL("./routes/", import.meta.url);
 const ROUTE_SUFFIX = ".route.mjs";
 const RESERVED_PREFIXES = new Set(["/selfhost/health", "/selfhost/ready", "/selfhost/contracts"]);
 
-function normalizePrefix(value, sourceFile, business=false) {
+function normalizePrefix(value, sourceFile, business=false, publicRoute=false) {
   const raw = String(value ?? "").trim().replace(/\/+$/, "");
   const validSelfhost=raw.startsWith('/selfhost/')&&raw!=='/selfhost';
   const validBusiness=business&&raw.startsWith('/api/v1/')&&raw!=='/api/v1';
-  if(!validSelfhost&&!validBusiness)throw new TypeError(`HTTP route ${sourceFile} prefix must be below /selfhost/ or explicitly opt into a /api/v1/ business route`);
+  const validPublic=publicRoute&&(raw==='/auth'||raw.startsWith('/auth/'));
+  if(!validSelfhost&&!validBusiness&&!validPublic)throw new TypeError(`HTTP route ${sourceFile} prefix must be below /selfhost/, an explicitly public /auth route, or explicitly opt into a /api/v1/ business route`);
   if (RESERVED_PREFIXES.has(raw)) throw new Error(`HTTP route ${sourceFile} may not own reserved prefix ${raw}`);
   return raw;
 }
@@ -25,7 +26,9 @@ function normalizeDescriptor(descriptor, sourceFile) {
   if (typeof descriptor.handle !== "function") throw new TypeError(`HTTP route ${name} must define handle()`);
   if (descriptor.enabled != null && typeof descriptor.enabled !== "function") throw new TypeError(`HTTP route ${name} enabled must be a function`);
   const business=descriptor.business===true;
-  return Object.freeze({name,prefix:normalizePrefix(descriptor.prefix,sourceFile,business),business,priority:Number.isFinite(descriptor.priority)?Number(descriptor.priority):0,enabled:descriptor.enabled??(()=>true),handle:descriptor.handle,sourceFile});
+  const publicRoute=descriptor.public===true;
+  if(business&&publicRoute)throw new TypeError(`HTTP route ${name} may not be both public and business`);
+  return Object.freeze({name,prefix:normalizePrefix(descriptor.prefix,sourceFile,business,publicRoute),business,public:publicRoute,priority:Number.isFinite(descriptor.priority)?Number(descriptor.priority):0,enabled:descriptor.enabled??(()=>true),handle:descriptor.handle,sourceFile});
 }
 
 async function discoverDescriptors() {
@@ -38,7 +41,7 @@ const DESCRIPTORS=await discoverDescriptors();
 const AUTHORITY_AUDIT=assertBusinessRouteAuthorityCoverage(DESCRIPTORS);
 function pathMatches(prefix,pathname){return pathname===prefix||pathname.startsWith(`${prefix}/`);}
 function normalizeResult(result,routeName){if(!result||typeof result!=='object')throw new TypeError(`HTTP route ${routeName} must return a response object`);const status=Number(result.status??200);if(!Number.isInteger(status)||status<100||status>599)throw new TypeError(`HTTP route ${routeName} returned an invalid status`);if(result.headers!=null&&(typeof result.headers!=='object'||Array.isArray(result.headers)))throw new TypeError(`HTTP route ${routeName} headers must be an object`);if(result.rawBody!=null&&!Buffer.isBuffer(result.rawBody)&&!(result.rawBody instanceof Uint8Array))throw new TypeError(`HTTP route ${routeName} rawBody must be bytes`);return{status,body:result.body??null,rawBody:result.rawBody??null,headers:result.headers??{}};}
-export function listHttpRouteDescriptors(){return DESCRIPTORS.map(({name,prefix,business,priority,sourceFile})=>({name,prefix,business,priority,sourceFile}));}
+export function listHttpRouteDescriptors(){return DESCRIPTORS.map(({name,prefix,business,public:publicRoute,priority,sourceFile})=>({name,prefix,business,public:publicRoute,priority,sourceFile}));}
 export function getBusinessRouteAuthorityAudit(){return AUTHORITY_AUDIT;}
 export async function createHttpRouteRegistry({runtime,config,cutoverCapabilities=createHttpCutoverCapabilities(config)}){
   const active=[];
@@ -46,12 +49,12 @@ export async function createHttpRouteRegistry({runtime,config,cutoverCapabilitie
   for(const descriptor of DESCRIPTORS){
     const featureEnabled=await descriptor.enabled(config);
     const authority=resolveBusinessRouteAuthority(descriptor,cutoverCapabilities);
-    if(!featureEnabled){blocked.push({name:descriptor.name,prefix:descriptor.prefix,business:descriptor.business,reason:'feature-disabled',authority});continue;}
-    if(authority&&!authority.nodeAuthoritative){blocked.push({name:descriptor.name,prefix:descriptor.prefix,business:true,reason:'not-node-authoritative',authority});continue;}
+    if(!featureEnabled){blocked.push({name:descriptor.name,prefix:descriptor.prefix,business:descriptor.business,public:descriptor.public,reason:'feature-disabled',authority});continue;}
+    if(authority&&!authority.nodeAuthoritative){blocked.push({name:descriptor.name,prefix:descriptor.prefix,business:true,public:false,reason:'not-node-authoritative',authority});continue;}
     active.push(Object.freeze({...descriptor,authority}));
   }
   return Object.freeze({
-    describe(){return active.map(({name,prefix,business,priority,sourceFile,authority})=>({name,prefix,business,priority,sourceFile,authority}));},
+    describe(){return active.map(({name,prefix,business,public:publicRoute,priority,sourceFile,authority})=>({name,prefix,business,public:publicRoute,priority,sourceFile,authority}));},
     describeAuthority(){return{audit:AUTHORITY_AUDIT,capabilities:cutoverCapabilities.all,blocked:[...blocked]};},
     async dispatch({request,url,requestId}){const route=active.find(descriptor=>pathMatches(descriptor.prefix,url.pathname));if(!route)return null;const result=await route.handle({request,url,requestId,runtime,config});return normalizeResult(result,route.name);}
   });
