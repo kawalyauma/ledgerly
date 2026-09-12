@@ -124,7 +124,7 @@ export default{
       if(usedBy)fail(409,'FILE_IN_USE',`This file is currently used as a ${usedBy}. Remove or replace that reference before deleting the file.`);
       await storage.delete(file.object_key);await database.query(`UPDATE school_files SET deleted_at=now(),updated_at=now() WHERE id=$1 AND organization_id=$2`,[file.id,principal.organizationId]);
       await audit(runtime,{organizationId:principal.organizationId,userId:principal.userId,requestId,action:'school.file.deleted',fileId:file.id,before:camel(file),metadata:{originalName:file.original_name}});
-      return{status:204,rawBody:''};
+      return{status:204,rawBody:Buffer.alloc(0)};
     }
 
     fail(404,'SCHOOL_FILES_ROUTE_NOT_FOUND','School file route not found');
