@@ -17,7 +17,16 @@ export default {
   };},
   enabled(c){return c.enabled===true;},
   async create({services,tenantStorage,createQueue,extensionConfig}){
-    const api=new TasksWorkApiService({database:services.database,audit:services.audit,events:services.events,tenantStorage});
+    const compatibleAudit=services.audit?Object.freeze({
+      write(event){
+        if(event?.actor&&!event?.actorId&&!event?.actor_id){
+          const {actor,...rest}=event;
+          return services.audit.write({...rest,actorType:actor.type??actor.actorType??"human",actorId:actor.id??actor.actorId??"unknown"});
+        }
+        return services.audit.write(event);
+      },
+    }):null;
+    const api=new TasksWorkApiService({database:services.database,audit:compatibleAudit,events:services.events,tenantStorage});
     const queue=createQueue({name:"tasks-work",maxAttempts:extensionConfig.maxAttempts});
     const worker=new TasksWorkWorker({queue,database:services.database,notifications:services.notifications,maxAttempts:extensionConfig.maxAttempts});
     const orgs=await services.database.query("SELECT id,COALESCE(NULLIF(timezone,''),'UTC') AS timezone FROM organizations WHERE status='active' ORDER BY id");
