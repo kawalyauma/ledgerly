@@ -21,7 +21,11 @@ export default {
     const api=createAttendanceParityService({database:services.database,audit:services.audit,biometricKey:extensionConfig.biometricKey});
     return {
       value:Object.freeze({api}),
-      readiness:()=>api.readiness(),
+      async readiness(){
+        const result=await api.readiness();
+        const biometricRequired=extensionConfig.cutover==='node';
+        return {...result,ok:result.ok===true&&(!biometricRequired||result.biometricEncryptionReady===true),biometricRequired};
+      },
       describe(){return{...api.describe(),cutover:extensionConfig.cutover,biometricEncryptionConfigured:extensionConfig.biometricKey.length>0};},
     };
   },
