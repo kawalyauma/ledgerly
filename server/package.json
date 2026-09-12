@@ -9,6 +9,7 @@
     "check": "node scripts/check.mjs",
     "test": "node --test test/*.test.mjs",
     "migration:phases": "node src/migration/cli.mjs phases",
+    "migration:schema": "node src/migration/cli.mjs schema",
     "migration:plan": "node src/migration/cli.mjs plan",
     "migration:run": "node src/migration/cli.mjs run",
     "migration:validate": "node src/migration/cli.mjs validate",
