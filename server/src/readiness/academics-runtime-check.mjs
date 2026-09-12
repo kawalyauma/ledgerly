@@ -29,9 +29,11 @@ async function fetchContracts(){
 
 const contracts=await fetchContracts();
 const academics=contracts?.extensions?.academics??null;
+const schoolPlatform=contracts?.extensions?.['school-platform']??null;
 const mobileSync=contracts?.extensions?.['mobile-sync']??null;
 const routes=Array.isArray(contracts?.httpRoutes)?contracts.httpRoutes:[];
 const academicsRoute=routes.find(route=>route?.name==='academics-api')??null;
+const schoolFilesRoute=routes.find(route=>route?.name==='school-files')??null;
 const mobileSyncRoute=routes.find(route=>route?.name==='mobile-sync')??null;
 const collections=Array.isArray(mobileSync?.collections)?mobileSync.collections:[];
 const academicsCollections=collections.filter(item=>item?.moduleKey==='academics');
@@ -44,6 +46,9 @@ const checks=Object.freeze({
   academicsNodeAuthoritative:academics?.cutover==='node',
   academicsRouteActive:Boolean(academicsRoute),
   academicsRouteNodeAuthoritative:academicsRoute?.authority?.state==='node',
+  schoolPlatformExtensionLoaded:Boolean(schoolPlatform),
+  schoolFilesRouteActive:Boolean(schoolFilesRoute),
+  schoolFilesRouteNodeAuthoritative:schoolFilesRoute?.authority?.state==='node',
   mobileSyncExtensionLoaded:Boolean(mobileSync),
   mobileSyncProviderReady:mobileSync?.provider==='postgresql-mobile-sync',
   mobileSyncRouteActive:Boolean(mobileSyncRoute),
@@ -58,6 +63,7 @@ console.log(JSON.stringify({
   checks,
   academicsCutover:academics?.cutover??null,
   academicsRouteAuthority:academicsRoute?.authority??null,
+  schoolFilesRouteAuthority:schoolFilesRoute?.authority??null,
   mobileSyncProvider:mobileSync?.provider??null,
   mobileSyncMaxPush:mobileSync?.maxPush??null,
   mobileSyncMaxPull:mobileSync?.maxPull??null,
