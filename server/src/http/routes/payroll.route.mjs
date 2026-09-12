@@ -1,6 +1,14 @@
 import {authenticateFinance,mapFinanceError,ok,pagination,readJson} from '../../finance/http.mjs';
 const PREFIX='/api/v1/payroll',parts=url=>url.pathname.slice(PREFIX.length).split('/').filter(Boolean);
-export default{name:'payroll-finance',prefix:PREFIX,business:true,priority:95,enabled:c=>c.extensions?.['finance-api']?.payrollCutover==='node',async handle({request,url,runtime,requestId}){try{const api=runtime.extensions?.['finance-api']?.payroll;if(!api)throw Object.assign(new Error('Payroll runtime unavailable'),{status:503,code:'FINANCE_SELFHOST_NOT_READY'});const p=parts(url),scope=request.method==='GET'?'payroll:read':'payroll:write',x=await authenticateFinance(runtime,request,scope),page=pagination(url);
+const SUPPORTED=[
+  ['GET',/^\/employees$/],
+  ['GET',/^\/runs$/],['POST',/^\/runs$/],['GET',/^\/runs\/[^/]+\/lines$/],['POST',/^\/runs\/[^/]+\/post$/],['POST',/^\/runs\/[^/]+\/reverse$/],
+  ['GET',/^\/components$/],['POST',/^\/components$/],
+  ['GET',/^\/inputs$/],['POST',/^\/inputs$/],
+  ['POST',/^\/salary-payments$/],['POST',/^\/salary-payments\/[^/]+\/reverse$/],
+];
+function matches({request,url}){const relative=url.pathname.slice(PREFIX.length)||'/';return SUPPORTED.some(([method,pattern])=>request.method===method&&pattern.test(relative));}
+export default{name:'payroll-finance',prefix:PREFIX,business:true,priority:95,enabled:c=>c.extensions?.['finance-api']?.payrollCutover==='node',matches,async handle({request,url,runtime,requestId}){try{const api=runtime.extensions?.['finance-api']?.payroll;if(!api)throw Object.assign(new Error('Payroll runtime unavailable'),{status:503,code:'FINANCE_SELFHOST_NOT_READY'});const p=parts(url),scope=request.method==='GET'?'payroll:read':'payroll:write',x=await authenticateFinance(runtime,request,scope),page=pagination(url);
 if(request.method==='GET'&&p[0]==='employees'&&p.length===1)return ok({data:await api.employees(x.organizationId,page.limit),pagination:page});
 if(request.method==='GET'&&p[0]==='runs'&&p.length===1)return ok({data:await api.payrollRuns(x.organizationId,page.limit),pagination:page});
 if(request.method==='POST'&&p[0]==='runs'&&p.length===1)return ok({data:await api.createPayrollRun({principal:x,body:await readJson(request),requestId})},201);
