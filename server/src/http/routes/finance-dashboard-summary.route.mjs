@@ -1,0 +1,3 @@
+import {authenticateFinance,mapFinanceError,ok} from '../../finance/http.mjs';
+const PREFIX='/api/v1/dashboards/summary';
+export default{name:'finance-dashboard-summary',prefix:PREFIX,business:true,priority:96,enabled:c=>c.extensions?.['finance-api']?.dashboardCutover==='node',matches({request,url}){return request.method==='GET'&&url.pathname===PREFIX;},async handle({request,runtime}){try{const api=runtime.extensions?.['finance-api']?.dashboard;if(!api)throw Object.assign(new Error('Finance dashboard runtime unavailable'),{status:503,code:'FINANCE_SELFHOST_NOT_READY'});const principal=await authenticateFinance(runtime,request,'reports:read');return ok({data:await api.summary(principal.organizationId,principal.userId)});}catch(error){throw mapFinanceError(error)}}};
