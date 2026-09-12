@@ -8,7 +8,7 @@ function cutover(value){
 
 export default {
   name:'attendance',
-  required:false,
+  required:true,
   configure(env){
     return {
       enabled:String(env.LEDGERLY_ATTENDANCE_SELFHOST_ENABLED??env.SELFHOST_ATTENDANCE_ENABLED??'').toLowerCase()==='true',
